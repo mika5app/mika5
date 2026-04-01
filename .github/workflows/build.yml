@@ -39,10 +39,10 @@ jobs:
 
       - name: Build Windows installers
         run: npm run build:win -- --publish never
-        env:
-          # Code signing — set these secrets in your repo settings if you have a cert:
-          # CSC_LINK: ${{ secrets.WIN_CSC_LINK }}           # Base64 .p12/.pfx
-          # CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_PASSWORD }}
+        # Code signing — set these secrets in your repo settings if you have a cert:
+        # env:
+        #   CSC_LINK: ${{ secrets.WIN_CSC_LINK }}           # Base64 .p12/.pfx
+        #   CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_PASSWORD }}
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
