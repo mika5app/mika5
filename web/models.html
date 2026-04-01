@@ -5,7 +5,83 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MIKA5 Model Guide — Benchmarks, Recommendations & Hardware Requirements</title>
     <meta name="description" content="Complete guide to choosing the best local AI models for MIKA5. Benchmarks, hardware requirements, and use-case recommendations for Ollama models.">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://mika5.xyz/models.html">
     <link rel="icon" type="image/png" href="icon.png">
+    <meta name="author" content="MIKA5">
+    <meta name="theme-color" content="#0B0F14">
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="MIKA5 Model Guide — Benchmarks, Recommendations & Hardware Requirements">
+    <meta property="og:description" content="Complete guide to choosing the best local AI models for MIKA5. Benchmarks, hardware requirements, and use-case recommendations.">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://mika5.xyz/models.html">
+    <meta property="og:image" content="https://mika5.xyz/og-image.png">
+    <meta property="og:locale" content="en_US">
+    <meta property="og:locale:alternate" content="es_ES">
+    <meta property="og:site_name" content="MIKA5">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="MIKA5 Model Guide — Benchmarks & Hardware Requirements">
+    <meta name="twitter:description" content="Complete guide to choosing the best local AI models for MIKA5. Benchmarks, hardware requirements, and use-case recommendations.">
+    <meta name="twitter:image" content="https://mika5.xyz/og-image.png">
+
+    <!-- Structured Data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Article",
+          "headline": "MIKA5 Model Guide — Benchmarks, Recommendations & Hardware Requirements",
+          "description": "Complete guide to choosing the best local AI models for MIKA5. Benchmarks, hardware requirements, and use-case recommendations for Ollama models.",
+          "url": "https://mika5.xyz/models.html",
+          "author": { "@id": "https://mika5.xyz/#org" },
+          "publisher": { "@id": "https://mika5.xyz/#org" },
+          "inLanguage": "en",
+          "mainEntityOfPage": "https://mika5.xyz/models.html"
+        },
+        {
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://mika5.xyz/" },
+            { "@type": "ListItem", "position": 2, "name": "Model Guide", "item": "https://mika5.xyz/models.html" }
+          ]
+        },
+        {
+          "@type": "FAQPage",
+          "mainEntity": [
+            {
+              "@type": "Question",
+              "name": "How much RAM do I need to run local AI models with MIKA5?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "With 8 GB RAM you can run small models like Qwen2.5:3B or Phi-4-mini. 16 GB supports most 7–8B models like Llama 3.2, Mistral, and Gemma3. For high-end models like Llama 3.3:70B or DeepSeek-R1, you need 32–64 GB RAM."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "What embedding model should I use for MIKA5 RAG?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "The recommended embedding model is nomic-embed-text (274 MB, 768 dimensions). For higher precision with long documents, use mxbai-embed-large (670 MB, 1024 dimensions). Install with: ollama pull nomic-embed-text."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "Which AI model is best for coding in MIKA5?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "For coding tasks, Qwen2.5-Coder:7B is the top recommendation. It achieves the highest coding benchmarks among 7B models. For lighter setups, DeepSeek-Coder-V2-Lite works well on 8 GB RAM."
+              }
+            }
+          ]
+        }
+      ]
+    }
+    </script>
+
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
     <style>
@@ -50,7 +126,7 @@
             <span data-i18n="nav.back">Back to MIKA5</span>
         </a>
         <div class="font-heading font-bold flex items-center gap-2">
-            <img src="icon.png" alt="" class="w-5 h-5 rounded">
+            <img src="icon.png" alt="MIKA5" class="w-5 h-5 rounded">
             <span data-i18n="nav.modelguide">Model Guide</span>
         </div>
         <div class="flex items-center gap-3">
@@ -668,7 +744,7 @@
 <footer class="border-t border-white/5 py-10 text-[#6B7280] text-sm">
     <div class="max-w-[1200px] mx-auto px-6 flex flex-col md:flex-row justify-between gap-4 items-center">
         <div class="flex items-center gap-2 font-heading text-white font-bold">
-            <img src="icon.png" alt="" class="w-5 h-5 rounded">
+            <img src="icon.png" alt="MIKA5" class="w-5 h-5 rounded">
             MIKA5 Model Guide
         </div>
         <div class="flex gap-6">
@@ -723,5 +799,6 @@ function toggleLang() {
 
 document.addEventListener('DOMContentLoaded', function() { applyLang(currentLang); });
 </script>
+<script src="chat-widget.js" defer></script>
 </body>
 </html>
