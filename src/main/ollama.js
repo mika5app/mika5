@@ -3,16 +3,14 @@ const { spawn } = require("child_process");
 const http = require("http");
 
 const BASE = "http://127.0.0.1:11434";
-const HEADER_TIMEOUT = 600000;  // 10 min for first response (model loading can take minutes)
-const BODY_TIMEOUT = 600000;   // 10 min for data transfer (large responses)
-const TOTAL_TIMEOUT = 660000;  // 11 min absolute safety cap
+const FETCH_TIMEOUT = 600000; // 10 minutos para modelos muy grandes
 
-// Dynamic context window sizing for Ollama chat
-const CHARS_PER_TOKEN = 3.5;     // ~1 token per 3.5 chars (conservative for multilingual)
-const OUTPUT_TOKEN_RESERVE = 1024; // tokens reserved for model response
+// Dynamic context window sizing
+const CHARS_PER_TOKEN = 3.5;
+const OUTPUT_TOKEN_RESERVE = 1024;
 const MIN_CTX = 4096;
 const MAX_CTX = 32768;
-const CTX_ALIGN = 2048;           // round up to nearest multiple
+const CTX_ALIGN = 2048;
 
 // Función fetch con control total de timeouts usando http nativo
 function fetchWithTimeout(url, options = {}) {
@@ -24,22 +22,15 @@ function fetchWithTimeout(url, options = {}) {
     function finish(fn) {
       if (settled) return;
       settled = true;
-      clearTimeout(totalTimer);
-      clearTimeout(headerTimer);
+      clearTimeout(timeoutId);
       fn();
     }
 
-    // Absolute safety timeout
-    const totalTimer = setTimeout(() => {
+    // Timeout de seguridad total
+    const timeoutId = setTimeout(() => {
       controller.abort();
-      finish(() => reject(new Error('Timeout: La operación excedió 11 minutos')));
-    }, TOTAL_TIMEOUT);
-
-    // Header timeout: reject if server doesn't start responding within 10 min
-    const headerTimer = setTimeout(() => {
-      controller.abort();
-      finish(() => reject(new Error('Timeout: Ollama no respondió en 10 minutos. Verifica que el modelo esté disponible.')));
-    }, HEADER_TIMEOUT);
+      finish(() => reject(new Error('Timeout: La operación excedió 10 minutos')));
+    }, FETCH_TIMEOUT);
 
     const req = http.request(
       {
@@ -55,13 +46,10 @@ function fetchWithTimeout(url, options = {}) {
         signal: controller.signal
       },
       (res) => {
-        // Headers received — clear header timeout
-        clearTimeout(headerTimer);
-
         let data = '';
 
-        // Body timeout: if no data arrives for 5 min, abort
-        res.setTimeout(BODY_TIMEOUT, () => {
+        // Timeout entre chunks de datos (5 min para evitar stalls)
+        res.setTimeout(300000, () => {
           req.destroy();
           finish(() => reject(new Error('Timeout: Ollama dejó de enviar datos (¿el modelo está cargando?)')));
         });

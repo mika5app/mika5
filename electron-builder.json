@@ -20,7 +20,12 @@
     "!**/.git/**",
     "!**/test/**",
     "!**/*.test.js",
-    "!**/node_modules/**"
+    "!**/node_modules/.bin/**",
+    "!**/*.map",
+    "!**/*.ts"
+  ],
+  "asarUnpack": [
+    "**/node_modules/better-sqlite3/**"
   ],
   "extraMetadata": {
     "main": "src/main/main.js"
