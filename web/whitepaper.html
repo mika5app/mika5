@@ -477,11 +477,10 @@ const STRINGS = {
   }
 };
 
-let currentLang = localStorage.getItem('mika5-lang') || ((navigator.language || 'en').startsWith('es') ? 'es' : 'en');
+let currentLang = localStorage.getItem('mika5-lang') || ((navigator.language || navigator.userLanguage || 'en').startsWith('es') ? 'es' : 'en');
 
 function applyLang(lang) {
   currentLang = lang;
-  localStorage.setItem('mika5-lang', lang);
   document.querySelectorAll('[data-i18n]').forEach(function(el) {
     var key = el.getAttribute('data-i18n');
     if (STRINGS[lang] && STRINGS[lang][key] !== undefined) el.textContent = STRINGS[lang][key];
@@ -491,7 +490,11 @@ function applyLang(lang) {
   document.documentElement.lang = lang;
 }
 
-function toggleLang() { applyLang(currentLang === 'es' ? 'en' : 'es'); }
+function toggleLang() {
+  var next = currentLang === 'es' ? 'en' : 'es';
+  localStorage.setItem('mika5-lang', next);
+  applyLang(next);
+}
 
 document.addEventListener('DOMContentLoaded', function() { applyLang(currentLang); });
 </script>

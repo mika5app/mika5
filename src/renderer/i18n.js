@@ -128,6 +128,7 @@ const MIKA5_TRANSLATIONS = {
 
     // Footer
     'footer.tagline': 'Ollama Local AI • Privado y Seguro • 100% en tu PC',
+    'footer.cloud':   'Cloud AI • Tus datos salen de tu PC • Usa con precaución',
 
     // Providers
     'provider.local': 'Ollama (Local)',
@@ -262,6 +263,7 @@ const MIKA5_TRANSLATIONS = {
     'context.selectProjectFirst': 'Select a project to manage the knowledge base.',
 
     'footer.tagline': 'Ollama Local AI • Private & Secure • 100% on your PC',
+    'footer.cloud':   'Cloud AI • Your data leaves your PC • Use with caution',
 
     'provider.local': 'Ollama (Local)',
     'provider.localDesc': 'Local models. Your data never leaves your PC.',

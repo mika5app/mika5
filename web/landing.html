@@ -165,7 +165,7 @@
 </header>
 
 <!-- Mobile menu overlay -->
-<div id="mobile-menu" class="hidden fixed inset-0 z-40 bg-[#0B0F14]/95 flex flex-col items-center justify-center gap-8 text-xl">
+<div id="mobile-menu" style="display:none" class="fixed inset-0 z-40 bg-[#0B0F14]/95 flex flex-col items-center justify-center gap-8 text-xl">
     <button id="mobile-menu-close" class="absolute top-6 right-6 text-white text-3xl" aria-label="Cerrar menú">&times;</button>
     <a href="#features" class="text-white hover:text-[#7C3AED] transition-colors" data-i18n="nav.features">Features</a>
     <a href="#download" class="text-white hover:text-[#7C3AED] transition-colors" data-i18n="nav.download">Download</a>
@@ -772,7 +772,7 @@
             <script>
               (function() {
                 // Buttondown API — set your API key from buttondown.email/settings
-                var BUTTONDOWN_API_KEY = 'YOUR_BUTTONDOWN_API_KEY';
+                var BUTTONDOWN_API_KEY = '26882ade-dd77-4998-be6f-4e2e73d79242';
                 var form = document.getElementById('notifyForm');
                 var btn  = document.getElementById('notifyBtn');
                 var msg  = document.getElementById('notifyMsg');
@@ -1193,7 +1193,6 @@ let currentLang = localStorage.getItem('mika5-lang') || ((navigator.language || 
 
 function applyLang(lang) {
   currentLang = lang;
-  localStorage.setItem('mika5-lang', lang);
   document.querySelectorAll('[data-i18n]').forEach(function(el) {
     var key = el.getAttribute('data-i18n');
     if (STRINGS[lang][key] !== undefined) {
@@ -1208,7 +1207,9 @@ function applyLang(lang) {
 }
 
 function toggleLang() {
-  applyLang(currentLang === 'es' ? 'en' : 'es');
+  var next = currentLang === 'es' ? 'en' : 'es';
+  localStorage.setItem('mika5-lang', next);
+  applyLang(next);
 }
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -1219,11 +1220,14 @@ document.addEventListener('DOMContentLoaded', function() {
   var mobileMenu = document.getElementById('mobile-menu');
   var menuClose = document.getElementById('mobile-menu-close');
   if (menuToggle && mobileMenu) {
-    menuToggle.addEventListener('click', function() { mobileMenu.classList.toggle('hidden'); });
-    if (menuClose) menuClose.addEventListener('click', function() { mobileMenu.classList.add('hidden'); });
-    // Close on link click
+    function openMenu()  { mobileMenu.style.display = 'flex'; }
+    function closeMenu() { mobileMenu.style.display = 'none'; }
+    menuToggle.addEventListener('click', function() {
+      mobileMenu.style.display === 'none' ? openMenu() : closeMenu();
+    });
+    if (menuClose) menuClose.addEventListener('click', closeMenu);
     mobileMenu.querySelectorAll('a').forEach(function(link) {
-      link.addEventListener('click', function() { mobileMenu.classList.add('hidden'); });
+      link.addEventListener('click', closeMenu);
     });
   }
 });
