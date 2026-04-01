@@ -1,8 +1,8 @@
 # MIKA5 — Sovereign AI Desktop Platform
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.1.0-green.svg)](https://github.com/mika5app/mika5-desktop/releases/tag/v0.1.0)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/mika5app/mika5-desktop/releases)
+[![Version](https://img.shields.io/badge/version-0.1.0-green.svg)](https://github.com/mika5app/mika5/releases/tag/v0.1.0)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/mika5app/mika5/releases)
 
 Desktop application for working with local and cloud AI models, organized by projects, chats, and knowledge documents, with a built-in local RAG engine backed by SQLite.
 

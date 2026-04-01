@@ -37,13 +37,16 @@
     <div class="max-w-[860px] mx-auto px-6 h-16 flex items-center justify-between">
         <a href="landing.html" class="flex items-center gap-2 text-sm font-medium text-[#9CA3AF] hover:text-white transition-colors">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
-            Back to MIKA5
+            <span data-i18n="nav.back">Back to MIKA5</span>
         </a>
         <div class="font-heading font-bold text-sm flex items-center gap-2">
             <img src="icon.png" alt="" class="w-5 h-5 rounded">
-            White Paper
+            <span data-i18n="nav.whitepaper">White Paper</span>
         </div>
-        <a href="models.html" class="text-sm text-[#9CA3AF] hover:text-white transition-colors hidden md:block">Model Guide →</a>
+        <div class="flex items-center gap-3">
+            <a href="models.html" class="text-sm text-[#9CA3AF] hover:text-white transition-colors hidden md:block" data-i18n="nav.modelguide_link">Model Guide →</a>
+            <button id="lang-toggle" onclick="toggleLang()" class="text-xs font-bold px-3 py-1 rounded-full border border-white/10 text-[#9CA3AF] hover:text-white hover:border-white/30 transition-all">EN</button>
+        </div>
     </div>
 </header>
 
@@ -444,13 +447,53 @@
             MIKA5 White Paper v1.0
         </div>
         <div class="flex gap-6">
-            <a href="landing.html" class="hover:text-white transition-colors">Home</a>
-            <a href="models.html" class="hover:text-white transition-colors">Model Guide</a>
-            <a href="https://github.com/mika5app/mika5-desktop" target="_blank" rel="noopener" class="hover:text-white transition-colors">GitHub</a>
+            <a href="landing.html" class="hover:text-white transition-colors" data-i18n="footer.home">Home</a>
+            <a href="models.html" class="hover:text-white transition-colors" data-i18n="footer.modelguide">Model Guide</a>
+            <a href="https://github.com/mika5app/mika5" target="_blank" rel="noopener" class="hover:text-white transition-colors" data-i18n="footer.github">GitHub</a>
         </div>
-        <p class="text-xs text-[#4B5563]">v0.1.0 · 2026 · AGPL-3.0</p>
+        <p class="text-xs text-[#4B5563]" data-i18n="wp.tagline">v0.1.0 · 2026 · AGPL-3.0</p>
     </div>
 </footer>
 
+<script>
+const STRINGS = {
+  en: {
+    'nav.back':           'Back to MIKA5',
+    'nav.whitepaper':     'White Paper',
+    'nav.modelguide_link':'Model Guide →',
+    'footer.home':        'Home',
+    'footer.modelguide':  'Model Guide',
+    'footer.github':      'GitHub',
+    'wp.tagline':         'v0.1.0 · 2026 · AGPL-3.0'
+  },
+  es: {
+    'nav.back':           'Volver a MIKA5',
+    'nav.whitepaper':     'White Paper',
+    'nav.modelguide_link':'Guía de Modelos →',
+    'footer.home':        'Inicio',
+    'footer.modelguide':  'Guía de Modelos',
+    'footer.github':      'GitHub',
+    'wp.tagline':         'v0.1.0 · 2026 · AGPL-3.0'
+  }
+};
+
+let currentLang = localStorage.getItem('mika5-lang') || ((navigator.language || 'en').startsWith('es') ? 'es' : 'en');
+
+function applyLang(lang) {
+  currentLang = lang;
+  localStorage.setItem('mika5-lang', lang);
+  document.querySelectorAll('[data-i18n]').forEach(function(el) {
+    var key = el.getAttribute('data-i18n');
+    if (STRINGS[lang] && STRINGS[lang][key] !== undefined) el.textContent = STRINGS[lang][key];
+  });
+  var btn = document.getElementById('lang-toggle');
+  if (btn) btn.textContent = lang === 'es' ? 'EN' : 'ES';
+  document.documentElement.lang = lang;
+}
+
+function toggleLang() { applyLang(currentLang === 'es' ? 'en' : 'es'); }
+
+document.addEventListener('DOMContentLoaded', function() { applyLang(currentLang); });
+</script>
 </body>
 </html>

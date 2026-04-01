@@ -147,16 +147,34 @@
             <a href="models.html" class="hover:text-white transition-colors" data-i18n="nav.modelguide">Model Guide</a>
             <a href="whitepaper.html" class="hover:text-white transition-colors" data-i18n="nav.whitepaper">White Paper</a>
             <button id="lang-toggle" onclick="toggleLang()" class="text-xs font-bold px-3 py-1 rounded-full border border-white/10 text-[#9CA3AF] hover:text-white hover:border-white/30 transition-all">EN</button>
-            <a href="https://github.com/mika5app/mika5-desktop" target="_blank" rel="noopener" class="hover:text-white transition-colors flex items-center gap-1.5">
+            <a href="https://github.com/mika5app/mika5" target="_blank" rel="noopener" class="hover:text-white transition-colors flex items-center gap-1.5">
                 <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
                 <span data-i18n="nav.github">GitHub</span>
             </a>
         </nav>
-        <a href="#download" class="btn-download px-5 py-2.5 rounded-full text-sm font-semibold text-white" data-i18n="nav.downloadbtn">
+        <a href="#download" class="btn-download hidden md:block px-5 py-2.5 rounded-full text-sm font-semibold text-white" data-i18n="nav.downloadbtn">
             Download Free
         </a>
+        <!-- Mobile hamburger button -->
+        <button id="menu-toggle" class="md:hidden flex flex-col justify-center items-center gap-1.5 p-2" aria-label="Abrir menú de navegación">
+            <span class="block w-5 h-0.5 bg-white"></span>
+            <span class="block w-5 h-0.5 bg-white"></span>
+            <span class="block w-5 h-0.5 bg-white"></span>
+        </button>
     </div>
 </header>
+
+<!-- Mobile menu overlay -->
+<div id="mobile-menu" class="hidden fixed inset-0 z-40 bg-[#0B0F14]/95 flex flex-col items-center justify-center gap-8 text-xl">
+    <button id="mobile-menu-close" class="absolute top-6 right-6 text-white text-3xl" aria-label="Cerrar menú">&times;</button>
+    <a href="#features" class="text-white hover:text-[#7C3AED] transition-colors" data-i18n="nav.features">Features</a>
+    <a href="#download" class="text-white hover:text-[#7C3AED] transition-colors" data-i18n="nav.download">Download</a>
+    <a href="#quickstart" class="text-white hover:text-[#7C3AED] transition-colors" data-i18n="nav.quickstart">Quick Start</a>
+    <a href="models.html" class="text-white hover:text-[#7C3AED] transition-colors" data-i18n="nav.modelguide">Model Guide</a>
+    <a href="whitepaper.html" class="text-white hover:text-[#7C3AED] transition-colors" data-i18n="nav.whitepaper">White Paper</a>
+    <a href="https://github.com/mika5app/mika5" target="_blank" rel="noopener" class="text-white hover:text-[#7C3AED] transition-colors" data-i18n="nav.github">GitHub</a>
+    <button onclick="toggleLang()" class="text-sm font-bold px-4 py-2 rounded-full border border-white/10 text-[#9CA3AF] hover:text-white hover:border-white/30 transition-all" id="mobile-lang-toggle">EN</button>
+</div>
 
 <!-- ─── HERO ──────────────────────────────────────────────────── -->
 <main class="max-w-[1200px] mx-auto px-6">
@@ -248,13 +266,13 @@
 
     <!-- Trust badges -->
     <section class="pb-20 flex flex-wrap justify-center gap-3">
-        <span class="px-4 py-2 rounded-full border border-white/5 bg-white/4 text-xs font-medium text-[#9CA3AF]" data-i18n="badge.offline">Offline-ready</span>
-        <span class="px-4 py-2 rounded-full border border-white/5 bg-white/4 text-xs font-medium text-[#9CA3AF]" data-i18n="badge.telemetry">No telemetry</span>
-        <span class="px-4 py-2 rounded-full border border-white/5 bg-white/4 text-xs font-medium text-[#9CA3AF]" data-i18n="badge.sqlite">SQLite local memory</span>
-        <span class="px-4 py-2 rounded-full border border-white/5 bg-white/4 text-xs font-medium text-[#9CA3AF]" data-i18n="badge.ollama">Ollama compatible</span>
-        <span class="px-4 py-2 rounded-full border border-white/5 bg-white/4 text-xs font-medium text-[#9CA3AF]" data-i18n="badge.vision">Vision models</span>
-        <span class="px-4 py-2 rounded-full border border-white/5 bg-white/4 text-xs font-medium text-[#9CA3AF]" data-i18n="badge.rag">Built-in RAG engine</span>
-        <span class="px-4 py-2 rounded-full border border-white/5 bg-white/4 text-xs font-medium text-[#9CA3AF]" data-i18n="badge.cloud">Cloud optional</span>
+        <span class="px-4 py-2 rounded-full border border-white/5 bg-white/5 text-xs font-medium text-[#9CA3AF]" data-i18n="badge.offline">Offline-ready</span>
+        <span class="px-4 py-2 rounded-full border border-white/5 bg-white/5 text-xs font-medium text-[#9CA3AF]" data-i18n="badge.telemetry">No telemetry</span>
+        <span class="px-4 py-2 rounded-full border border-white/5 bg-white/5 text-xs font-medium text-[#9CA3AF]" data-i18n="badge.sqlite">SQLite local memory</span>
+        <span class="px-4 py-2 rounded-full border border-white/5 bg-white/5 text-xs font-medium text-[#9CA3AF]" data-i18n="badge.ollama">Ollama compatible</span>
+        <span class="px-4 py-2 rounded-full border border-white/5 bg-white/5 text-xs font-medium text-[#9CA3AF]" data-i18n="badge.vision">Vision models</span>
+        <span class="px-4 py-2 rounded-full border border-white/5 bg-white/5 text-xs font-medium text-[#9CA3AF]" data-i18n="badge.rag">Built-in RAG engine</span>
+        <span class="px-4 py-2 rounded-full border border-white/5 bg-white/5 text-xs font-medium text-[#9CA3AF]" data-i18n="badge.cloud">Cloud optional</span>
     </section>
 
     <hr class="border-white/5">
@@ -416,11 +434,11 @@
                 </div>
                 <span class="version-tag badge px-2 py-0.5 rounded-full">v0.1.0</span>
                 <div class="w-full space-y-2 mt-1">
-                    <a href="https://github.com/mika5app/mika5-desktop/releases/download/v0.1.0/MIKA5-Setup-0.1.0-win-x64.exe"
+                    <a href="https://github.com/mika5app/mika5/releases/download/v0.1.0/MIKA5-Setup-0.1.0-win-x64.exe"
                        class="block w-full bg-[#7C3AED] text-white text-xs font-semibold py-2 rounded-xl text-center hover:brightness-110 transition-all" data-i18n="dl.win.installer">
                         Download Installer (.exe)
                     </a>
-                    <a href="https://github.com/mika5app/mika5-desktop/releases/download/v0.1.0/MIKA5-0.1.0-win-x64-portable.exe"
+                    <a href="https://github.com/mika5app/mika5/releases/download/v0.1.0/MIKA5-0.1.0-win-x64-portable.exe"
                        class="block w-full bg-white/5 border border-white/10 text-[#9CA3AF] text-xs font-semibold py-2 rounded-xl text-center hover:bg-white/10 transition-all" data-i18n="dl.win.portable">
                         Portable (.exe)
                     </a>
@@ -438,11 +456,11 @@
                 </div>
                 <span class="version-tag badge px-2 py-0.5 rounded-full">v0.1.0</span>
                 <div class="w-full space-y-2 mt-1">
-                    <a href="https://github.com/mika5app/mika5-desktop/releases/download/v0.1.0/MIKA5-0.1.0-mac-arm64.dmg"
+                    <a href="https://github.com/mika5app/mika5/releases/download/v0.1.0/MIKA5-0.1.0-mac-arm64.dmg"
                        class="block w-full bg-[#7C3AED] text-white text-xs font-semibold py-2 rounded-xl text-center hover:brightness-110 transition-all" data-i18n="dl.mac.arm">
                         Apple Silicon (.dmg)
                     </a>
-                    <a href="https://github.com/mika5app/mika5-desktop/releases/download/v0.1.0/MIKA5-0.1.0-mac-x64.dmg"
+                    <a href="https://github.com/mika5app/mika5/releases/download/v0.1.0/MIKA5-0.1.0-mac-x64.dmg"
                        class="block w-full bg-white/5 border border-white/10 text-[#9CA3AF] text-xs font-semibold py-2 rounded-xl text-center hover:bg-white/10 transition-all" data-i18n="dl.mac.intel">
                         Intel x64 (.dmg)
                     </a>
@@ -460,16 +478,16 @@
                 </div>
                 <span class="version-tag badge px-2 py-0.5 rounded-full">v0.1.0</span>
                 <div class="w-full space-y-2 mt-1">
-                    <a href="https://github.com/mika5app/mika5-desktop/releases/download/v0.1.0/MIKA5-0.1.0-linux-x64.AppImage"
+                    <a href="https://github.com/mika5app/mika5/releases/download/v0.1.0/MIKA5-0.1.0-linux-x64.AppImage"
                        class="block w-full bg-[#7C3AED] text-white text-xs font-semibold py-2 rounded-xl text-center hover:brightness-110 transition-all" data-i18n="dl.linux.appimage">
                         AppImage (universal)
                     </a>
                     <div class="flex gap-2">
-                        <a href="https://github.com/mika5app/mika5-desktop/releases/download/v0.1.0/MIKA5-0.1.0-linux-x64.deb"
+                        <a href="https://github.com/mika5app/mika5/releases/download/v0.1.0/MIKA5-0.1.0-linux-x64.deb"
                            class="flex-1 bg-white/5 border border-white/10 text-[#9CA3AF] text-xs font-semibold py-2 rounded-xl text-center hover:bg-white/10 transition-all">
                             .deb
                         </a>
-                        <a href="https://github.com/mika5app/mika5-desktop/releases/download/v0.1.0/MIKA5-0.1.0-linux-x64.rpm"
+                        <a href="https://github.com/mika5app/mika5/releases/download/v0.1.0/MIKA5-0.1.0-linux-x64.rpm"
                            class="flex-1 bg-white/5 border border-white/10 text-[#9CA3AF] text-xs font-semibold py-2 rounded-xl text-center hover:bg-white/10 transition-all">
                             .rpm
                         </a>
@@ -500,7 +518,7 @@
         <!-- Older releases -->
         <p class="text-center text-sm text-[#6B7280]">
             <span data-i18n="dl.allreleases">All releases →</span>
-            <a href="https://github.com/mika5app/mika5-desktop/releases" target="_blank" rel="noopener" class="text-[#A78BFA] hover:text-white underline underline-offset-2 transition-colors">github.com/mika5app/mika5-desktop/releases</a>
+            <a href="https://github.com/mika5app/mika5/releases" target="_blank" rel="noopener" class="text-[#A78BFA] hover:text-white underline underline-offset-2 transition-colors">github.com/mika5app/mika5/releases</a>
         </p>
     </section>
 
@@ -730,7 +748,7 @@
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                 <span data-i18n="cta.download">Download MIKA5 — Free</span>
             </a>
-            <a href="https://github.com/mika5app/mika5-desktop" target="_blank" rel="noopener"
+            <a href="https://github.com/mika5app/mika5" target="_blank" rel="noopener"
                class="border border-white/10 px-10 py-4 rounded-xl font-bold text-lg hover:bg-white/5 transition-all inline-flex items-center gap-2">
                 <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
                 <span data-i18n="cta.github">View on GitHub</span>
@@ -831,17 +849,17 @@
             <div class="space-y-2">
                 <p class="text-[#4B5563] text-xs uppercase tracking-widest" data-i18n="footer.community">Community</p>
                 <div class="space-y-1.5">
-                    <a href="https://github.com/mika5app/mika5-desktop" target="_blank" rel="noopener" class="block hover:text-white transition-colors">GitHub</a>
-                    <a href="https://github.com/mika5app/mika5-desktop/releases" target="_blank" rel="noopener" class="block hover:text-white transition-colors" data-i18n="footer.releases">Releases</a>
-                    <a href="https://github.com/mika5app/mika5-desktop/issues" target="_blank" rel="noopener" class="block hover:text-white transition-colors" data-i18n="footer.issues">Issues</a>
+                    <a href="https://github.com/mika5app/mika5" target="_blank" rel="noopener" class="block hover:text-white transition-colors">GitHub</a>
+                    <a href="https://github.com/mika5app/mika5/releases" target="_blank" rel="noopener" class="block hover:text-white transition-colors" data-i18n="footer.releases">Releases</a>
+                    <a href="https://github.com/mika5app/mika5/issues" target="_blank" rel="noopener" class="block hover:text-white transition-colors" data-i18n="footer.issues">Issues</a>
                 </div>
             </div>
             <div class="space-y-2">
                 <p class="text-[#4B5563] text-xs uppercase tracking-widest" data-i18n="footer.legal">Legal</p>
                 <div class="space-y-1.5">
                     <a href="#" class="block hover:text-white transition-colors" data-i18n="footer.privacy">Privacy</a>
-                    <a href="https://github.com/mika5app/mika5-desktop/blob/main/LICENSE" target="_blank" rel="noopener" class="block hover:text-white transition-colors" data-i18n="footer.license">License (AGPL-3.0)</a>
-                    <a href="https://github.com/mika5app/mika5-desktop/blob/main/TRADEMARK.md" target="_blank" rel="noopener" class="block hover:text-white transition-colors" data-i18n="footer.trademark">Trademark</a>
+                    <a href="https://github.com/mika5app/mika5/blob/main/LICENSE" target="_blank" rel="noopener" class="block hover:text-white transition-colors" data-i18n="footer.license">License (AGPL-3.0)</a>
+                    <a href="https://github.com/mika5app/mika5/blob/main/TRADEMARK.md" target="_blank" rel="noopener" class="block hover:text-white transition-colors" data-i18n="footer.trademark">Trademark</a>
                 </div>
             </div>
         </div>
@@ -1171,10 +1189,11 @@ const STRINGS = {
   }
 };
 
-let currentLang = (navigator.language || navigator.userLanguage || 'en').startsWith('es') ? 'es' : 'en';
+let currentLang = localStorage.getItem('mika5-lang') || ((navigator.language || navigator.userLanguage || 'en').startsWith('es') ? 'es' : 'en');
 
 function applyLang(lang) {
   currentLang = lang;
+  localStorage.setItem('mika5-lang', lang);
   document.querySelectorAll('[data-i18n]').forEach(function(el) {
     var key = el.getAttribute('data-i18n');
     if (STRINGS[lang][key] !== undefined) {
@@ -1183,6 +1202,8 @@ function applyLang(lang) {
   });
   var btn = document.getElementById('lang-toggle');
   if (btn) btn.textContent = lang === 'es' ? 'EN' : 'ES';
+  var mobileBtn = document.getElementById('mobile-lang-toggle');
+  if (mobileBtn) mobileBtn.textContent = lang === 'es' ? 'EN' : 'ES';
   document.documentElement.lang = lang;
 }
 
@@ -1190,7 +1211,22 @@ function toggleLang() {
   applyLang(currentLang === 'es' ? 'en' : 'es');
 }
 
-document.addEventListener('DOMContentLoaded', function() { applyLang(currentLang); });
+document.addEventListener('DOMContentLoaded', function() {
+  applyLang(currentLang);
+
+  // Mobile menu toggle
+  var menuToggle = document.getElementById('menu-toggle');
+  var mobileMenu = document.getElementById('mobile-menu');
+  var menuClose = document.getElementById('mobile-menu-close');
+  if (menuToggle && mobileMenu) {
+    menuToggle.addEventListener('click', function() { mobileMenu.classList.toggle('hidden'); });
+    if (menuClose) menuClose.addEventListener('click', function() { mobileMenu.classList.add('hidden'); });
+    // Close on link click
+    mobileMenu.querySelectorAll('a').forEach(function(link) {
+      link.addEventListener('click', function() { mobileMenu.classList.add('hidden'); });
+    });
+  }
+});
 </script>
 
 </body>

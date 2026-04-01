@@ -1406,10 +1406,11 @@ function showToast(message, type = "success") {
   toast.className = `toast ${type}`;
   toast.textContent = message;
   container.appendChild(toast);
+  const duration = type === 'error' ? 4000 : 2500;
   setTimeout(() => {
     toast.style.opacity = "0";
     setTimeout(() => toast.remove(), 300);
-  }, 2500);
+  }, duration);
 }
 
 function generateId() {
@@ -1683,6 +1684,8 @@ function updatePrivacyUI() {
     if (apiKeyBtn) apiKeyBtn.style.display = 'none';
     if (providerName) providerName.textContent = t('provider.local');
     if (inputBanner) inputBanner.classList.remove('visible');
+    const footerEl = el('footerStatus');
+    if (footerEl) footerEl.textContent = 'Ollama Local AI \u2022 Privado y Seguro \u2022 100% en tu PC';
   } else {
     if (indicator) {
       indicator.className = 'privacy-indicator cloud';
@@ -1702,6 +1705,8 @@ function updatePrivacyUI() {
       inputBanner.classList.add('visible');
       inputBanner.innerHTML = `⚠️ <strong>${providerLabel}:</strong> ${t('privacy.inputWarning')}`;
     }
+    const footerEl = el('footerStatus');
+    if (footerEl) footerEl.textContent = 'Cloud AI \u2022 Tus datos salen de tu PC \u2022 Usa con precauci\u00f3n';
   }
 }
 
