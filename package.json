@@ -1,0 +1,39 @@
+{
+  "name": "mika5-desktop",
+  "version": "0.1.0",
+  "description": "MIKA5 — local AI desktop with projects, chats, knowledge and RAG",
+  "author": "MIKA5 Team",
+  "license": "AGPL-3.0",
+  "main": "src/main/main.js",
+  "private": true,
+  "scripts": {
+    "dev": "electron .",
+    "build": "electron-builder --config electron-builder.json",
+    "build:win": "electron-builder --win   --config electron-builder.json",
+    "build:mac": "electron-builder --mac   --config electron-builder.json",
+    "build:linux": "electron-builder --linux --config electron-builder.json",
+    "build:all": "electron-builder --win --mac --linux --config electron-builder.json",
+    "postinstall": "electron-builder install-app-deps",
+    "icons:mac": "bash scripts/gen-icns.sh",
+    "icons:win": "node scripts/gen-ico.js",
+    "test": "node test/rag.test.js && node test/vision.test.js",
+    "test:db": "electron test/db.test.js",
+    "test:rag": "node test/rag.test.js",
+    "test:vision": "node test/vision.test.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "highlight.js": "^11.11.1",
+    "mammoth": "^1.12.0",
+    "marked": "^17.0.4",
+    "pdf-parse": "^2.4.5",
+    "pdfjs-dist": "^5.4.296",
+    "uuid": "^9.0.1",
+    "xlsx": "^0.18.5",
+    "xlsx-parse-json": "^3.1.1"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  }
+}

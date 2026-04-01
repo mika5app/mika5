@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MIKA5 White Paper — Sovereign AI for Everyone</title>
+    <meta name="description" content="MIKA5 White Paper: the technical and philosophical foundation of a privacy-first, open-source AI desktop built on local models, SQLite, and RAG.">
+    <link rel="icon" type="image/png" href="icon.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Space+Grotesk:wght@600;700&family=Lora:ital,wght@0,400;1,400&display=swap" rel="stylesheet">
+    <style>
+        body { background: #0B0F14; color: #F9FAFB; font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }
+        h1,h2,h3,h4,.font-heading { font-family: 'Space Grotesk', sans-serif; }
+        .prose { font-family: 'Lora', serif; font-size: 1.05rem; line-height: 1.85; color: #D1D5DB; }
+        .prose p { margin-bottom: 1.4rem; }
+        .prose strong { color: #F9FAFB; font-family: 'Inter', sans-serif; font-weight: 600; }
+        .prose em { color: #A78BFA; }
+        .prose blockquote { border-left: 3px solid #7C3AED; padding-left: 1.5rem; margin: 2rem 0; color: #9CA3AF; font-style: italic; }
+        .section-num { font-family: 'Space Grotesk', sans-serif; font-size: 0.7rem; letter-spacing: 0.15em; color: #7C3AED; text-transform: uppercase; font-weight: 700; }
+        .glass { background: #111827; border: 1px solid rgba(255,255,255,0.06); }
+        .accent { background: linear-gradient(90deg, #7C3AED, #6EE7B7); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+        .toc-link { color: #6B7280; font-size: 0.82rem; transition: color 0.2s; }
+        .toc-link:hover { color: #A78BFA; }
+        .terminal { background: #070A0E; border: 1px solid rgba(255,255,255,0.08); font-family: 'Menlo','Monaco','Cascadia Code',monospace; font-size: 0.78rem; line-height: 1.8; }
+        .terminal .p { color: #7C3AED; }
+        .terminal .c { color: #374151; }
+        hr.section-divider { border: none; border-top: 1px solid rgba(255,255,255,0.06); margin: 3rem 0; }
+        .footnote { font-size: 0.78rem; color: #6B7280; line-height: 1.6; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+    </style>
+</head>
+<body>
+
+<!-- NAV -->
+<header class="sticky top-0 z-50 border-b border-white/5 bg-[#0B0F14]/90 backdrop-blur-md">
+    <div class="max-w-[860px] mx-auto px-6 h-16 flex items-center justify-between">
+        <a href="landing.html" class="flex items-center gap-2 text-sm font-medium text-[#9CA3AF] hover:text-white transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+            Back to MIKA5
+        </a>
+        <div class="font-heading font-bold text-sm flex items-center gap-2">
+            <img src="icon.png" alt="" class="w-5 h-5 rounded">
+            White Paper
+        </div>
+        <a href="models.html" class="text-sm text-[#9CA3AF] hover:text-white transition-colors hidden md:block">Model Guide →</a>
+    </div>
+</header>
+
+<main class="max-w-[860px] mx-auto px-6 pb-32">
+
+    <!-- COVER -->
+    <div class="py-20 space-y-8 border-b border-white/5">
+        <div class="space-y-2">
+            <p class="text-xs uppercase tracking-widest text-[#7C3AED] font-bold font-heading">Technical White Paper — v0.1.0</p>
+            <h1 class="text-4xl md:text-5xl font-bold leading-tight">
+                MIKA5: Sovereign AI<br>
+                <span class="accent">for the Individual</span>
+            </h1>
+        </div>
+        <p class="text-lg text-[#9CA3AF] leading-relaxed max-w-xl font-['Lora',serif] italic">
+            A technical and philosophical document on building private, local-first AI infrastructure using open-source models as the foundational layer.
+        </p>
+        <div class="flex flex-wrap gap-6 text-sm text-[#6B7280]">
+            <span>Version 1.0 · March 2026</span>
+            <span>License: AGPL-3.0</span>
+            <span>Platform: Windows · macOS · Linux</span>
+        </div>
+
+        <!-- Abstract box -->
+        <div class="glass rounded-2xl p-8">
+            <p class="text-[10px] uppercase tracking-widest text-[#6B7280] mb-4 font-heading font-bold">Abstract</p>
+            <p class="text-[#9CA3AF] leading-relaxed text-sm font-['Lora',serif]">
+                The rapid commoditization of large language models has created a paradox: AI capabilities have never been more accessible, yet access has been increasingly mediated through proprietary cloud platforms that impose subscription costs, data exposure, and usage restrictions. MIKA5 proposes a different model — an Electron-based desktop application that places open-source language models at its core, running entirely on local hardware, with SQLite for persistent memory, a local RAG (Retrieval-Augmented Generation) engine for knowledge-grounded inference, and optional cloud connectivity that is always explicit, privacy-indicated, and user-controlled. This document describes the architecture, design philosophy, privacy model, and technical implementation of MIKA5 v0.1.0.
+            </p>
+        </div>
+    </div>
+
+    <div class="flex flex-col lg:flex-row gap-12 pt-12">
+
+        <!-- TOC -->
+        <aside class="lg:w-48 shrink-0">
+            <div class="sticky top-24 space-y-1">
+                <p class="text-[10px] uppercase tracking-widest text-[#4B5563] mb-3 font-heading">Contents</p>
+                <a href="#s1" class="toc-link block py-1">1. The Problem</a>
+                <a href="#s2" class="toc-link block py-1">2. Open Source as Foundation</a>
+                <a href="#s3" class="toc-link block py-1">3. Architecture</a>
+                <a href="#s4" class="toc-link block py-1">4. Privacy Model</a>
+                <a href="#s5" class="toc-link block py-1">5. RAG Engine</a>
+                <a href="#s6" class="toc-link block py-1">6. Provider Architecture</a>
+                <a href="#s7" class="toc-link block py-1">7. Data Model</a>
+                <a href="#s8" class="toc-link block py-1">8. Security Design</a>
+                <a href="#s9" class="toc-link block py-1">9. Llama.cpp Integration</a>
+                <a href="#s10" class="toc-link block py-1">10. Roadmap</a>
+                <a href="#s11" class="toc-link block py-1">11. Conclusion</a>
+            </div>
+        </aside>
+
+        <!-- BODY -->
+        <article class="flex-1 min-w-0 space-y-16">
+
+            <!-- 1. The Problem -->
+            <section id="s1" class="space-y-6">
+                <div class="space-y-1">
+                    <p class="section-num">Section 1</p>
+                    <h2 class="text-2xl font-heading">The Problem with Cloud-First AI</h2>
+                </div>
+                <div class="prose">
+                    <p>The artificial intelligence industry has converged on a cloud-delivery model as its primary distribution mechanism. Users access language models through web interfaces, mobile applications, and APIs — all of which route every prompt and every response through remote servers operated by a small number of large corporations. This architecture introduces several structural problems that disproportionately affect individual users, small organizations, and users in regions with different regulatory environments.</p>
+
+                    <blockquote>Every time you type a thought into a cloud AI assistant, you are not just using a service — you are contributing training data, revealing behavioral patterns, and accepting terms that can change without your consent.</blockquote>
+
+                    <p><strong>Subscription lock-in</strong> is the first and most visible problem. Cloud AI access is priced by token, by month, or by API call. The cost structure is designed to make sustained, professional use dependent on continuous payment. Models that were free in beta become paid; pricing tiers change; capabilities are gated behind premium plans. A professional who integrates cloud AI into their daily workflow becomes economically dependent on a vendor whose incentives may not align with the user's continuity of access.</p>
+
+                    <p><strong>Data exposure</strong> is the second and more serious problem. When a prompt is sent to a cloud API, it leaves the user's machine and traverses the internet to a remote server. Even with encryption in transit, the receiving server processes the plaintext prompt. Terms of service for many AI providers explicitly reserve the right to use interactions for model improvement, safety monitoring, and abuse detection. For users handling confidential information — medical records, legal documents, business strategy, personal correspondence — this creates an unacceptable disclosure risk that may also carry regulatory consequences (GDPR, HIPAA, attorney-client privilege).</p>
+
+                    <p><strong>Censorship and policy enforcement</strong> is the third problem. Cloud models are subject to the content policies of the companies that host them. These policies evolve over time, vary by region, and can create unexpected blocks for legitimate professional or creative use. A researcher studying extremist rhetoric, a security professional testing prompt injections, a novelist exploring dark themes, or simply a user asking a politically charged question may encounter refusals that have nothing to do with the user's actual intent. When the model runs locally, the user and their system prompt define the behavioral envelope.</p>
+
+                    <p><strong>Infrastructure dependency</strong> is the fourth problem. Cloud AI services go down, introduce regressions in new model versions, or deprecate models entirely. A workflow built around GPT-4 may break when the model is replaced with a successor that behaves differently. Local models, once downloaded, are stable: the same model weights produce the same outputs indefinitely, independent of network connectivity or vendor decisions.</p>
+                </div>
+            </section>
+
+            <hr class="section-divider">
+
+            <!-- 2. Open Source as Foundation -->
+            <section id="s2" class="space-y-6">
+                <div class="space-y-1">
+                    <p class="section-num">Section 2</p>
+                    <h2 class="text-2xl font-heading">Open-Source Models as the Foundational Layer</h2>
+                </div>
+                <div class="prose">
+                    <p>MIKA5 is built on the premise that <em>open-source language models are now capable enough to handle the majority of real-world AI tasks</em>, and that this capability will only increase over time. The benchmarks support this position: models like Qwen2.5 72B, DeepSeek-R1 70B, and Llama 3.3 70B perform comparably to GPT-4 on most standardized evaluations, and in specific domains — reasoning under constrained compute, multilingual understanding, and code generation — often surpass it.</p>
+
+                    <p>Open-source AI is not a compromise. It is a choice with distinct advantages beyond privacy. Open models can be inspected — their weights are public and their architecture is documented. They can be fine-tuned on domain-specific data without vendor approval. They can be run at any quantization level to trade quality for speed. They can be deployed in air-gapped environments with zero external dependencies. And perhaps most importantly, they cannot be suddenly discontinued, repriced, or fundamentally altered by a commercial decision made in a boardroom that the user has no access to.</p>
+
+                    <p>The open-source model ecosystem is built on a collaborative infrastructure that no single company controls. Meta releases Llama under a license permitting commercial use. Alibaba releases Qwen with multilingual breadth that outpaces Western models. DeepSeek's reinforcement-learning approach to reasoning achieves frontier performance at open weights. Mistral brings European research and strong European language capabilities. The diversity of this ecosystem provides resilience that no single cloud provider can match.</p>
+
+                    <blockquote>MIKA5 treats open-source models not as a fallback when cloud access fails, but as the primary interface between human thought and machine capability.</blockquote>
+
+                    <p>Ollama serves as the runtime layer. It provides a unified API across all GGUF-format models, handles quantization, manages GPU/CPU memory allocation, and exposes a clean HTTP interface that MIKA5 communicates with over localhost. This means the entire compute stack — from user input to AI response — operates within a single machine, with no data leaving the network boundary. Ollama's design also makes it trivial to add new models: pulling a new model is a single command, and it becomes immediately available to MIKA5 without any application code change.</p>
+                </div>
+            </section>
+
+            <hr class="section-divider">
+
+            <!-- 3. Architecture -->
+            <section id="s3" class="space-y-6">
+                <div class="space-y-1">
+                    <p class="section-num">Section 3</p>
+                    <h2 class="text-2xl font-heading">System Architecture</h2>
+                </div>
+                <div class="prose">
+                    <p>MIKA5 is implemented as a cross-platform Electron desktop application following a strict two-process model, supporting Windows, macOS, and Linux from a single codebase. Platform-specific installers are produced by electron-builder: NSIS for Windows, DMG for macOS (Apple Silicon and Intel universal builds), and AppImage for Linux. The <strong>main process</strong> runs in a Node.js environment with full system access and handles all sensitive operations: database read/write, file system access, AI provider communication, encryption, and RAG indexing. The <strong>renderer process</strong> runs in a sandboxed Chromium environment and handles only the user interface. All communication between processes occurs through Electron's IPC (Inter-Process Communication) channel via a tightly-scoped contextBridge API.</p>
+
+                    <p>This architectural separation is a security boundary, not merely a technical convention. The renderer process cannot directly access the file system, cannot make network requests to external services, and cannot access the database. It can only invoke the specific IPC handlers that the main process has registered, each of which validates inputs before processing. This means that even if a malicious actor achieved code execution in the renderer (for example, through a cross-site scripting injection in rendered Markdown), they would have no path to the sensitive data or network capabilities available to the main process.</p>
+
+                    <div class="glass rounded-xl p-6 my-2 not-prose">
+                        <p class="text-[10px] uppercase tracking-widest text-[#6B7280] mb-4 font-heading">Architecture Diagram</p>
+                        <div class="terminal rounded-lg p-5 text-[11px] space-y-3">
+                            <div>
+                                <p class="text-[#4B5563] mb-2"># User Interface Layer (Renderer — sandboxed)</p>
+                                <p>  index.html → app.js → window.mika5.* (contextBridge)</p>
+                            </div>
+                            <div class="border-t border-white/5 pt-3">
+                                <p class="text-[#4B5563] mb-2"># IPC Boundary (Electron contextBridge + ipcRenderer)</p>
+                                <p class="text-[#7C3AED]">  ↕ db:*, ai:*, rag:*, appState:*, app:*</p>
+                            </div>
+                            <div class="border-t border-white/5 pt-3">
+                                <p class="text-[#4B5563] mb-2"># Core Services Layer (Main Process — Node.js)</p>
+                                <p>  main.js → db.js (SQLite/better-sqlite3)</p>
+                                <p>           → ai-providers.js (Ollama + Cloud APIs)</p>
+                                <p>           → rag.js (chunking + embeddings + cosine search)</p>
+                                <p>           → ollama.js (HTTP client → localhost:11434)</p>
+                            </div>
+                            <div class="border-t border-white/5 pt-3">
+                                <p class="text-[#4B5563] mb-2"># Local Runtime</p>
+                                <p>  Ollama server → GGUF model weights (GPU/CPU)</p>
+                                <p>  SQLite DB    → mika5.db (AppData/Roaming/MIKA5)</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <p>The database layer uses <strong>better-sqlite3</strong>, a synchronous SQLite binding that provides ACID guarantees and WAL (Write-Ahead Logging) mode for concurrent read performance. All database operations are synchronous, which eliminates an entire class of race conditions that arise from asynchronous database access. SQLite was chosen over alternatives like IndexedDB (browser-native but no true persistence guarantees) or a networked database (would require a server process and break the offline-first guarantee) because it is a mature, battle-tested, embedded database with a zero-configuration deployment story.</p>
+                </div>
+            </section>
+
+            <hr class="section-divider">
+
+            <!-- 4. Privacy Model -->
+            <section id="s4" class="space-y-6">
+                <div class="space-y-1">
+                    <p class="section-num">Section 4</p>
+                    <h2 class="text-2xl font-heading">Privacy Model</h2>
+                </div>
+                <div class="prose">
+                    <p>MIKA5's privacy model operates on three principles: <em>local by default</em>, <em>explicit cloud disclosure</em>, and <em>encrypted credential storage</em>.</p>
+
+                    <p><strong>Local by default</strong> means that in its default configuration, MIKA5 makes zero outbound network requests to external servers. All AI inference occurs on the local Ollama instance. All conversation history is stored in a local SQLite database. All document knowledge is indexed and searched locally. There is no telemetry, no analytics, no crash reporting, and no background synchronization. The application does not "phone home" in any form unless the user explicitly enables a cloud provider and initiates a conversation that routes through it.</p>
+
+                    <p><strong>Explicit cloud disclosure</strong> means that when a user activates a cloud provider (OpenAI, Anthropic, Groq, or Moonshot), the UI visually changes to reflect this: the privacy indicator changes from a green "Private" badge to an orange "Cloud" badge; a warning banner appears above the input area; and the toolbar text shows the active provider name. This disclosure is persistent and cannot be accidentally missed. The design philosophy is that cloud mode should feel "opted into" rather than transparent — users should always know when their prompts are leaving their machine.</p>
+
+                    <p><strong>Encrypted credential storage</strong> means that API keys are never stored in plaintext. When a user saves an API key, it is encrypted using AES-256-GCM before being written to the SQLite database. The encryption key is derived using two layers of protection: a per-installation salt file (stored in the application's userData directory) and Electron's <strong>safeStorage</strong> API, which ties decryption to the operating system's credential store (Windows DPAPI on Windows, Keychain on macOS). This means that even if an attacker extracts the database file, they cannot decrypt the API keys without also having access to the specific machine's OS credential store. On systems where safeStorage is unavailable, the system falls back to a salt-based key derivation that still ensures the API keys are not human-readable in the database file.</p>
+
+                    <blockquote>The cloud is not prohibited — it is disclosed. MIKA5 users who want access to frontier models can have it, with full transparency about when and how their data is being transmitted.</blockquote>
+
+                    <p>MIKA5 also includes a basic PII (Personally Identifiable Information) sanitization step for cloud requests. When cloud mode is active, email addresses, phone numbers, and long numeric sequences (potential ID numbers) in prompts are replaced with placeholder tokens (<code>[EMAIL]</code>, <code>[PHONE]</code>, <code>[ID]</code>) before transmission. This is a defense-in-depth measure and does not replace proper data handling policies, but it reduces the risk of accidental disclosure of common PII patterns when cloud providers are used.</p>
+                </div>
+            </section>
+
+            <hr class="section-divider">
+
+            <!-- 5. RAG Engine -->
+            <section id="s5" class="space-y-6">
+                <div class="space-y-1">
+                    <p class="section-num">Section 5</p>
+                    <h2 class="text-2xl font-heading">The RAG Engine — Knowledge-Grounded Inference</h2>
+                </div>
+                <div class="prose">
+                    <p>Retrieval-Augmented Generation (RAG) addresses one of the most significant limitations of language models: they are trained on static datasets with a knowledge cutoff, and they have no access to information created after that cutoff or to documents that were not in their training data. For professional use — analyzing your own documents, referencing your company's internal knowledge, working with recent research — a model without RAG is fundamentally constrained.</p>
+
+                    <p>MIKA5's RAG engine operates entirely locally. When a user uploads a document to the Knowledge Base, the following pipeline executes in the background:</p>
+
+                    <p><strong>1. Chunking.</strong> The document text is split into overlapping chunks of 4,200 characters with a 700-character overlap. The overlap ensures that concepts that span chunk boundaries are not lost — a sentence that starts near the end of one chunk will also appear near the beginning of the next. This chunking strategy was chosen based on empirical performance across diverse document types and is configurable in the source code via the <code>CHUNK_CHARS</code> and <code>OVERLAP_CHARS</code> constants.</p>
+
+                    <p><strong>2. Embedding.</strong> Each chunk is passed to Ollama's embedding endpoint using the <code>nomic-embed-text</code> model (or another installed embedding model), which converts the text into a 768-dimensional floating-point vector. This vector captures the semantic content of the chunk — two chunks with similar meaning will have similar vectors, even if they use different words.</p>
+
+                    <p><strong>3. Storage.</strong> The chunk text and its embedding vector are stored in the <code>knowledge_chunks</code> table in SQLite. The vector is stored as a binary blob (serialized Float32 array). A foreign key links each chunk to its parent <code>knowledge_items</code> row, and an optional <code>chat_id</code> column scopes chunks to specific chat conversations for per-chat knowledge isolation.</p>
+
+                    <p><strong>4. Query.</strong> When the user sends a message, the query text is embedded using the same embedding model. The resulting query vector is compared against all stored chunk vectors using cosine similarity (computed as a dot product of unit-normalized vectors). The top-k (default: 3) most similar chunks are retrieved and injected into the conversation as a system message before the AI model is called. This grounds the model's response in the actual content of the user's documents rather than its training data.</p>
+
+                    <div class="glass rounded-xl p-6 not-prose my-2">
+                        <p class="text-[10px] uppercase tracking-widest text-[#6B7280] mb-3 font-heading">RAG Pipeline</p>
+                        <div class="terminal rounded-lg p-5 text-[11px] space-y-1">
+                            <p>User uploads document</p>
+                            <p class="text-[#7C3AED]">  → chunkText(doc, 4200 chars, 700 overlap)</p>
+                            <p class="text-[#7C3AED]">  → ollama.embed(chunk) → Float32[768]</p>
+                            <p class="text-[#7C3AED]">  → SQLite: knowledge_chunks (text, embedding, chat_id)</p>
+                            <p class="mt-2">User sends message</p>
+                            <p class="text-[#34D399]">  → ollama.embed(query) → Float32[768]</p>
+                            <p class="text-[#34D399]">  → cosineSimilarity(query, all chunks) → top-3</p>
+                            <p class="text-[#34D399]">  → system message: "Context:\n{chunk1}\n{chunk2}\n{chunk3}"</p>
+                            <p class="text-[#34D399]">  → AI model receives grounded context → better answer</p>
+                        </div>
+                    </div>
+
+                    <p>The RAG engine maintains an in-memory cache of embedding vectors per project, with a 5-minute TTL. This means that after the first query in a project, subsequent queries do not need to load embeddings from SQLite — they use the cached vectors for cosine similarity computation. This provides a significant performance improvement for interactive use while ensuring that newly added documents are incorporated after the cache expires or on the next app start.</p>
+
+                    <p>Knowledge isolation is a first-class feature. Documents uploaded within a specific chat conversation are tagged with that conversation's ID and are only retrieved during queries in that same conversation. Project-level documents are retrieved for all chats within that project. Quick Chat has its own isolated knowledge base. This design allows users to build specialized knowledge contexts for different workflows without cross-contamination.</p>
+                </div>
+            </section>
+
+            <hr class="section-divider">
+
+            <!-- 6. Provider Architecture -->
+            <section id="s6" class="space-y-6">
+                <div class="space-y-1">
+                    <p class="section-num">Section 6</p>
+                    <h2 class="text-2xl font-heading">Provider Architecture — Extensible AI Backends</h2>
+                </div>
+                <div class="prose">
+                    <p>MIKA5's AI provider system is designed around a uniform interface that abstracts over fundamentally different backends: a local Ollama server, multiple cloud API providers, and a llama.cpp server. Each provider implements three methods: <code>chat()</code>, <code>listModels()</code>, and <code>status()</code>. The renderer only ever calls <code>window.mika5.ai.chat()</code> — it is agnostic to whether the underlying call goes to Ollama, OpenAI, or any other provider.</p>
+
+                    <p>This architecture has two important properties. First, it is easy to add new providers without changing any renderer code — only a new entry in the <code>PROVIDERS</code> object in <code>ai-providers.js</code> is required. Second, it ensures that privacy-sensitive routing decisions happen entirely in the main process, where they can be audited and controlled without the user interface having any influence over them.</p>
+
+                    <p><strong>Current providers:</strong></p>
+
+                    <p><strong>Ollama (local)</strong> — The primary provider. Routes all requests to the local Ollama HTTP server on port 11434. Model capabilities (including vision support) are probed via the <code>/api/show</code> endpoint, which returns model metadata including architecture information. A name-based fallback handles models that don't respond to the show endpoint.</p>
+
+                    <p><strong>OpenAI</strong> — Routes to the OpenAI REST API. Filters the model list to GPT-family chat models. Includes a 2-minute timeout for long-form generation. Vision capabilities are supported for GPT-4o and GPT-4-turbo models.</p>
+
+                    <p><strong>Anthropic</strong> — Routes to the Anthropic Messages API. Because Anthropic's API requires a single top-level system field rather than multiple system messages in the conversation array, the provider merges all system messages (project context, RAG context) into a single concatenated string before transmission. It also enforces Anthropic's strict user/assistant alternation requirement by merging consecutive same-role messages.</p>
+
+                    <p><strong>Groq</strong> — Routes to Groq's OpenAI-compatible API endpoint. Groq provides hardware-accelerated inference that delivers dramatically higher token throughput than most alternatives. The model list is fetched dynamically from Groq's <code>/models</code> endpoint so that newly available models are automatically shown without an app update.</p>
+
+                    <p><strong>Moonshot (Kimi)</strong> — Routes to the Moonshot AI API. Kimi's models feature extremely long context windows (up to 256k tokens), making them suitable for whole-document analysis tasks that exceed the context limits of other providers.</p>
+
+                    <p><strong>llama.cpp</strong> — Routes to a locally-running llama.cpp server, which exposes an OpenAI-compatible API on port 8080. This provider enables users who prefer llama.cpp's GGUF runtime over Ollama to use MIKA5 without Ollama installed. The provider auto-detects whether the server is running via a 3-second probe at startup.</p>
+                </div>
+            </section>
+
+            <hr class="section-divider">
+
+            <!-- 7. Data Model -->
+            <section id="s7" class="space-y-6">
+                <div class="space-y-1">
+                    <p class="section-num">Section 7</p>
+                    <h2 class="text-2xl font-heading">Data Model — SQLite Schema</h2>
+                </div>
+                <div class="prose">
+                    <p>All user data is stored in a single SQLite database file located at <code>%AppData%\Roaming\MIKA5\mika5.db</code> on Windows. The schema is organized around five core tables:</p>
+
+                    <p><strong>projects</strong> — The top-level organizational unit. Each project has a name, description, optional icon and color for visual organization, and a <code>system_prompt</code> field that defines the AI's behavior within that project. A special project with ID <code>quick-chat</code> serves as the default project for conversations that don't belong to a user-defined project.</p>
+
+                    <p><strong>chats</strong> — Individual conversation threads, each belonging to a project. Chats have a title (auto-generated from the first user message), a <code>system_prompt</code> for per-chat instruction overrides, and a creation timestamp. Foreign key constraints with <code>ON DELETE CASCADE</code> ensure that deleting a project automatically deletes all its chats.</p>
+
+                    <p><strong>messages</strong> — Individual messages within chats. Each message stores the role (user/assistant/system), content text, the model that generated it, optional base64-encoded images, and an optional <code>reply_to_id</code> for threaded context. The <code>model</code> field enables model tracking — the UI shows which model answered each message and highlights model changes within a conversation.</p>
+
+                    <p><strong>knowledge_items</strong> — Metadata records for uploaded documents. Stores the title, MIME type, raw content, and an optional <code>chat_id</code> for per-chat scoping. The <code>index_status</code> field tracks whether the document has been embedded (pending → indexing → ready). Documents that fail to index (e.g., because no embedding model is available) enter an error state and can be retried.</p>
+
+                    <p><strong>knowledge_chunks</strong> — The core of the RAG engine. Each row stores a text chunk and its binary embedding vector. Chunks are linked to their parent knowledge_item and optionally to a specific chat. When a project or chat is deleted, cascading deletes automatically remove all associated chunks.</p>
+
+                    <p>The database runs in WAL (Write-Ahead Log) mode, which allows concurrent reads during writes — important for the background indexing pipeline that runs alongside interactive chat. Foreign key enforcement is enabled at the connection level, preventing orphaned records. All writes are wrapped in transactions to maintain consistency in the event of unexpected process termination.</p>
+                </div>
+            </section>
+
+            <hr class="section-divider">
+
+            <!-- 8. Security -->
+            <section id="s8" class="space-y-6">
+                <div class="space-y-1">
+                    <p class="section-num">Section 8</p>
+                    <h2 class="text-2xl font-heading">Security Design</h2>
+                </div>
+                <div class="prose">
+                    <p>Security in MIKA5 operates across four domains: process isolation, input validation, credential protection, and network boundary enforcement.</p>
+
+                    <p><strong>Process isolation</strong> is provided by Electron's two-process model with <code>contextIsolation: true</code> and <code>nodeIntegration: false</code>. The renderer process runs in a browser-equivalent security context with no Node.js access. The contextBridge API is the only communication channel between processes and exposes only the specific operations needed by the UI.</p>
+
+                    <p><strong>Input validation</strong> is applied at the IPC layer before any database or filesystem operation. Project IDs are validated against a UUID regex pattern to prevent path traversal attacks (a malicious project ID like <code>../../etc/passwd</code> would be rejected before it could reach any file operation). The <code>app_state</code> table uses an allowlist of permitted keys, preventing arbitrary data injection through the state API. Knowledge item project IDs are validated against the UUID pattern, and any ID containing path traversal characters is rejected with an <code>INVALID_NAME</code> error code.</p>
+
+                    <p><strong>Credential protection</strong> uses a two-layer scheme. The outer layer is Electron's <code>safeStorage</code> API, which on Windows wraps DPAPI (Data Protection API) — a system service that ties encryption to the user's Windows login credentials. Even if an attacker extracts the database file from disk, decryption requires the same OS user session. The inner layer is AES-256-GCM encryption with a per-installation salt, providing a fallback on systems where <code>safeStorage</code> is unavailable and an additional layer of protection on systems where it is available. Authentication tags from GCM mode prevent silent decryption failures from being mistaken for valid data.</p>
+
+                    <p><strong>Network boundary enforcement</strong> relies on the main process as the sole actor with network access. The renderer cannot make fetch requests to external hosts — all such calls go through IPC to the main process, which enforces provider-specific routing and timeout policies. Outbound URL handling is secured through <code>setWindowOpenHandler</code>, which intercepts all window.open and link-click events in the renderer and routes external URLs through the OS's default browser rather than opening new Electron windows with web content.</p>
+
+                    <p>Markdown rendering uses <code>marked.js</code> with sanitization to prevent cross-site scripting via AI-generated responses containing HTML. Code blocks are syntax-highlighted using <code>highlight.js</code>, which operates on the AST level rather than raw HTML injection. User-supplied HTML in knowledge documents is not rendered — only the extracted text is used for embedding and retrieval.</p>
+                </div>
+            </section>
+
+            <hr class="section-divider">
+
+            <!-- 9. Llama.cpp -->
+            <section id="s9" class="space-y-6">
+                <div class="space-y-1">
+                    <p class="section-num">Section 9</p>
+                    <h2 class="text-2xl font-heading">llama.cpp Integration — A Second Local Runtime</h2>
+                </div>
+                <div class="prose">
+                    <p>While Ollama provides the primary local inference runtime for MIKA5, there is a meaningful segment of users who prefer llama.cpp directly — power users who want fine-grained control over quantization parameters, hardware acceleration settings, batch sizes, and model loading behavior that Ollama's managed interface abstracts away. llama.cpp also has slightly lower overhead for users who run a single model permanently rather than switching between models.</p>
+
+                    <p>llama.cpp's server mode exposes an OpenAI-compatible HTTP API on <code>http://127.0.0.1:8080/v1</code>, implementing the standard <code>/v1/chat/completions</code> and <code>/v1/models</code> endpoints. This compatibility means MIKA5's llama.cpp provider can use the same request format as the OpenAI provider, without any model-specific adaptation code.</p>
+
+                    <p><strong>Technical viability assessment:</strong> The integration is technically straightforward. MIKA5's provider abstraction is designed exactly for this — adding llama.cpp requires only a new entry in the <code>PROVIDERS</code> dictionary with appropriate <code>chat()</code>, <code>listModels()</code>, and <code>status()</code> implementations. The llama.cpp provider has been implemented in v0.1.0 and is accessible by selecting "llama.cpp (Local)" in the provider dropdown.</p>
+
+                    <p><strong>To use llama.cpp with MIKA5:</strong></p>
+
+                    <div class="glass rounded-xl p-1 not-prose my-2">
+                        <div class="terminal rounded-lg p-5 text-[11px] space-y-2">
+                            <p class="text-[#4B5563]"># Download and build llama.cpp</p>
+                            <p><span class="p">$</span> git clone https://github.com/ggerganov/llama.cpp &amp;&amp; cd llama.cpp</p>
+                            <p><span class="p">$</span> make <span class="c"># or cmake for GPU support</span></p>
+                            <p class="text-[#4B5563] mt-2"># Download a GGUF model (example: Qwen2.5 7B Q4)</p>
+                            <p><span class="p">$</span> wget https://huggingface.co/Qwen/Qwen2.5-7B-GGUF/resolve/main/qwen2.5-7b-instruct-q4_k_m.gguf</p>
+                            <p class="text-[#4B5563] mt-2"># Start the server (GPU with CUDA)</p>
+                            <p><span class="p">$</span> ./llama-server -m qwen2.5-7b-instruct-q4_k_m.gguf --port 8080 -ngl 99</p>
+                            <p class="text-[#4B5563] mt-2"># In MIKA5: select "llama.cpp (Local)" from provider dropdown</p>
+                            <p class="text-[#34D399]">✓ MIKA5 auto-detects the running server and lists available models</p>
+                        </div>
+                    </div>
+
+                    <p>Key differences from the Ollama provider: llama.cpp does not manage model downloads — the user is responsible for obtaining GGUF files and specifying the correct path when starting the server. Vision models require a special multimodal llama.cpp server build with clip support. The <code>-ngl</code> flag controls GPU layer offloading — setting it to 99 offloads all layers to GPU, while setting it to 0 forces CPU-only inference. These tradeoffs give power users full control over the inference stack that Ollama's managed interface does not expose.</p>
+                </div>
+            </section>
+
+            <hr class="section-divider">
+
+            <!-- 10. Roadmap -->
+            <section id="s10" class="space-y-6">
+                <div class="space-y-1">
+                    <p class="section-num">Section 10</p>
+                    <h2 class="text-2xl font-heading">Roadmap</h2>
+                </div>
+                <div class="prose">
+                    <p>MIKA5 v0.1.0 represents a functional foundation, not a complete product. Cross-platform support (Windows, macOS, and Linux) has been completed and is available as of v0.1.0, with a CI/CD pipeline via GitHub Actions that automatically builds all three platform installers on every version tag push. The following capabilities are planned for future releases:</p>
+
+                    <p><strong>Streaming responses.</strong> Token-by-token streaming delivery — where tokens appear progressively as they are generated — provides a significantly better user experience for long responses and allows users to begin reading and interrupt generation early. Implementation requires switching the IPC architecture from a single <code>invoke</code> to a stream of <code>send</code> events.</p>
+
+                    <p><strong>Drag-and-drop file upload.</strong> Direct file ingestion into the knowledge base via drag-and-drop, eliminating the need to navigate file dialogs for document import workflows.</p>
+
+                    <p><strong>Agent / tool use.</strong> Structured output and function calling support would allow MIKA5 to integrate with user-defined tools — web search, calculator, file system access — creating an agent loop where the AI can take actions and observe results. This is architecturally feasible with the current main-process design but requires careful security design for the tool execution sandbox.</p>
+
+                    <p><strong>BM25 hybrid retrieval.</strong> The current RAG engine uses pure cosine similarity (dense retrieval). Hybrid retrieval combines dense vector search with sparse keyword search (BM25) to improve retrieval quality, particularly for named entities, technical terms, and cases where the user's query phrasing differs significantly from the document's phrasing. SQLite's FTS5 full-text search extension makes this implementable without adding a separate search library.</p>
+
+                    <p><strong>Model management UI.</strong> A built-in interface for browsing, downloading, and managing Ollama models without leaving the application. Currently, model management requires using the Ollama CLI.</p>
+
+                    <p><strong>Encrypted knowledge export/import.</strong> The ability to export a project's knowledge base (documents and embeddings) and import it on another machine, with optional encryption for sensitive knowledge bases.</p>
+
+                    <p><strong>Multi-model routing.</strong> Automatic routing of different types of queries to specialized models — for example, sending code questions to a code-specialized model and math questions to a reasoning model — based on query classification.</p>
+
+                    <p><strong>Cloud sync (optional).</strong> An opt-in synchronization layer for users who work across multiple machines, allowing encrypted replication of projects, conversations, and knowledge bases via a user-controlled cloud backend. Cloud sync will always be explicitly disclosed and never enabled by default.</p>
+
+                    <p><strong>Plugin / extension system.</strong> A sandboxed plugin architecture that allows third-party developers to extend MIKA5 with custom tools, providers, and UI panels without modifying core application code.</p>
+
+                    <p><strong>Mobile companion app.</strong> A lightweight mobile client for reviewing conversations, querying knowledge bases, and optionally routing inference to the user's desktop machine running MIKA5, maintaining the local-first principle even on mobile.</p>
+                </div>
+            </section>
+
+            <hr class="section-divider">
+
+            <!-- 11. Conclusion -->
+            <section id="s11" class="space-y-6">
+                <div class="space-y-1">
+                    <p class="section-num">Section 11</p>
+                    <h2 class="text-2xl font-heading">Conclusion</h2>
+                </div>
+                <div class="prose">
+                    <p>The central thesis of MIKA5 is that AI should serve the individual, not collect from them. The current generation of open-source language models has crossed a threshold of capability that makes this thesis practically realizable — not as a compromise, but as a genuine choice that, for many users and many tasks, produces better outcomes than cloud alternatives.</p>
+
+                    <p>By placing open-source models at the core, SQLite as the persistent memory layer, and a carefully scoped RAG engine as the knowledge interface, MIKA5 creates a self-contained AI workstation that is owned entirely by the person using it. The cloud remains accessible as an option — always disclosed, never hidden — for cases where frontier capability justifies the tradeoff.</p>
+
+                    <blockquote>Sovereignty over one's AI tools is not a luxury. It is the foundation on which professional work, creative exploration, and personal use of AI can be built without dependency on external actors whose incentives may not align with the user's interests.</blockquote>
+
+                    <p>MIKA5 is free, open-source, and designed to remain so. The model ecosystem it runs on is free and open-source. The database that stores your conversations is a standard file you can open, back up, and migrate without any proprietary tool. Every architectural decision has been made with the goal of giving the user maximum control and minimum dependency on external systems.</p>
+
+                    <p>This is version 0.1.0. The foundation is in place. The work continues.</p>
+                </div>
+
+                <!-- Citation block -->
+                <div class="glass rounded-2xl p-6 space-y-2">
+                    <p class="text-[10px] uppercase tracking-widest text-[#4B5563] font-heading">Technical References</p>
+                    <div class="space-y-1.5 footnote">
+                        <p>Ollama — Local AI model runtime · <span class="text-[#7C3AED]">ollama.com</span></p>
+                        <p>Meta Llama 3 — Open-source language model · <span class="text-[#7C3AED]">ai.meta.com/llama</span></p>
+                        <p>Alibaba Qwen 2.5 — Multilingual language model series · <span class="text-[#7C3AED]">qwen.readthedocs.io</span></p>
+                        <p>DeepSeek-R1 — Reinforcement learning reasoning model · <span class="text-[#7C3AED]">deepseek.com</span></p>
+                        <p>llama.cpp — C++ GGUF inference engine · <span class="text-[#7C3AED]">github.com/ggerganov/llama.cpp</span></p>
+                        <p>Electron — Cross-platform desktop framework · <span class="text-[#7C3AED]">electronjs.org</span></p>
+                        <p>SQLite — Embedded relational database · <span class="text-[#7C3AED]">sqlite.org</span></p>
+                        <p>Nomic Embed Text — Open-source embedding model · <span class="text-[#7C3AED]">nomic.ai</span></p>
+                        <p>AES-256-GCM — NIST FIPS 197, SP 800-38D authenticated encryption</p>
+                        <p>Electron safeStorage — Windows DPAPI, macOS Keychain wrapper · <span class="text-[#7C3AED]">electronjs.org/docs/api/safe-storage</span></p>
+                    </div>
+                </div>
+            </section>
+
+        </article>
+    </div>
+
+</main>
+
+<footer class="border-t border-white/5 py-10 text-[#6B7280] text-sm">
+    <div class="max-w-[860px] mx-auto px-6 flex flex-col md:flex-row justify-between gap-4 items-center">
+        <div class="flex items-center gap-2 font-heading text-white font-bold">
+            <img src="icon.png" alt="" class="w-5 h-5 rounded">
+            MIKA5 White Paper v1.0
+        </div>
+        <div class="flex gap-6">
+            <a href="landing.html" class="hover:text-white transition-colors">Home</a>
+            <a href="models.html" class="hover:text-white transition-colors">Model Guide</a>
+            <a href="https://github.com/mika5app/mika5-desktop" target="_blank" rel="noopener" class="hover:text-white transition-colors">GitHub</a>
+        </div>
+        <p class="text-xs text-[#4B5563]">v0.1.0 · 2026 · AGPL-3.0</p>
+    </div>
+</footer>
+
+</body>
+</html>

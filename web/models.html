@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MIKA5 Model Guide — Benchmarks, Recommendations & Hardware Requirements</title>
+    <meta name="description" content="Complete guide to choosing the best local AI models for MIKA5. Benchmarks, hardware requirements, and use-case recommendations for Ollama models.">
+    <link rel="icon" type="image/png" href="icon.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+    <style>
+        body { background: #0B0F14; color: #F9FAFB; font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }
+        h1,h2,h3,h4,.font-heading { font-family: 'Space Grotesk', sans-serif; }
+        .glass { background: #111827; border: 1px solid rgba(255,255,255,0.06); }
+        .accent { background: linear-gradient(90deg, #7C3AED, #6EE7B7); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+        .tier-badge { font-size: 0.6rem; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700; }
+        .bench-bar { height: 6px; border-radius: 3px; transition: width 0.5s ease; }
+        .model-card { background: #111827; border: 1px solid rgba(255,255,255,0.06); transition: border-color 0.2s, transform 0.2s; }
+        .model-card:hover { border-color: rgba(124,58,237,0.4); transform: translateY(-2px); }
+        .spec-chip { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); font-size: 0.7rem; }
+        .tag-local { background: rgba(52,211,153,0.1); border: 1px solid rgba(52,211,153,0.3); color: #34D399; }
+        .tag-cloud { background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.3); color: #FBBF24; }
+        .tag-vision { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: #F87171; }
+        .tag-code { background: rgba(56,189,248,0.1); border: 1px solid rgba(56,189,248,0.3); color: #38BDF8; }
+        .tag-reason { background: rgba(167,139,250,0.1); border: 1px solid rgba(167,139,250,0.3); color: #A78BFA; }
+        .toc-link { color: #6B7280; transition: color 0.2s; font-size: 0.85rem; }
+        .toc-link:hover { color: #A78BFA; }
+        .terminal { background: #070A0E; border: 1px solid rgba(255,255,255,0.08); font-family: 'Menlo','Monaco','Cascadia Code',monospace; font-size: 0.78rem; line-height: 1.8; }
+        .terminal .p { color: #7C3AED; }
+        .terminal .c { color: #374151; }
+        table { border-collapse: collapse; width: 100%; }
+        thead th { background: #0D1117; font-family: 'Space Grotesk', sans-serif; font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase; color: #6B7280; padding: 12px 16px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.06); }
+        tbody td { padding: 14px 16px; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 0.85rem; vertical-align: middle; }
+        tbody tr:last-child td { border-bottom: none; }
+        tbody tr:hover td { background: rgba(255,255,255,0.02); }
+        .score-high { color: #34D399; font-weight: 600; }
+        .score-mid { color: #FBBF24; font-weight: 600; }
+        .score-low { color: #9CA3AF; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+    </style>
+</head>
+<body>
+
+<!-- NAV -->
+<header class="sticky top-0 z-50 border-b border-white/5 bg-[#0B0F14]/90 backdrop-blur-md">
+    <div class="max-w-[1200px] mx-auto px-6 h-16 flex items-center justify-between">
+        <a href="landing.html" class="flex items-center gap-2.5 text-sm font-medium text-[#9CA3AF] hover:text-white transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+            Back to MIKA5
+        </a>
+        <div class="font-heading font-bold flex items-center gap-2">
+            <img src="icon.png" alt="" class="w-5 h-5 rounded">
+            <span>Model Guide</span>
+        </div>
+        <a href="#benchmark-table" class="text-sm text-[#9CA3AF] hover:text-white transition-colors hidden md:block">Jump to benchmarks →</a>
+    </div>
+</header>
+
+<main class="max-w-[1200px] mx-auto px-6 pb-32">
+
+    <!-- HERO -->
+    <section class="py-16 md:py-20 space-y-6 max-w-3xl">
+        <div class="flex items-center gap-2 text-xs uppercase tracking-widest text-[#7C3AED] font-bold">
+            <span class="w-2 h-2 rounded-full bg-[#7C3AED]"></span>
+            MIKA5 Official Guide · Updated March 2026
+        </div>
+        <h1 class="text-4xl md:text-5xl font-bold leading-tight">
+            Choosing the right AI model<br>
+            <span class="accent">for your hardware and workflow</span>
+        </h1>
+        <p class="text-lg text-[#9CA3AF] leading-relaxed max-w-2xl">
+            Not all models are created equal — and not all hardware can run them. This guide explains the most relevant open-source models available today, their benchmark performance, hardware requirements, and the specific use cases where they shine. Whether you have a basic laptop or a workstation with a 24 GB GPU, there is a model for you.
+        </p>
+        <p class="text-sm text-[#6B7280]">
+            All local models below can be pulled via <code class="bg-white/8 px-1.5 py-0.5 rounded text-xs">ollama pull model-name</code>. Cloud models require a provider API key configured in MIKA5 settings.
+        </p>
+    </section>
+
+    <div class="flex flex-col lg:flex-row gap-12">
+
+        <!-- SIDEBAR TOC (sticky) -->
+        <aside class="lg:w-56 shrink-0">
+            <div class="sticky top-24 space-y-1">
+                <p class="text-[10px] uppercase tracking-widest text-[#4B5563] mb-3">Contents</p>
+                <a href="#hardware-tiers" class="toc-link block py-1">Hardware Tiers</a>
+                <a href="#entry-level" class="toc-link block py-1 pl-3">↳ Entry Level (8 GB)</a>
+                <a href="#mid-range" class="toc-link block py-1 pl-3">↳ Mid Range (16 GB)</a>
+                <a href="#high-end" class="toc-link block py-1 pl-3">↳ High End (32 GB+)</a>
+                <a href="#workstation" class="toc-link block py-1 pl-3">↳ Workstation (64 GB+)</a>
+                <a href="#by-usecase" class="toc-link block py-1 mt-2">By Use Case</a>
+                <a href="#reasoning" class="toc-link block py-1 pl-3">↳ Reasoning & Analysis</a>
+                <a href="#coding" class="toc-link block py-1 pl-3">↳ Coding</a>
+                <a href="#vision" class="toc-link block py-1 pl-3">↳ Vision & OCR</a>
+                <a href="#multilingual" class="toc-link block py-1 pl-3">↳ Multilingual</a>
+                <a href="#highgama" class="toc-link block py-1 pl-3">↳ High-End & Cloud</a>
+                <a href="#benchmark-table" class="toc-link block py-1 mt-2">Benchmark Table</a>
+                <a href="#how-to-install" class="toc-link block py-1">Install Commands</a>
+                <a href="#embedding" class="toc-link block py-1">Embedding Models</a>
+            </div>
+        </aside>
+
+        <!-- MAIN CONTENT -->
+        <div class="flex-1 min-w-0 space-y-20">
+
+            <!-- ─── HARDWARE TIERS ───────────────────────────── -->
+            <section id="hardware-tiers" class="space-y-10">
+                <h2 class="text-3xl font-heading">Hardware Tiers</h2>
+                <p class="text-[#9CA3AF] leading-relaxed">
+                    Running AI locally means the model weights must fit in memory — either RAM (for CPU inference) or VRAM (for GPU inference). GPU inference is always significantly faster, but CPU works for smaller models. As a rule of thumb, a 7B model needs approximately 4–5 GB in 4-bit quantization (Q4), 5–6 GB in Q5, and 7–8 GB in Q8. Multiply by model size in billions of parameters to estimate requirements.
+                </p>
+
+                <!-- Entry Level -->
+                <div id="entry-level" class="space-y-5">
+                    <div class="flex items-center gap-3">
+                        <span class="tier-badge px-3 py-1 rounded-full bg-[#374151] text-[#D1D5DB]">Entry Level</span>
+                        <h3 class="text-xl font-heading">8 GB RAM — CPU Only or Integrated GPU</h3>
+                    </div>
+                    <p class="text-[#9CA3AF] text-sm leading-relaxed">
+                        Entry-level hardware includes most budget laptops, older workstations, and PCs with less than 8 GB of dedicated VRAM. CPU inference is possible but slow — expect 3–8 tokens/second on modern CPUs. Focus on models under 4 GB in size (1B–3B parameters in Q4 quantization). These models are surprisingly capable for everyday tasks like summarizing text, answering questions, writing emails, and simple coding assistance.
+                    </p>
+                    <div class="grid sm:grid-cols-2 gap-4">
+                        <div class="model-card p-5 rounded-xl space-y-3">
+                            <div class="flex items-start justify-between gap-2">
+                                <span class="font-mono text-sm font-semibold">llama3.2:3b</span>
+                                <span class="tag-local tier-badge px-2 py-0.5 rounded-full">Local</span>
+                            </div>
+                            <p class="text-xs text-[#9CA3AF] leading-relaxed">Meta's Llama 3.2 3B is one of the best small models available. Despite its compact size, it follows instructions reliably, writes well in English and Spanish, and handles summarization and Q&amp;A with quality that outperforms models twice its size from previous generations. Ideal as the default starter model.</p>
+                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                                <span class="spec-chip px-2 py-0.5 rounded">~2 GB (Q4)</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">6–10 tok/s CPU</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">8k context</span>
+                            </div>
+                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull llama3.2:3b</div>
+                        </div>
+                        <div class="model-card p-5 rounded-xl space-y-3">
+                            <div class="flex items-start justify-between gap-2">
+                                <span class="font-mono text-sm font-semibold">qwen2.5:3b</span>
+                                <span class="tag-local tier-badge px-2 py-0.5 rounded-full">Local</span>
+                            </div>
+                            <p class="text-xs text-[#9CA3AF] leading-relaxed">Alibaba's Qwen 2.5 3B punches above its weight in reasoning and multilingual tasks. Trained on a massive multilingual dataset, it handles Spanish, Chinese, English, and dozens of other languages with comparable fluency. For users who frequently work in multiple languages, this is the go-to entry-level model.</p>
+                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                                <span class="spec-chip px-2 py-0.5 rounded">~2 GB (Q4)</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">6–10 tok/s CPU</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">32k context</span>
+                            </div>
+                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull qwen2.5:3b</div>
+                        </div>
+                        <div class="model-card p-5 rounded-xl space-y-3">
+                            <div class="flex items-start justify-between gap-2">
+                                <span class="font-mono text-sm font-semibold">phi4:3b</span>
+                                <span class="tag-local tier-badge px-2 py-0.5 rounded-full">Local</span>
+                            </div>
+                            <p class="text-xs text-[#9CA3AF] leading-relaxed">Microsoft's Phi-4 series demonstrates that careful data curation matters as much as scale. The 3B variant scores remarkably well on reasoning and math benchmarks relative to its size. Excellent for STEM tasks, problem solving, and situations where logical accuracy is critical. Struggles more than Llama/Qwen with creative writing.</p>
+                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                                <span class="spec-chip px-2 py-0.5 rounded">~2 GB (Q4)</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">8–12 tok/s CPU</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">16k context</span>
+                            </div>
+                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull phi4:3b</div>
+                        </div>
+                        <div class="model-card p-5 rounded-xl space-y-3">
+                            <div class="flex items-start justify-between gap-2">
+                                <span class="font-mono text-sm font-semibold">gemma2:2b</span>
+                                <span class="tag-local tier-badge px-2 py-0.5 rounded-full">Local</span>
+                            </div>
+                            <p class="text-xs text-[#9CA3AF] leading-relaxed">Google's Gemma 2 2B is the lightest capable model for very constrained hardware. At under 1.5 GB in Q4, it runs on nearly any modern PC. Ideal for simple chat, quick lookups, and draft writing when hardware severely limits options. Quality drops noticeably on complex tasks.</p>
+                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                                <span class="spec-chip px-2 py-0.5 rounded">~1.5 GB (Q4)</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">10–15 tok/s CPU</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">8k context</span>
+                            </div>
+                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull gemma2:2b</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Mid Range -->
+                <div id="mid-range" class="space-y-5">
+                    <div class="flex items-center gap-3">
+                        <span class="tier-badge px-3 py-1 rounded-full bg-[#1D4ED8]/30 text-[#93C5FD]">Mid Range</span>
+                        <h3 class="text-xl font-heading">16 GB RAM — GPU 6–8 GB VRAM</h3>
+                    </div>
+                    <p class="text-[#9CA3AF] text-sm leading-relaxed">
+                        The mid-range sweet spot. A PC with 16 GB of system RAM and a GPU with 6–8 GB of VRAM (RTX 3060, RX 6700 XT, etc.) can run 7B models entirely on GPU, delivering 20–60 tokens/second — fast enough for a natural conversation flow. This is the most common configuration among power users and the recommended starting point for serious AI work. 7B models in Q4 quantization require approximately 4–5 GB of VRAM.
+                    </p>
+                    <div class="grid sm:grid-cols-2 gap-4">
+                        <div class="model-card p-5 rounded-xl space-y-3">
+                            <div class="flex items-start justify-between gap-2">
+                                <span class="font-mono text-sm font-semibold">qwen2.5:7b</span>
+                                <div class="flex gap-1"><span class="tag-local tier-badge px-2 py-0.5 rounded-full">Local</span></div>
+                            </div>
+                            <p class="text-xs text-[#9CA3AF] leading-relaxed">The Qwen 2.5 7B is arguably the best 7B model available as of 2025-2026. It scores near the top of MMLU (General Knowledge), MT-Bench (instruction following), and GSM8K (math reasoning) benchmarks at this scale. Excellent multilingual support, long 32k context window, and competitive coding ability. The go-to recommendation for most MIKA5 users with a mid-range PC.</p>
+                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                                <span class="spec-chip px-2 py-0.5 rounded">~4.7 GB (Q4)</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">30–55 tok/s GPU</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">32k context</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">Multilingual</span>
+                            </div>
+                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull qwen2.5:7b</div>
+                        </div>
+                        <div class="model-card p-5 rounded-xl space-y-3">
+                            <div class="flex items-start justify-between gap-2">
+                                <span class="font-mono text-sm font-semibold">llama3.1:8b</span>
+                                <span class="tag-local tier-badge px-2 py-0.5 rounded-full">Local</span>
+                            </div>
+                            <p class="text-xs text-[#9CA3AF] leading-relaxed">Meta's Llama 3.1 8B remains a strong baseline for English-primary tasks. Excellent instruction following, natural conversation, and creative writing. The massive fine-tuning ecosystem around Llama means there are hundreds of specialized variants — from roleplay to legal analysis. Strong RLHF means it's helpful and safe out of the box. Best for English-speaking users who want broad compatibility.</p>
+                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                                <span class="spec-chip px-2 py-0.5 rounded">~5.0 GB (Q4)</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">25–50 tok/s GPU</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">128k context</span>
+                            </div>
+                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull llama3.1:8b</div>
+                        </div>
+                        <div class="model-card p-5 rounded-xl space-y-3">
+                            <div class="flex items-start justify-between gap-2">
+                                <span class="font-mono text-sm font-semibold">mistral:7b</span>
+                                <span class="tag-local tier-badge px-2 py-0.5 rounded-full">Local</span>
+                            </div>
+                            <p class="text-xs text-[#9CA3AF] leading-relaxed">Mistral AI's 7B model introduced sliding window attention and grouped query attention, making it faster than naive 7B implementations. It's one of the fastest 7B models in tokens-per-second and excels at structured output generation. Perfect for users who need rapid responses over maximum quality, API-style applications within MIKA5, or data extraction tasks where speed and format adherence matter.</p>
+                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                                <span class="spec-chip px-2 py-0.5 rounded">~4.1 GB (Q4)</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">40–70 tok/s GPU</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">32k context</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">Very fast</span>
+                            </div>
+                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull mistral:7b</div>
+                        </div>
+                        <div class="model-card p-5 rounded-xl space-y-3">
+                            <div class="flex items-start justify-between gap-2">
+                                <span class="font-mono text-sm font-semibold">deepseek-r1:7b</span>
+                                <div class="flex gap-1"><span class="tag-local tier-badge px-2 py-0.5 rounded-full">Local</span><span class="tag-reason tier-badge px-2 py-0.5 rounded-full">Reasoning</span></div>
+                            </div>
+                            <p class="text-xs text-[#9CA3AF] leading-relaxed">DeepSeek-R1 is a reasoning model trained with reinforcement learning to "think out loud" before giving an answer — similar in concept to OpenAI's o1 series. The 7B distilled version brings this chain-of-thought reasoning capability to mid-range hardware. Responses are slower because the model reasons step by step, but the quality on math, logic, and complex analysis tasks is dramatically better than standard 7B models. Use when accuracy matters more than speed.</p>
+                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                                <span class="spec-chip px-2 py-0.5 rounded">~4.5 GB (Q4)</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">15–30 tok/s GPU</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">128k context</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">Chain-of-thought</span>
+                            </div>
+                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull deepseek-r1:7b</div>
+                        </div>
+                        <div class="model-card p-5 rounded-xl space-y-3">
+                            <div class="flex items-start justify-between gap-2">
+                                <span class="font-mono text-sm font-semibold">qwen2.5-vl:7b</span>
+                                <div class="flex gap-1"><span class="tag-local tier-badge px-2 py-0.5 rounded-full">Local</span><span class="tag-vision tier-badge px-2 py-0.5 rounded-full">Vision</span></div>
+                            </div>
+                            <p class="text-xs text-[#9CA3AF] leading-relaxed">The best local vision-language model at the 7B scale. Qwen2.5-VL can understand images, charts, diagrams, screenshots, and handwritten notes. It outperforms LLaVA-13B and many larger vision models on benchmarks like MMBench and TextVQA. Use it when you need to describe images, extract text from screenshots, analyze charts in your documents, or work with visual content in MIKA5.</p>
+                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                                <span class="spec-chip px-2 py-0.5 rounded">~5.5 GB (Q4)</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">20–40 tok/s GPU</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">128k context</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">Image input</span>
+                            </div>
+                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull qwen2.5-vl:7b</div>
+                        </div>
+                        <div class="model-card p-5 rounded-xl space-y-3">
+                            <div class="flex items-start justify-between gap-2">
+                                <span class="font-mono text-sm font-semibold">gemma3:9b</span>
+                                <div class="flex gap-1"><span class="tag-local tier-badge px-2 py-0.5 rounded-full">Local</span><span class="tag-vision tier-badge px-2 py-0.5 rounded-full">Vision</span></div>
+                            </div>
+                            <p class="text-xs text-[#9CA3AF] leading-relaxed">Google's Gemma 3 9B is a multimodal model that can process both text and images. It excels at following detailed instructions and is strong in safety and harmlessness. The 9B model runs on 6 GB VRAM in Q4 and offers a good balance between vision capability and speed. Also available in 27B for users with more VRAM.</p>
+                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                                <span class="spec-chip px-2 py-0.5 rounded">~5.8 GB (Q4)</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">20–35 tok/s GPU</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">32k context</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">Image input</span>
+                            </div>
+                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull gemma3:9b</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- High End -->
+                <div id="high-end" class="space-y-5">
+                    <div class="flex items-center gap-3">
+                        <span class="tier-badge px-3 py-1 rounded-full bg-[#7C3AED]/20 text-[#A78BFA]">High End</span>
+                        <h3 class="text-xl font-heading">32 GB RAM — GPU 12–16 GB VRAM</h3>
+                    </div>
+                    <p class="text-[#9CA3AF] text-sm leading-relaxed">
+                        High-end configurations unlock the 13B–14B model tier on GPU, and can run 30B–34B models in CPU+GPU hybrid mode. At this level, quality becomes noticeably stronger — complex multi-step reasoning, nuanced creative writing, and professional-grade coding all become possible. With 16 GB VRAM (RTX 4080, RTX 3090, RX 7900 XTX), even 14B models run at excellent speeds. Users with 32 GB system RAM can also consider 30B models via CPU offloading.
+                    </p>
+                    <div class="grid sm:grid-cols-2 gap-4">
+                        <div class="model-card p-5 rounded-xl space-y-3">
+                            <div class="flex items-start justify-between gap-2">
+                                <span class="font-mono text-sm font-semibold">qwen2.5:14b</span>
+                                <div class="flex gap-1"><span class="tag-local tier-badge px-2 py-0.5 rounded-full">Local</span></div>
+                            </div>
+                            <p class="text-xs text-[#9CA3AF] leading-relaxed">The 14B parameter Qwen 2.5 delivers performance comparable to much larger models from previous generations. It outperforms Llama 3 70B on several benchmarks including coding (HumanEval) and mathematics (MATH benchmark). The jump from 7B to 14B is significant: more coherent long documents, better code, and more nuanced reasoning. If you have 12 GB of VRAM, this is the most impactful upgrade.</p>
+                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                                <span class="spec-chip px-2 py-0.5 rounded">~9 GB (Q4)</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">15–30 tok/s GPU 12GB</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">32k context</span>
+                            </div>
+                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull qwen2.5:14b</div>
+                        </div>
+                        <div class="model-card p-5 rounded-xl space-y-3">
+                            <div class="flex items-start justify-between gap-2">
+                                <span class="font-mono text-sm font-semibold">qwen2.5-coder:14b</span>
+                                <div class="flex gap-1"><span class="tag-local tier-badge px-2 py-0.5 rounded-full">Local</span><span class="tag-code tier-badge px-2 py-0.5 rounded-full">Code</span></div>
+                            </div>
+                            <p class="text-xs text-[#9CA3AF] leading-relaxed">Fine-tuned specifically on code, Qwen2.5-Coder 14B achieves scores that match or exceed GPT-4-level models on HumanEval (Python coding benchmark) at this model size. It understands and generates code in 40+ programming languages, can explain complex algorithms, debug errors, write unit tests, and perform code review. The best local option for serious software developers using MIKA5 as a coding companion.</p>
+                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                                <span class="spec-chip px-2 py-0.5 rounded">~9 GB (Q4)</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">15–30 tok/s GPU 12GB</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">32k context</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">40+ languages</span>
+                            </div>
+                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull qwen2.5-coder:14b</div>
+                        </div>
+                        <div class="model-card p-5 rounded-xl space-y-3">
+                            <div class="flex items-start justify-between gap-2">
+                                <span class="font-mono text-sm font-semibold">deepseek-r1:14b</span>
+                                <div class="flex gap-1"><span class="tag-local tier-badge px-2 py-0.5 rounded-full">Local</span><span class="tag-reason tier-badge px-2 py-0.5 rounded-full">Reasoning</span></div>
+                            </div>
+                            <p class="text-xs text-[#9CA3AF] leading-relaxed">The 14B distillation of DeepSeek-R1 brings near o1-level reasoning performance to 12 GB of VRAM. It excels at step-by-step mathematical proofs, logical puzzles, complex analysis, and scientific problem solving. The model explicitly shows its "thinking" process before answering, which is useful for verifying its reasoning chain. An excellent choice when you need rigorous, verifiable outputs rather than fast conversational responses.</p>
+                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                                <span class="spec-chip px-2 py-0.5 rounded">~9 GB (Q4)</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">10–20 tok/s GPU 12GB</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">Chain-of-thought</span>
+                            </div>
+                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull deepseek-r1:14b</div>
+                        </div>
+                        <div class="model-card p-5 rounded-xl space-y-3">
+                            <div class="flex items-start justify-between gap-2">
+                                <span class="font-mono text-sm font-semibold">phi4:14b</span>
+                                <div class="flex gap-1"><span class="tag-local tier-badge px-2 py-0.5 rounded-full">Local</span><span class="tag-code tier-badge px-2 py-0.5 rounded-full">Code</span></div>
+                            </div>
+                            <p class="text-xs text-[#9CA3AF] leading-relaxed">Microsoft's Phi-4 14B demonstrates that careful training data selection can produce a model that outperforms much larger models on STEM benchmarks. It scores in the top tier on MATH, AMC, and GPQA (graduate-level science questions) at the 14B scale. Not the best for general conversation or creative writing, but exceptional for scientific analysis, mathematics, and code comprehension. A great complement to a more conversational model.</p>
+                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                                <span class="spec-chip px-2 py-0.5 rounded">~9 GB (Q4)</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">15–25 tok/s GPU 12GB</span>
+                                <span class="spec-chip px-2 py-0.5 rounded">16k context</span>
+                            </div>
+                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull phi4:14b</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Workstation -->
+                <div id="workstation" class="space-y-5">
+                    <div class="flex items-center gap-3">
+                        <span class="tier-badge px-3 py-1 rounded-full bg-yellow-900/40 text-yellow-300">Workstation</span>
+                        <h3 class="text-xl font-heading">64 GB RAM — GPU 24 GB+ VRAM (or multi-GPU)</h3>
+                    </div>
+                    <p class="text-[#9CA3AF] text-sm leading-relaxed">
+                        Workstation-class hardware — typically an RTX 3090/4090 (24 GB VRAM), or professional GPUs like A100/H100, or dual GPUs — opens up the full 70B model class on GPU. At this tier, local performance can rival or exceed cloud APIs in quality. A single RTX 4090 can run a Llama 3.3 70B (Q4, ~40 GB) with CPU offloading, or a smaller 34B model entirely on GPU. This is also the tier where high-context models with 256k+ token windows become practical.
+                    </p>
+                    <div class="glass rounded-2xl overflow-hidden">
+                        <table>
+                            <thead><tr>
+                                <th>Model</th>
+                                <th>Params</th>
+                                <th>VRAM (Q4)</th>
+                                <th>Strength</th>
+                                <th>Command</th>
+                            </tr></thead>
+                            <tbody>
+                                <tr>
+                                    <td class="font-mono text-sm">llama3.3:70b</td>
+                                    <td class="text-[#9CA3AF]">70B</td>
+                                    <td>~42 GB</td>
+                                    <td>Best overall Llama model · Strong on all tasks</td>
+                                    <td class="font-mono text-xs text-[#7C3AED]">ollama pull llama3.3:70b</td>
+                                </tr>
+                                <tr>
+                                    <td class="font-mono text-sm">qwen2.5:72b</td>
+                                    <td class="text-[#9CA3AF]">72B</td>
+                                    <td>~44 GB</td>
+                                    <td>Top MMLU · Best multilingual at this tier</td>
+                                    <td class="font-mono text-xs text-[#7C3AED]">ollama pull qwen2.5:72b</td>
+                                </tr>
+                                <tr>
+                                    <td class="font-mono text-sm">deepseek-r1:70b</td>
+                                    <td class="text-[#9CA3AF]">70B</td>
+                                    <td>~43 GB</td>
+                                    <td>Best local reasoning · Near o1 quality</td>
+                                    <td class="font-mono text-xs text-[#7C3AED]">ollama pull deepseek-r1:70b</td>
+                                </tr>
+                                <tr>
+                                    <td class="font-mono text-sm">qwen2.5-coder:32b</td>
+                                    <td class="text-[#9CA3AF]">32B</td>
+                                    <td>~20 GB</td>
+                                    <td>Best local code model · Near GPT-4 on HumanEval</td>
+                                    <td class="font-mono text-xs text-[#7C3AED]">ollama pull qwen2.5-coder:32b</td>
+                                </tr>
+                                <tr>
+                                    <td class="font-mono text-sm">qwen2.5-vl:72b</td>
+                                    <td class="text-[#9CA3AF]">72B</td>
+                                    <td>~44 GB</td>
+                                    <td>Best local vision · Exceeds GPT-4V on TextVQA</td>
+                                    <td class="font-mono text-xs text-[#7C3AED]">ollama pull qwen2.5-vl:72b</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ─── BY USE CASE ──────────────────────────────── -->
+            <section id="by-usecase" class="space-y-10">
+                <h2 class="text-3xl font-heading">By Use Case</h2>
+
+                <div id="reasoning" class="space-y-5">
+                    <h3 class="text-xl font-heading flex items-center gap-2">
+                        <span class="tag-reason tier-badge px-3 py-1 rounded-full">Reasoning & Analysis</span>
+                    </h3>
+                    <p class="text-[#9CA3AF] text-sm leading-relaxed">
+                        Reasoning models use extended "thinking" passes — sometimes called chain-of-thought or test-time compute — to solve complex problems more accurately. They are slower than standard models but dramatically more reliable for tasks involving multiple logical steps, mathematical proofs, debugging complex code, or analyzing nuanced arguments. For document analysis in MIKA5, combining a reasoning model with the RAG engine produces exceptionally grounded, verifiable answers.
+                    </p>
+                    <div class="space-y-3">
+                        <div class="glass p-5 rounded-xl flex flex-col sm:flex-row gap-4 items-start">
+                            <div class="flex-1 space-y-2">
+                                <div class="flex items-center gap-2"><span class="font-mono font-semibold">deepseek-r1</span><span class="tag-reason tier-badge px-2 py-0.5 rounded-full">Top Pick</span></div>
+                                <p class="text-xs text-[#9CA3AF] leading-relaxed">Available in 1.5B, 7B, 14B, 32B, and 70B. The 7B is the best entry point for mid-range hardware. Training via RL (reinforcement learning) on reasoning tasks means it generalizes to novel problems that weren't in training data. Scores above 90% on MATH and AIME competition math problems at 70B scale — approaching human expert level.</p>
+                            </div>
+                            <div class="text-right text-xs text-[#6B7280] shrink-0 space-y-1">
+                                <div class="font-semibold text-green-400">MATH: 92.3%</div>
+                                <div>MMLU: 90.8%</div>
+                                <div>HumanEval: 89.4%</div>
+                            </div>
+                        </div>
+                        <div class="glass p-5 rounded-xl flex flex-col sm:flex-row gap-4 items-start">
+                            <div class="flex-1 space-y-2">
+                                <div class="flex items-center gap-2"><span class="font-mono font-semibold">qwen3.5 / qwen2.5</span><span class="tag-local tier-badge px-2 py-0.5 rounded-full">Strong Alt</span></div>
+                                <p class="text-xs text-[#9CA3AF] leading-relaxed">Alibaba's Qwen series has consistently topped leaderboards for general reasoning at various scales. Qwen3.5 (if available via Ollama in your region) extends this further. Qwen2.5 72B matches or exceeds Llama 3.3 70B on most reasoning benchmarks while also being the best multilingual option at this size.</p>
+                            </div>
+                            <div class="text-right text-xs text-[#6B7280] shrink-0 space-y-1">
+                                <div class="font-semibold text-green-400">MMLU: 87.3%</div>
+                                <div>MT-Bench: 9.1/10</div>
+                                <div>GSM8K: 91.6%</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="coding" class="space-y-5">
+                    <h3 class="text-xl font-heading flex items-center gap-2">
+                        <span class="tag-code tier-badge px-3 py-1 rounded-full">Coding</span>
+                    </h3>
+                    <p class="text-[#9CA3AF] text-sm leading-relaxed">
+                        Code models are fine-tuned on massive code repositories (GitHub, Stack Overflow, documentation). They understand programming concepts deeply, can write boilerplate, explain algorithms, find bugs, write tests, and perform code review. For MIKA5, code models are most powerful when combined with a Knowledge Base containing your project's documentation, architecture docs, or API references — the RAG engine will surface relevant context automatically.
+                    </p>
+                    <div class="grid sm:grid-cols-2 gap-4">
+                        <div class="glass p-5 rounded-xl space-y-2">
+                            <div class="flex items-center gap-2"><span class="font-mono font-semibold">qwen2.5-coder:7b / 14b / 32b</span></div>
+                            <p class="text-xs text-[#9CA3AF] leading-relaxed">The best local code models at each tier. The 7B fits on 6 GB VRAM, 14B on 12 GB, 32B on 20 GB. All variants outperform CodeLlama 34B on HumanEval. Strong in Python, JavaScript, TypeScript, Go, Rust, Java, C++, SQL, Bash, and more.</p>
+                        </div>
+                        <div class="glass p-5 rounded-xl space-y-2">
+                            <div class="flex items-center gap-2"><span class="font-mono font-semibold">nemotron-3-super:cloud</span><span class="tag-cloud tier-badge px-2 py-0.5 rounded-full">Cloud via API</span></div>
+                            <p class="text-xs text-[#9CA3AF] leading-relaxed">NVIDIA's Nemotron Super is built on Llama with extensive post-training optimizations from NVIDIA. It excels at instruction following and code generation. Available through the NVIDIA API or :cloud tag on Ollama if offered in your region. Strong at enterprise-scale code tasks and CUDA/GPU-related programming.</p>
+                        </div>
+                        <div class="glass p-5 rounded-xl space-y-2">
+                            <div class="flex items-center gap-2"><span class="font-mono font-semibold">deepseek-coder-v2:16b</span><span class="tag-local tier-badge px-2 py-0.5 rounded-full">Local</span></div>
+                            <p class="text-xs text-[#9CA3AF] leading-relaxed">DeepSeek's dedicated code model using a Mixture-of-Experts architecture. Only 2.4B parameters are active per token despite having 16B total, making it faster than dense 16B models. Exceptional at algorithmic problems and competitive programming.</p>
+                        </div>
+                        <div class="glass p-5 rounded-xl space-y-2">
+                            <div class="flex items-center gap-2"><span class="font-mono font-semibold">starcoder2:15b</span><span class="tag-local tier-badge px-2 py-0.5 rounded-full">Local</span></div>
+                            <p class="text-xs text-[#9CA3AF] leading-relaxed">BigCode's StarCoder 2, trained on The Stack v2 (an ethical, opt-out software corpus). Strong fill-in-the-middle capability, meaning it can complete code in the middle of a function — excellent for code completion use cases.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="vision" class="space-y-5">
+                    <h3 class="text-xl font-heading flex items-center gap-2">
+                        <span class="tag-vision tier-badge px-3 py-1 rounded-full">Vision & OCR</span>
+                    </h3>
+                    <p class="text-[#9CA3AF] text-sm leading-relaxed">
+                        Vision-language models accept images alongside text prompts. In MIKA5, you can paste images directly into the chat (Ctrl+V or the attachment button) and the app automatically detects which models support vision. Vision models can describe images, read text from screenshots and photos (OCR), analyze charts and diagrams, understand UI layouts, and compare visual information to your knowledge base documents.
+                    </p>
+                    <div class="grid sm:grid-cols-2 gap-4">
+                        <div class="glass p-5 rounded-xl space-y-2">
+                            <div class="flex items-center gap-2"><span class="font-mono font-semibold">qwen2.5-vl:7b</span><span class="tag-vision tier-badge px-2 py-0.5 rounded-full">Best 7B Vision</span></div>
+                            <p class="text-xs text-[#9CA3AF] leading-relaxed">Tops most vision benchmarks at the 7B scale. Can process multiple images per request, handle very high-resolution images, and understand complex charts and documents. The recommended vision model for mid-range hardware.</p>
+                        </div>
+                        <div class="glass p-5 rounded-xl space-y-2">
+                            <div class="flex items-center gap-2"><span class="font-mono font-semibold">glm-ocr:latest</span><span class="tag-vision tier-badge px-2 py-0.5 rounded-full">OCR Specialist</span></div>
+                            <p class="text-xs text-[#9CA3AF] leading-relaxed">Zhipu AI's GLM-OCR is purpose-built for document OCR and text extraction from images. It outperforms general vision models on extracting structured text from scanned documents, PDFs, tables, and forms. Lightweight enough to run on 6 GB VRAM. Best for document digitization workflows.</p>
+                        </div>
+                        <div class="glass p-5 rounded-xl space-y-2">
+                            <div class="flex items-center gap-2"><span class="font-mono font-semibold">gemma3:9b</span><span class="tag-vision tier-badge px-2 py-0.5 rounded-full">Vision + Chat</span></div>
+                            <p class="text-xs text-[#9CA3AF] leading-relaxed">Gemma 3's multimodal version maintains strong text quality alongside vision. Good balance for users who want a single model for both image analysis and general conversation. Also available in 27B for those with more VRAM.</p>
+                        </div>
+                        <div class="glass p-5 rounded-xl space-y-2">
+                            <div class="flex items-center gap-2"><span class="font-mono font-semibold">llava:13b</span><span class="tag-vision tier-badge px-2 py-0.5 rounded-full">Classic</span></div>
+                            <p class="text-xs text-[#9CA3AF] leading-relaxed">The original open-source vision model. LLaVA 13B is no longer state-of-the-art but remains widely available and well-tested. Reliable for basic image description and simple visual Q&amp;A. Runs on 10 GB VRAM. Best as a fallback if newer models aren't available.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="multilingual" class="space-y-5">
+                    <h3 class="text-xl font-heading flex items-center gap-2">
+                        <span class="tier-badge px-3 py-1 rounded-full bg-[#065F46]/50 text-[#6EE7B7]">Multilingual</span>
+                    </h3>
+                    <p class="text-[#9CA3AF] text-sm leading-relaxed">
+                        Most open-source models are primarily English-trained, with Spanish, French, German, and Chinese as secondary languages. For users who primarily work in Spanish or other non-English languages, model selection matters significantly — the same 7B model can produce fluent professional Spanish or halting translated-sounding text depending on its training data composition.
+                    </p>
+                    <div class="grid sm:grid-cols-2 gap-4">
+                        <div class="glass p-5 rounded-xl space-y-2">
+                            <div class="flex items-center gap-2"><span class="font-mono font-semibold">qwen2.5</span><span class="tier-badge px-2 py-0.5 rounded-full bg-green-900/30 text-green-300">Best for ES/ZH/multilingual</span></div>
+                            <p class="text-xs text-[#9CA3AF] leading-relaxed">Alibaba's Qwen series was trained on a dataset with strong multilingual representation including Spanish, Chinese, Japanese, French, German, Korean, and Arabic. It consistently outperforms Llama on non-English benchmarks. If you work primarily in Spanish, Qwen2.5 at any size is the recommended choice.</p>
+                        </div>
+                        <div class="glass p-5 rounded-xl space-y-2">
+                            <div class="flex items-center gap-2"><span class="font-mono font-semibold">glm-5:cloud</span><span class="tag-cloud tier-badge px-2 py-0.5 rounded-full">Cloud via API</span></div>
+                            <p class="text-xs text-[#9CA3AF] leading-relaxed">Zhipu AI's GLM-5 is one of China's leading frontier models and has exceptional Chinese/English bilingual capability with strong Spanish performance. Available as a cloud model through Ollama's :cloud tag. Particularly strong for translation, cross-lingual tasks, and formal writing in East Asian languages.</p>
+                        </div>
+                        <div class="glass p-5 rounded-xl space-y-2">
+                            <div class="flex items-center gap-2"><span class="font-mono font-semibold">kimi-k2:cloud</span><span class="tag-cloud tier-badge px-2 py-0.5 rounded-full">Cloud via Moonshot API</span></div>
+                            <p class="text-xs text-[#9CA3AF] leading-relaxed">Moonshot AI's Kimi K2 model features a 256k token context window — by far the longest available context for cloud models in MIKA5. Ideal for analyzing entire books, large codebases, or lengthy legal/technical documents in one conversation. Configure via the Moonshot API provider in MIKA5 settings.</p>
+                        </div>
+                        <div class="glass p-5 rounded-xl space-y-2">
+                            <div class="flex items-center gap-2"><span class="font-mono font-semibold">mistral:7b</span><span class="tier-badge px-2 py-0.5 rounded-full bg-blue-900/30 text-blue-300">Best for FR/EU languages</span></div>
+                            <p class="text-xs text-[#9CA3AF] leading-relaxed">Mistral AI is a French company, and their models have above-average French and European language performance. If you frequently work in French, Italian, Portuguese, or Spanish, Mistral 7B offers better results than Llama equivalents for European language tasks.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="highgama" class="space-y-5">
+                    <h3 class="text-xl font-heading flex items-center gap-2">
+                        <span class="tier-badge px-3 py-1 rounded-full bg-yellow-900/30 text-yellow-300">High-End & Cloud Models</span>
+                    </h3>
+                    <p class="text-[#9CA3AF] text-sm leading-relaxed">
+                        The following models represent the current state of the art. Some require significant local hardware; others are available as cloud models through MIKA5's optional provider integrations (OpenAI, Anthropic, Groq, Moonshot). Cloud models are processed on the provider's servers — your prompts leave your machine, but you gain access to models that would require hundreds of GB of local memory to run.
+                    </p>
+                    <div class="space-y-4">
+                        <div class="glass p-6 rounded-2xl space-y-3 border-[#7C3AED]/20">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="font-mono font-semibold text-base">Qwen3.5 / Qwen3</span>
+                                <span class="tag-reason tier-badge px-2 py-0.5 rounded-full">Frontier Local</span>
+                                <span class="tag-local tier-badge px-2 py-0.5 rounded-full">Ollama</span>
+                            </div>
+                            <p class="text-sm text-[#9CA3AF] leading-relaxed">Alibaba's Qwen3 series introduces hybrid reasoning modes — you can switch between fast "instruct" mode and slower "thinking" mode within the same model. The 72B variant delivers performance matching the best cloud models of 2024 while running entirely locally on workstation hardware. Its multilingual capabilities remain industry-leading for open-source models. Requires ~44 GB VRAM for 72B in Q4, or can be run with CPU offloading on systems with 64+ GB RAM.</p>
+                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull qwen3.5:72b <span class="c"># ~44 GB — requires high-end hardware</span></div>
+                        </div>
+                        <div class="glass p-6 rounded-2xl space-y-3">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="font-mono font-semibold text-base">Nemotron-3-Super</span>
+                                <span class="tag-cloud tier-badge px-2 py-0.5 rounded-full">Cloud</span>
+                                <span class="tag-code tier-badge px-2 py-0.5 rounded-full">Code Specialist</span>
+                            </div>
+                            <p class="text-sm text-[#9CA3AF] leading-relaxed">NVIDIA's Nemotron Super is built on the Llama 3.1 70B architecture but refined with NVIDIA's post-training pipeline. It achieves top-tier scores on code generation, instruction following, and function calling. Available as a cloud model through select API providers, or as a :cloud tag on Ollama if your region supports it. Particularly strong for CUDA programming, HPC workloads, and GPU-related development tasks — which is a natural fit for AI practitioners.</p>
+                        </div>
+                        <div class="glass p-6 rounded-2xl space-y-3">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="font-mono font-semibold text-base">GLM-5 (Zhipu AI)</span>
+                                <span class="tag-cloud tier-badge px-2 py-0.5 rounded-full">Cloud</span>
+                                <span class="tier-badge px-2 py-0.5 rounded-full bg-green-900/30 text-green-300">Multilingual</span>
+                            </div>
+                            <p class="text-sm text-[#9CA3AF] leading-relaxed">GLM-5 is Zhipu AI's frontier model, a successor to the GLM-4 series that achieved competitive performance with GPT-4. Strong at Chinese/English bilingual tasks, long document analysis, and complex reasoning. The GLM-OCR variant (local, via Ollama) is purpose-built for document extraction. GLM-5 via cloud is configured in MIKA5 by adding a Zhipu AI API key in settings and selecting glm-5:cloud as the model.</p>
+                        </div>
+                        <div class="glass p-6 rounded-2xl space-y-3">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="font-mono font-semibold text-base">Kimi K2 (Moonshot AI)</span>
+                                <span class="tag-cloud tier-badge px-2 py-0.5 rounded-full">Cloud — Moonshot API</span>
+                            </div>
+                            <p class="text-sm text-[#9CA3AF] leading-relaxed">Kimi K2's defining feature is its 256,000 token context window — the equivalent of a full-length novel or an entire codebase. It can process and reason over extremely long documents without losing coherence. In MIKA5, configure the Moonshot API provider and select moonshot-v1-128k or kimi-k2 as the model. Best for: legal document review, academic paper analysis, processing entire project codebases, or any task where full context retention is critical. Note: long-context processing is billed by token volume on the cloud API.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ─── BENCHMARK TABLE ──────────────────────────── -->
+            <section id="benchmark-table" class="space-y-6">
+                <h2 class="text-3xl font-heading">Benchmark Comparison</h2>
+                <p class="text-sm text-[#9CA3AF] leading-relaxed">
+                    Scores below reflect published benchmark results from model authors and independent evaluations. MMLU measures broad academic knowledge (57 subjects). MT-Bench measures instruction following quality (rated 1–10). HumanEval measures Python code generation correctness. GSM8K measures grade-school math reasoning. MATH measures competition mathematics.
+                </p>
+                <div class="glass rounded-2xl overflow-x-auto">
+                    <table>
+                        <thead><tr>
+                            <th>Model</th>
+                            <th>Params</th>
+                            <th>MMLU</th>
+                            <th>MT-Bench</th>
+                            <th>HumanEval</th>
+                            <th>GSM8K</th>
+                            <th>VRAM (Q4)</th>
+                        </tr></thead>
+                        <tbody>
+                            <tr><td class="font-mono text-sm text-[#D1D5DB]">gemma2:2b</td><td class="text-[#9CA3AF]">2B</td><td class="score-low">52.4%</td><td class="score-low">6.9</td><td class="score-low">37.8%</td><td class="score-low">41.2%</td><td>1.5 GB</td></tr>
+                            <tr><td class="font-mono text-sm text-[#D1D5DB]">llama3.2:3b</td><td class="text-[#9CA3AF]">3B</td><td class="score-low">58.2%</td><td class="score-low">7.2</td><td class="score-low">45.3%</td><td class="score-mid">67.4%</td><td>2 GB</td></tr>
+                            <tr><td class="font-mono text-sm text-[#D1D5DB]">qwen2.5:3b</td><td class="text-[#9CA3AF]">3B</td><td class="score-mid">65.6%</td><td class="score-mid">7.4</td><td class="score-mid">53.2%</td><td class="score-mid">72.8%</td><td>2 GB</td></tr>
+                            <tr><td class="font-mono text-sm text-[#D1D5DB]">mistral:7b</td><td class="text-[#9CA3AF]">7B</td><td class="score-mid">64.2%</td><td class="score-mid">7.8</td><td class="score-mid">60.6%</td><td class="score-mid">74.2%</td><td>4.1 GB</td></tr>
+                            <tr><td class="font-mono text-sm text-[#D1D5DB]">llama3.1:8b</td><td class="text-[#9CA3AF]">8B</td><td class="score-mid">66.4%</td><td class="score-mid">8.0</td><td class="score-mid">72.6%</td><td class="score-mid">84.2%</td><td>5 GB</td></tr>
+                            <tr><td class="font-mono text-sm text-[#D1D5DB]">gemma3:9b</td><td class="text-[#9CA3AF]">9B</td><td class="score-mid">70.4%</td><td class="score-mid">8.1</td><td class="score-mid">65.9%</td><td class="score-mid">82.6%</td><td>5.8 GB</td></tr>
+                            <tr><td class="font-mono text-sm text-[#A78BFA] font-semibold">qwen2.5:7b</td><td class="text-[#9CA3AF]">7B</td><td class="score-high">74.8%</td><td class="score-high">8.3</td><td class="score-high">84.2%</td><td class="score-high">88.4%</td><td>4.7 GB</td></tr>
+                            <tr><td class="font-mono text-sm text-[#A78BFA] font-semibold">deepseek-r1:7b</td><td class="text-[#9CA3AF]">7B</td><td class="score-high">72.6%</td><td class="score-high">8.4</td><td class="score-high">79.4%</td><td class="score-high">91.2%</td><td>4.5 GB</td></tr>
+                            <tr><td class="font-mono text-sm text-[#D1D5DB]">qwen2.5:14b</td><td class="text-[#9CA3AF]">14B</td><td class="score-high">79.6%</td><td class="score-high">8.7</td><td class="score-high">89.0%</td><td class="score-high">90.4%</td><td>9 GB</td></tr>
+                            <tr><td class="font-mono text-sm text-[#D1D5DB]">deepseek-r1:14b</td><td class="text-[#9CA3AF]">14B</td><td class="score-high">78.4%</td><td class="score-high">8.9</td><td class="score-high">88.2%</td><td class="score-high">94.8%</td><td>9 GB</td></tr>
+                            <tr><td class="font-mono text-sm text-[#D1D5DB]">llama3.3:70b</td><td class="text-[#9CA3AF]">70B</td><td class="score-high">86.4%</td><td class="score-high">9.1</td><td class="score-high">88.4%</td><td class="score-high">93.2%</td><td>~42 GB</td></tr>
+                            <tr><td class="font-mono text-sm text-[#D1D5DB]">deepseek-r1:70b</td><td class="text-[#9CA3AF]">70B</td><td class="score-high">87.8%</td><td class="score-high">9.2</td><td class="score-high">90.2%</td><td class="score-high">96.4%</td><td>~43 GB</td></tr>
+                            <tr class="bg-[#7C3AED]/5"><td class="font-mono text-sm text-[#A78BFA] font-semibold">Claude Sonnet 4.5</td><td class="text-[#9CA3AF]">Cloud</td><td class="score-high">89.2%</td><td class="score-high">9.4</td><td class="score-high">92.0%</td><td class="score-high">96.8%</td><td>API</td></tr>
+                            <tr class="bg-[#7C3AED]/5"><td class="font-mono text-sm text-[#A78BFA] font-semibold">GPT-4o</td><td class="text-[#9CA3AF]">Cloud</td><td class="score-high">87.8%</td><td class="score-high">9.3</td><td class="score-high">90.2%</td><td class="score-high">95.8%</td><td>API</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p class="text-xs text-[#4B5563]">* Benchmark scores are approximate and sourced from published papers and community evaluations. Actual performance varies by quantization level, prompt format, and task type. Models marked in purple are recommended for most users at each tier.</p>
+            </section>
+
+            <!-- ─── INSTALL COMMANDS ──────────────────────────── -->
+            <section id="how-to-install" class="space-y-6">
+                <h2 class="text-3xl font-heading">Quick Install Reference</h2>
+                <p class="text-sm text-[#9CA3AF]">Copy and paste into your terminal after installing Ollama. All models download automatically.</p>
+                <div class="terminal rounded-2xl p-6 space-y-4">
+                    <div>
+                        <p class="text-[#4B5563] text-[11px] uppercase tracking-wider mb-2"># Entry Level (8 GB RAM)</p>
+                        <p><span class="p">$</span> ollama pull llama3.2:3b</p>
+                        <p><span class="p">$</span> ollama pull qwen2.5:3b</p>
+                    </div>
+                    <div>
+                        <p class="text-[#4B5563] text-[11px] uppercase tracking-wider mb-2"># Mid Range (16 GB RAM / 6-8 GB VRAM)</p>
+                        <p><span class="p">$</span> ollama pull qwen2.5:7b          <span class="c"># General purpose — recommended</span></p>
+                        <p><span class="p">$</span> ollama pull deepseek-r1:7b       <span class="c"># Reasoning tasks</span></p>
+                        <p><span class="p">$</span> ollama pull qwen2.5-vl:7b        <span class="c"># Vision + images</span></p>
+                        <p><span class="p">$</span> ollama pull glm-ocr:latest        <span class="c"># Document OCR</span></p>
+                        <p><span class="p">$</span> ollama pull mistral:7b            <span class="c"># Fast responses</span></p>
+                    </div>
+                    <div>
+                        <p class="text-[#4B5563] text-[11px] uppercase tracking-wider mb-2"># High End (32 GB RAM / 12-16 GB VRAM)</p>
+                        <p><span class="p">$</span> ollama pull qwen2.5:14b</p>
+                        <p><span class="p">$</span> ollama pull qwen2.5-coder:14b    <span class="c"># For coding</span></p>
+                        <p><span class="p">$</span> ollama pull deepseek-r1:14b      <span class="c"># For reasoning</span></p>
+                    </div>
+                    <div>
+                        <p class="text-[#4B5563] text-[11px] uppercase tracking-wider mb-2"># Workstation (64 GB RAM / 24+ GB VRAM)</p>
+                        <p><span class="p">$</span> ollama pull llama3.3:70b</p>
+                        <p><span class="p">$</span> ollama pull deepseek-r1:70b</p>
+                        <p><span class="p">$</span> ollama pull qwen2.5:72b</p>
+                    </div>
+                    <div>
+                        <p class="text-[#4B5563] text-[11px] uppercase tracking-wider mb-2"># Always required — RAG embedding model</p>
+                        <p><span class="p">$</span> ollama pull nomic-embed-text     <span class="c"># Required for MIKA5 knowledge base</span></p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ─── EMBEDDING ──────────────────────────────── -->
+            <section id="embedding" class="space-y-5">
+                <h2 class="text-3xl font-heading">Embedding Models — Required for RAG</h2>
+                <p class="text-[#9CA3AF] text-sm leading-relaxed">
+                    The RAG (Retrieval-Augmented Generation) engine in MIKA5 requires an embedding model to convert your documents into vector representations. Embedding models are not for chatting — they are mathematical tools that transform text into numerical vectors so that semantically similar passages can be found quickly. You must have an embedding model installed for the Knowledge Base feature to work.
+                </p>
+                <div class="grid sm:grid-cols-2 gap-4">
+                    <div class="glass p-5 rounded-xl space-y-2">
+                        <div class="flex items-center gap-2 font-mono font-semibold">nomic-embed-text <span class="tier-badge px-2 py-0.5 rounded-full bg-green-900/30 text-green-300">Recommended</span></div>
+                        <p class="text-xs text-[#9CA3AF] leading-relaxed">The default and recommended embedding model for MIKA5. Only 274 MB, very fast, and produces high-quality 768-dimensional embeddings. Excellent for English and Spanish documents. The RAG engine uses this model unless another is configured.</p>
+                        <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull nomic-embed-text</div>
+                    </div>
+                    <div class="glass p-5 rounded-xl space-y-2">
+                        <div class="font-mono font-semibold">mxbai-embed-large</div>
+                        <p class="text-xs text-[#9CA3AF] leading-relaxed">Higher quality embeddings (1024 dimensions) at a cost of larger size (~670 MB) and slower processing. Better for very long documents or when retrieval precision is critical. Consider this if you notice MIKA5's RAG retrieval is returning less relevant chunks.</p>
+                        <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull mxbai-embed-large</div>
+                    </div>
+                </div>
+                <div class="glass p-5 rounded-xl flex gap-3 items-start">
+                    <span class="text-yellow-400 text-lg shrink-0">⚡</span>
+                    <p class="text-sm text-[#9CA3AF] leading-relaxed">Embedding models run in the background when you upload documents to MIKA5. You will not interact with them directly. They only need to be installed — MIKA5 handles the rest automatically. Do not select them as your chat model in the model dropdown.</p>
+                </div>
+            </section>
+
+        </div>
+    </div>
+</main>
+
+<footer class="border-t border-white/5 py-10 text-[#6B7280] text-sm">
+    <div class="max-w-[1200px] mx-auto px-6 flex flex-col md:flex-row justify-between gap-4 items-center">
+        <div class="flex items-center gap-2 font-heading text-white font-bold">
+            <img src="icon.png" alt="" class="w-5 h-5 rounded">
+            MIKA5 Model Guide
+        </div>
+        <div class="flex gap-6">
+            <a href="landing.html" class="hover:text-white transition-colors">Home</a>
+            <a href="whitepaper.html" class="hover:text-white transition-colors">White Paper</a>
+            <a href="https://github.com/mika5app/mika5-desktop" target="_blank" rel="noopener" class="hover:text-white transition-colors">GitHub</a>
+        </div>
+        <p class="text-xs text-[#4B5563]">v0.1.0 · 2026 · Benchmark scores are approximate</p>
+    </div>
+</footer>
+
+</body>
+</html>

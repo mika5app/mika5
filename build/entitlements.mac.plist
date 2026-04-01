@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Electron / V8 JIT compilation -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+
+  <!-- Dynamic code used by Node.js native modules (better-sqlite3) -->
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+
+  <!-- Allows loading third-party native Node modules compiled outside Xcode -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+
+  <!-- Network access — required to connect to local Ollama (127.0.0.1:11434) -->
+  <!-- and optional cloud providers (OpenAI, Anthropic, Groq, Moonshot) -->
+  <key>com.apple.security.network.client</key>
+  <true/>
+
+  <!-- File access — required for Save As dialog and knowledge document import -->
+  <key>com.apple.security.files.user-selected.read-write</key>
+  <true/>
+
+  <!-- File access — required for reading downloaded model files (llama.cpp GGUF) -->
+  <key>com.apple.security.files.downloads.read-write</key>
+  <true/>
+</dict>
+</plist>

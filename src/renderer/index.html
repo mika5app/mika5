@@ -1,0 +1,2115 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MIKA5</title>
+    <link rel="icon" href="./assets/icon.png">
+    <link rel="stylesheet" href="./styles.css">
+    <link rel="stylesheet" href="./vendor/atom-one-dark.min.css">
+    <script src="./vendor/marked.min.js"></script>
+    <script src="./vendor/highlight.min.js"></script>
+    <style>
+        :root {
+            /* Colores del proyecto actual */
+            --bg-base: #0D1123;
+            --bg-sidebar: #070b16;
+            --bg-card: #101a33;
+            --bg-hover: #152044;
+            --border-subtle: #1b2a55;
+            --text-main: #eef3ff;
+            --text-muted: #a9b4d0;
+            --accent: #49C2F4;
+            --accent-hover: #2184E5;
+            --accent-glow: rgba(73, 194, 244, 0.25);
+            --glass: rgba(13, 17, 35, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --shadow-md: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            
+            /* Nuevos valores para mejor experiencia */
+            --sidebar-width: 280px;
+            --transition-speed: 0.3s;
+            --border-radius: 12px;
+            --spacing-sm: 8px;
+            --spacing-md: 16px;
+            --spacing-lg: 24px;
+            
+            /* Tema claro (variables para .light-theme) */
+            --light-bg-base: #f0f4f8;
+            --light-bg-sidebar: #e2e8f0;
+            --light-bg-card: #ffffff;
+            --light-bg-hover: #cbd5e1;
+            --light-border-subtle: #cbd5e1;
+            --light-text-main: #1e293b;
+            --light-text-muted: #64748b;
+            --light-accent: #0ea5e9;
+            --light-accent-hover: #0284c7;
+            --light-accent-glow: rgba(14, 165, 233, 0.25);
+        }
+
+        .light-theme {
+            --bg-base: var(--light-bg-base);
+            --bg-sidebar: var(--light-bg-sidebar);
+            --bg-card: var(--light-bg-card);
+            --bg-hover: var(--light-bg-hover);
+            --border-subtle: var(--light-border-subtle);
+            --text-main: var(--light-text-main);
+            --text-muted: var(--light-text-muted);
+            --accent: var(--light-accent);
+            --accent-hover: var(--light-accent-hover);
+            --accent-glow: var(--light-accent-glow);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        }
+
+        html {
+            overflow-x: hidden;
+        }
+
+        body {
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            height: 100vh;
+            min-height: 100vh;
+            overflow: hidden;
+            font-size: 15px;
+            display: flex;
+            min-width: 0;
+            width: 100%;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        /* --- Scrollbars --- */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #444;
+            border-radius: 4px;
+            border: 2px solid var(--bg-base);
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+
+        .light-theme ::-webkit-scrollbar-thumb {
+            background: #bbb;
+            border-color: var(--bg-base);
+        }
+        .light-theme ::-webkit-scrollbar-thumb:hover {
+            background: #999;
+        }
+
+        /* --- Animations --- */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(5px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes fadeOut {
+            from {
+                opacity: 1;
+                transform: translateY(0);
+            }
+            to {
+                opacity: 0;
+                transform: translateY(5px);
+            }
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.5; }
+            50% { opacity: 1; }
+            100% { opacity: 0.5; }
+        }
+
+        /* --- Layout Principal --- */
+        .app-layout {
+            display: flex;
+            width: 100%;
+            height: 100vh;
+        }
+
+        /* --- Sidebar --- */
+        .sidebar {
+            width: var(--sidebar-width);
+            background: var(--bg-sidebar);
+            border-right: 1px solid var(--border-subtle);
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            transition: width var(--transition-speed) cubic-bezier(0.4, 0, 0.2, 1),
+                        transform var(--transition-speed) cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 20;
+            overflow: hidden;
+        }
+        /* Desktop: ocultar sidebar colapsado (estilo ChatGPT) */
+        .sidebar:not(.open) {
+            width: 0;
+            min-width: 0;
+            padding: 0;
+            border-right-width: 0;
+        }
+
+        .sidebar-header {
+            padding: var(--spacing-md);
+            border-bottom: 1px solid var(--border-subtle);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-logo {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+        }
+
+        .brand-name {
+            font-weight: 600;
+            font-size: 18px;
+            letter-spacing: -0.3px;
+        }
+
+        .sidebar-section {
+            padding: var(--spacing-md);
+            border-bottom: 1px solid var(--border-subtle);
+            display: flex;
+            flex-direction: column;
+            flex: 1 1 0;
+            min-height: 80px;
+            overflow: hidden;
+        }
+
+        .section-title {
+            font-size: 12px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: var(--spacing-sm);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .section-actions {
+            display: flex;
+            gap: var(--spacing-sm);
+        }
+
+        .btn-icon {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 6px;
+            border-radius: 6px;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .btn-icon:hover {
+            background: var(--bg-hover);
+            color: var(--text-main);
+        }
+
+        .sidebar-content {
+            flex: 1 1 0;
+            overflow-y: auto;
+            padding: var(--spacing-sm) 0;
+            min-height: 0;
+        }
+
+        .item-list {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .item {
+            padding: 10px var(--spacing-md);
+            border-radius: 8px;
+            cursor: pointer;
+            color: var(--text-muted);
+            font-size: 14px;
+            transition: background 0.15s;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin: 0 var(--spacing-sm);
+        }
+
+        .item:hover {
+            background: var(--bg-hover);
+            color: var(--text-main);
+        }
+
+        .item.active {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-main);
+            font-weight: 500;
+        }
+
+        .item-preview {
+            font-size: 12px;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 70%;
+        }
+
+        .item-actions {
+            display: none;
+            gap: 6px;
+        }
+
+        .item:hover .item-actions {
+            display: flex;
+        }
+
+        .action-icon {
+            opacity: 0.6;
+            transition: opacity 0.2s;
+            font-size: 12px;
+        }
+
+        .action-icon:hover {
+            opacity: 1;
+            color: var(--text-main);
+        }
+
+        /* --- Main Content --- */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            background: var(--bg-base);
+            min-width: 0;
+        }
+
+        .main-header {
+            flex-shrink: 0;
+            border-bottom: 1px solid var(--border-subtle);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px var(--spacing-lg);
+            background: rgba(30, 30, 29, 0.8);
+            backdrop-filter: blur(12px);
+            z-index: 10;
+            height: 52px;
+            position: relative;
+        }
+
+        .header-section {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 1 1 0;
+            min-width: 0;
+        }
+
+        .header-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-shrink: 0;
+        }
+
+        #activeTitle {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            min-width: 0;
+            font-weight: 600;
+            font-size: 15px;
+        }
+
+        .model-selector {
+            position: relative;
+            user-select: none;
+            flex-shrink: 0;
+        }
+
+        .model-trigger #currentModel {
+            display: inline-block;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 14ch;
+        }
+
+        .privacy-indicator, .provider-selector, .status-pill {
+            flex-shrink: 0;
+        }
+
+        .model-options {
+            z-index: 1100;
+        }
+
+        .mobile-toggle {
+            display: none;
+            background: none;
+            border: none;
+            color: white;
+            padding: 8px;
+            cursor: pointer;
+        }
+        /* Botón menú en header siempre visible para abrir/cerrar sidebar (estilo ChatGPT) */
+        .main-header .mobile-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* --- Model Selector --- */
+        .model-trigger {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--bg-card);
+            color: var(--text-main);
+            font-size: 14px;
+            font-weight: 500;
+            padding: 8px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+            border: 1px solid var(--border-subtle);
+        }
+
+        .model-trigger:hover {
+            background: var(--bg-hover);
+        }
+
+        .model-options {
+            position: absolute;
+            top: calc(100% + 5px);
+            left: 0;
+            right: 0;
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 10px;
+            overflow: hidden;
+            display: none;
+            z-index: 100;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
+            max-height: 300px;
+            overflow-y: auto;
+            animation: fadeIn 0.2s ease;
+        }
+
+        .model-options.open {
+            display: block;
+        }
+
+        .model-option {
+            padding: 10px 12px;
+            cursor: pointer;
+            color: var(--text-muted);
+            transition: background 0.15s;
+            font-size: 13px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .model-option:last-child {
+            border-bottom: none;
+        }
+
+        .model-option:hover {
+            background: var(--bg-hover);
+            color: var(--text-main);
+        }
+
+        .model-option.selected {
+            background: rgba(73, 194, 244, 0.1);
+            color: var(--accent);
+        }
+
+        .light-theme .item.active {
+            background: rgba(0, 0, 0, 0.08);
+        }
+        .light-theme .main-header {
+            background: rgba(255, 255, 255, 0.9);
+        }
+        .light-theme .mobile-toggle {
+            color: var(--text-main);
+        }
+        .light-theme .model-trigger,
+        .light-theme .model-options {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        }
+        .light-theme .model-option {
+            border-bottom-color: var(--border-subtle);
+        }
+        .light-theme .model-option.selected {
+            background: rgba(14, 165, 233, 0.12);
+        }
+
+        /* --- Theme Toggle --- */
+        .theme-toggle {
+            background: none;
+            border: 1px solid var(--border-subtle);
+            color: var(--text-muted);
+            padding: 6px 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: background 0.2s, color 0.2s;
+        }
+        .theme-toggle:hover {
+            background: var(--bg-hover);
+            color: var(--text-main);
+        }
+
+        /* --- Status Pill --- */
+        .status-pill {
+            font-size: 11px;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-pill.status-ok {
+            background: rgba(34, 197, 94, 0.2);
+            color: #4ade80;
+            border: 1px solid rgba(34, 197, 94, 0.4);
+        }
+
+        .status-pill.status-offline {
+            background: rgba(239, 68, 68, 0.2);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.4);
+        }
+
+        .status-pill.status-loading {
+            background: rgba(156, 163, 175, 0.2);
+            color: #9ca3af;
+            border: 1px solid rgba(156, 163, 175, 0.4);
+        }
+
+        /* --- Chat Area --- */
+        .chat-area {
+            flex: 1 1 0%;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            min-height: 0;
+        }
+
+        .messages-container {
+            flex: 1 1 0%;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding: var(--spacing-lg);
+            min-height: 0;
+        }
+
+        .message {
+            display: flex;
+            gap: var(--spacing-md);
+            max-width: 900px;
+            width: 100%;
+            margin: 0 auto;
+            padding: var(--spacing-sm) 0;
+        }
+
+        .message-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 6px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .avatar-user {
+            background: var(--bg-card);
+            color: var(--text-muted);
+        }
+
+        .avatar-assistant {
+            background: var(--accent);
+            color: white;
+        }
+
+        .message-content {
+            flex: 1;
+            min-width: 0;
+            line-height: 1.6;
+            font-size: 15px;
+            overflow-wrap: break-word;
+            color: var(--text-main);
+        }
+
+        .message-content p {
+            margin-bottom: 12px;
+        }
+
+        .message-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .message:hover .message-actions {
+            opacity: 1;
+        }
+
+        .action-btn {
+            background: transparent;
+            border: 1px solid var(--border-subtle);
+            color: var(--text-muted);
+            padding: 4px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            transition: all 0.2s;
+        }
+
+        .action-btn:hover {
+            background: var(--bg-hover);
+            color: var(--text-main);
+        }
+
+        /* --- Input Area --- */
+        .input-area {
+            flex-shrink: 0;
+            padding: var(--spacing-md) var(--spacing-lg);
+            background: linear-gradient(180deg, rgba(13, 17, 35, 0) 0%, var(--bg-base) 30%);
+            border-top: 1px solid var(--border-subtle);
+            max-height: 45vh;
+            overflow-y: auto;
+        }
+
+        .input-box {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--border-radius);
+            padding: var(--spacing-sm);
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-sm);
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.2);
+            transition: border-color 0.2s, box-shadow 0.2s;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .input-box:focus-within {
+            border-color: var(--accent);
+            box-shadow: 0 0 25px rgba(73, 194, 244, 0.3);
+        }
+
+        .input-textarea {
+            background: transparent;
+            border: none;
+            color: var(--text-main);
+            resize: none;
+            outline: none;
+            min-height: 40px;
+            max-height: 200px;
+            line-height: 1.5;
+            font-size: 15px;
+            overflow-y: auto;
+            padding: var(--spacing-sm);
+            width: 100%;
+        }
+
+        .input-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 var(--spacing-sm);
+        }
+
+        .attachment-preview {
+            display: flex;
+            gap: var(--spacing-sm);
+            padding: var(--spacing-sm);
+            flex-wrap: wrap;
+            max-height: 120px;
+            overflow-y: auto;
+        }
+
+        .preview-item {
+            position: relative;
+            border-radius: 8px;
+            overflow: visible;
+            border: 1px solid var(--border-subtle);
+            background: var(--bg-hover);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 8px;
+            min-width: 50px;
+            max-width: 140px;
+        }
+
+        .preview-remove {
+            position: absolute;
+            top: -6px;
+            right: -6px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            color: var(--text-muted);
+            font-size: 12px;
+        }
+
+        .preview-remove:hover {
+            background: #ff4444;
+            color: white;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-hover);
+            transform: translateY(-1px);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: default;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 6px;
+            border-radius: 6px;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-main);
+        }
+
+        /* --- Empty State --- */
+        .empty-state {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .empty-logo {
+            width: 64px;
+            height: 64px;
+            border-radius: 12px;
+            margin-bottom: 24px;
+            opacity: 0.9;
+        }
+
+        .empty-title {
+            font-size: 18px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        .empty-subtitle {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 24px;
+        }
+
+        .suggestion-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            max-width: 480px;
+        }
+
+        .suggestion-chip {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-muted);
+            padding: 12px 16px;
+            border-radius: 10px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: left;
+            width: 100%;
+        }
+
+        .suggestion-chip:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: rgba(73, 194, 244, 0.08);
+        }
+
+        /* --- Toast Notifications --- */
+        #toast-container {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 9999;
+            pointer-events: none;
+        }
+
+        .toast {
+            background: #333;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 50px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            animation: slideUp 0.3s ease forwards;
+            pointer-events: auto;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .toast.error {
+            background: #4a1818;
+            border-color: #ff4444;
+        }
+
+        .toast.success {
+            background: #183018;
+            border-color: #44ff44;
+        }
+
+        .light-theme .input-area {
+            background: linear-gradient(180deg, rgba(240, 244, 248, 0) 0%, var(--bg-base) 30%);
+        }
+        .light-theme .input-box {
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+        }
+        .light-theme .input-box:focus-within {
+            box-shadow: 0 2px 16px rgba(14, 165, 233, 0.2);
+        }
+        .light-theme .btn-secondary:hover {
+            background: rgba(0, 0, 0, 0.06);
+        }
+        .light-theme .suggestion-chip:hover {
+            background: rgba(14, 165, 233, 0.08);
+        }
+        .light-theme .toast {
+            background: #334155;
+            color: #f1f5f9;
+            border-color: rgba(255, 255, 255, 0.15);
+        }
+        .light-theme .toast.error {
+            background: #7f1d1d;
+            border-color: #ef4444;
+        }
+        .light-theme .toast.success {
+            background: #14532d;
+            border-color: #22c55e;
+        }
+        .light-theme .context-panel {
+            box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
+        }
+        .light-theme .code-block-wrapper {
+            background: #2d3748;
+            border-color: var(--border-subtle);
+        }
+        .light-theme .code-block-header {
+            background: rgba(0, 0, 0, 0.2);
+        }
+        .light-theme .empty-subtitle {
+            color: var(--text-muted);
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* --- Typing Indicator --- */
+        .typing-indicator {
+            display: flex;
+            gap: 4px;
+            padding: 10px 0;
+        }
+
+        .typing-dot {
+            width: 6px;
+            height: 6px;
+            background: #888;
+            border-radius: 50%;
+            animation: typing 1.4s infinite ease-in-out both;
+        }
+
+        .typing-dot:nth-child(1) {
+            animation-delay: -0.32s;
+        }
+
+        .typing-dot:nth-child(2) {
+            animation-delay: -0.16s;
+        }
+
+        @keyframes typing {
+            0%, 80%, 100% {
+                transform: scale(0);
+            }
+            40% {
+                transform: scale(1);
+            }
+        }
+
+        /* --- Responsive Design --- */
+        @media (max-width: 768px) {
+            .sidebar {
+                position: fixed;
+                height: 100%;
+                z-index: 50;
+                transform: translateX(-100%);
+                width: min(var(--sidebar-width), 85vw) !important;
+                min-width: unset;
+                padding: var(--spacing-md);
+                border-right-width: 1px;
+            }
+
+            .sidebar.open {
+                transform: translateX(0);
+                box-shadow: 10px 0 30px rgba(0, 0, 0, 0.5);
+            }
+
+            .mobile-toggle {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+
+            .main-header {
+                padding: 0 var(--spacing-md);
+                gap: var(--spacing-sm);
+                height: 48px;
+            }
+
+            .model-selector {
+                max-width: 150px;
+            }
+
+            .messages-container {
+                padding: var(--spacing-md);
+            }
+
+            .message {
+                padding: var(--spacing-sm) 0;
+                gap: var(--spacing-sm);
+            }
+
+            .message-avatar {
+                width: 32px;
+                height: 32px;
+            }
+
+            .input-area {
+                padding: var(--spacing-sm);
+            }
+
+            .input-box {
+                border-radius: 10px;
+            }
+
+            .input-textarea {
+                padding: 8px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .main-header {
+                padding: 0 var(--spacing-sm);
+                height: 44px;
+            }
+
+            .messages-container {
+                padding: var(--spacing-sm);
+            }
+
+            .message {
+                padding: 8px 0;
+                gap: 10px;
+            }
+
+            .message-avatar {
+                width: 28px;
+                height: 28px;
+            }
+
+            .input-area {
+                padding: 8px var(--spacing-sm);
+            }
+
+            .input-box {
+                padding: 6px;
+            }
+
+            .input-textarea {
+                font-size: 14px;
+            }
+        }
+
+        /* --- Focus Styles --- */
+        button:focus-visible, .item:focus-visible, .model-option:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        /* --- Loading States --- */
+        .loading-pulse {
+            animation: pulse 1.5s infinite;
+        }
+        
+        /* --- Project Name Input --- */
+        #projectName {
+            width: 100%;
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-main);
+            padding: 8px 12px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+        
+        #projectName:focus {
+            border-color: var(--accent);
+            outline: none;
+        }
+        
+        /* --- Hidden Select for Compatibility --- */
+        #modelSelect {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+            width: 0;
+            height: 0;
+        }
+        
+        /* --- Pull Button Label --- */
+        #btnPullLabel {
+            margin-left: 6px;
+        }
+        
+        /* --- Save Chat Button --- */
+        #btnSaveChatDoc {
+            margin-left: 0;
+        }
+        
+        /* --- Panel Contexto del proyecto --- */
+        .context-panel {
+            position: fixed;
+            top: 0;
+            right: 0;
+            width: 320px;
+            max-width: 90vw;
+            height: 100vh;
+            background: var(--bg-sidebar);
+            border-left: 1px solid var(--border-subtle);
+            z-index: 40;
+            display: flex;
+            flex-direction: column;
+            transform: translateX(100%);
+            transition: transform var(--transition-speed) cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: -8px 0 24px rgba(0,0,0,0.3);
+            pointer-events: none;
+        }
+        .context-panel.open {
+            transform: translateX(0);
+            pointer-events: auto;
+        }
+        .context-panel-header {
+            padding: var(--spacing-md);
+            border-bottom: 1px solid var(--border-subtle);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-weight: 600;
+        }
+        .context-panel-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: var(--spacing-md);
+        }
+        .context-section {
+            margin-bottom: var(--spacing-lg);
+        }
+        .context-label {
+            display: block;
+            font-size: 12px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+        .context-textarea {
+            width: 100%;
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-main);
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 13px;
+            line-height: 1.5;
+            resize: vertical;
+            min-height: 80px;
+            margin-bottom: 8px;
+        }
+        .context-textarea:focus {
+            border-color: var(--accent);
+            outline: none;
+        }
+        .context-hint {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-bottom: 10px;
+        }
+        .knowledge-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-bottom: 10px;
+        }
+        .knowledge-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 10px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 6px;
+            font-size: 13px;
+        }
+        .knowledge-item-name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .knowledge-item-remove {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 2px 6px;
+            font-size: 14px;
+        }
+        .knowledge-item-remove:hover {
+            color: #f87171;
+        }
+        .btn-sm { padding: 6px 12px; font-size: 12px; }
+        .btn-block { width: 100%; margin-top: 4px; }
+        
+        /* --- Markdown Tables --- */
+        .msg table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0;
+            font-size: 13px;
+            line-height: 1.5;
+            overflow-x: auto;
+            display: block;
+        }
+        .msg thead {
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+        .msg th {
+            background: var(--bg-hover);
+            color: var(--text-main);
+            font-weight: 600;
+            text-align: left;
+            padding: 8px 12px;
+            border: 1px solid var(--border-subtle);
+            white-space: nowrap;
+        }
+        .msg td {
+            padding: 6px 12px;
+            border: 1px solid var(--border-subtle);
+            vertical-align: top;
+            word-break: break-word;
+            min-width: 60px;
+        }
+        .msg tr:nth-child(even) {
+            background: rgba(255, 255, 255, 0.02);
+        }
+        .msg tr:hover {
+            background: var(--bg-hover);
+        }
+        .msg td code, .msg th code {
+            font-size: 12px;
+            padding: 1px 5px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 4px;
+        }
+        /* Table responsive wrapper (added by JS) */
+        .table-responsive {
+            overflow-x: auto;
+            margin: 12px 0;
+            border-radius: 8px;
+            border: 1px solid var(--border-subtle);
+            max-width: 100%;
+        }
+        .table-responsive table {
+            display: table;
+            border: none;
+            margin: 0;
+            min-width: 400px;
+        }
+        .table-responsive th:first-child,
+        .table-responsive td:first-child {
+            border-left: none;
+        }
+        .table-responsive th:last-child,
+        .table-responsive td:last-child {
+            border-right: none;
+        }
+        .table-responsive thead tr:first-child th {
+            border-top: none;
+        }
+        .table-responsive tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        /* --- Messages (app.js generated) --- */
+        .msg {
+            padding: 12px 16px;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--border-radius);
+            max-width: 75%;
+            background: var(--bg-card);
+            line-height: 1.6;
+            margin-bottom: var(--spacing-md);
+            box-sizing: border-box;
+            overflow: hidden;
+            word-break: break-word;
+            position: relative;
+        }
+        .msg img {
+            max-width: 100%;
+            max-height: 300px;
+            object-fit: contain;
+            border-radius: 6px;
+        }
+        .msg .msg-content {
+            overflow: hidden;
+        }
+        .msg pre {
+            max-height: 400px;
+            overflow: auto;
+        }
+        .msg.user {
+            background: linear-gradient(135deg, rgba(73, 194, 244, 0.15) 0%, rgba(73, 194, 244, 0.08) 100%);
+            border-color: var(--accent);
+            border-left: none;
+            border-right: 3px solid var(--accent);
+            margin-left: auto;
+            margin-right: 0;
+            border-radius: var(--border-radius) 4px 4px var(--border-radius);
+        }
+        .msg.assistant {
+            background: var(--bg-card);
+            border-left: 3px solid var(--text-muted);
+            margin-right: auto;
+            margin-left: 0;
+            border-radius: 4px var(--border-radius) var(--border-radius) 4px;
+        }
+        .msg.system {
+            max-width: 90%;
+            margin: 0 auto var(--spacing-md);
+            text-align: center;
+            font-style: italic;
+            border-left: none;
+            border-color: rgba(245, 158, 11, 0.3);
+            background: rgba(245, 158, 11, 0.06);
+        }
+        .light-theme .msg.user {
+            background: linear-gradient(135deg, rgba(14, 165, 233, 0.12) 0%, rgba(14, 165, 233, 0.05) 100%);
+        }
+        .msg-generating {
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        .msg-actions {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: var(--spacing-sm);
+            margin-top: var(--spacing-sm);
+        }
+        .model-badge {
+            font-size: 10px;
+            color: var(--text-muted);
+            background: var(--bg-hover);
+            padding: 2px 8px;
+            border-radius: 10px;
+            margin-left: auto;
+            white-space: nowrap;
+            opacity: 0.7;
+            user-select: text;
+        }
+        .model-change-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 12px 0;
+            padding: 0 16px;
+        }
+        .model-change-line {
+            flex: 1;
+            height: 1px;
+            background: var(--border-subtle);
+        }
+        .model-change-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            background: var(--bg-secondary);
+            padding: 2px 10px;
+            border-radius: 10px;
+            white-space: nowrap;
+        }
+        .btn-save-message {
+            background: transparent;
+            border: 1px solid var(--border-subtle);
+            color: var(--text-muted);
+            padding: 4px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+        .btn-save-message:hover:not(:disabled) {
+            background: var(--bg-hover);
+            color: var(--text-main);
+        }
+        .btn-save-message:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .empty-chat-hint {
+            color: var(--text-muted);
+            font-size: 14px;
+            padding: 24px 16px;
+            text-align: center;
+            border-radius: var(--border-radius);
+            background: var(--bg-card);
+            border: 1px dashed var(--border-subtle);
+            margin: 8px 0;
+        }
+        .load-more-btn {
+            display: block;
+            width: auto;
+            margin: 0 auto var(--spacing-md);
+            padding: 8px 20px;
+            background: var(--bg-card);
+            color: var(--accent);
+            border: 1px solid var(--border-subtle);
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: background 0.2s, border-color 0.2s;
+        }
+        .load-more-btn:hover {
+            background: var(--bg-hover);
+            border-color: var(--accent);
+        }
+        .msg-truncated-indicator {
+            display: block;
+            color: var(--text-muted);
+            font-style: italic;
+            font-size: 12px;
+            margin-top: 8px;
+        }
+        .msg-expand-btn {
+            display: inline-block;
+            margin-top: 8px;
+        }
+
+        /* --- Chat search bar --- */
+        .chat-search-bar {
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            background: var(--bg-sidebar);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .chat-search-input {
+            flex: 1;
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 6px;
+            color: var(--text-main);
+            padding: 5px 10px;
+            font-size: 13px;
+            outline: none;
+        }
+        .chat-search-input:focus {
+            border-color: var(--accent);
+        }
+        .chat-search-count {
+            color: var(--text-muted);
+            font-size: 12px;
+            min-width: 50px;
+            text-align: center;
+            white-space: nowrap;
+        }
+        .chat-search-nav {
+            font-size: 10px !important;
+            padding: 3px 6px !important;
+        }
+        .chat-search-close {
+            font-size: 13px !important;
+            padding: 3px 6px !important;
+        }
+        .msg-search-highlight {
+            background: rgba(250, 204, 21, 0.4);
+            border-radius: 2px;
+            padding: 0 1px;
+        }
+        .msg-search-highlight.active {
+            background: rgba(250, 204, 21, 0.8);
+            outline: 2px solid #facc15;
+        }
+        .msg.search-match {
+            box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.5);
+        }
+
+        /* --- Reply quote block (WhatsApp-style) --- */
+        .msg-reply-quote {
+            background: rgba(73, 194, 244, 0.08);
+            border-left: 3px solid var(--accent);
+            border-radius: 4px;
+            padding: 6px 10px;
+            margin-bottom: 8px;
+            font-size: 12px;
+            color: var(--text-muted);
+            max-height: 60px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .msg-reply-quote:hover {
+            background: rgba(73, 194, 244, 0.15);
+        }
+        .msg-reply-quote .reply-role {
+            font-weight: 700;
+            color: var(--accent);
+            font-size: 11px;
+            text-transform: uppercase;
+            margin-bottom: 2px;
+        }
+        .msg-reply-quote .reply-text {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .msg.reply-flash {
+            animation: replyFlash 1.5s ease;
+        }
+        @keyframes replyFlash {
+            0%, 100% { box-shadow: none; }
+            20%, 60% { box-shadow: 0 0 0 2px var(--accent), 0 0 12px rgba(73, 194, 244, 0.3); }
+        }
+
+        /* --- Reply preview above input --- */
+        .reply-preview {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            background: var(--bg-sidebar);
+            border-left: 3px solid var(--accent);
+            border-radius: 4px;
+            margin-bottom: 6px;
+            font-size: 12px;
+            color: var(--text-muted);
+            max-width: 900px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .reply-preview-body { flex: 1; overflow: hidden; }
+        .reply-preview-role { font-weight: 700; color: var(--accent); font-size: 11px; text-transform: uppercase; }
+        .reply-preview-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .reply-preview-close {
+            background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 16px; padding: 0 4px;
+        }
+        .reply-preview-close:hover { color: var(--text-main); }
+
+        /* --- Mensajes: markdown y bloques de código --- */
+        .msg-content {
+            line-height: 1.6;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            overflow: hidden;
+        }
+        .msg-content p {
+            margin-bottom: 0.75em;
+        }
+        .msg-content p:last-child {
+            margin-bottom: 0;
+        }
+        .msg-content ul, .msg-content ol {
+            margin: 0.5em 0;
+            padding-left: 1.5em;
+        }
+        .code-block-wrapper {
+            margin: 0.75em 0;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #1e1e1e;
+            border: 1px solid var(--border-subtle);
+        }
+        .code-block-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 10px;
+            background: rgba(255, 255, 255, 0.06);
+            border-bottom: 1px solid var(--border-subtle);
+            font-size: 12px;
+        }
+        .code-block-lang {
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .copy-code-btn {
+            background: transparent;
+            border: 1px solid var(--border-subtle);
+            color: var(--text-muted);
+            padding: 4px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+        .copy-code-btn:hover {
+            background: var(--bg-hover);
+            color: var(--text-main);
+            border-color: var(--accent);
+        }
+        .msg-content pre {
+            margin: 0;
+            padding: 1em;
+            border-radius: 0;
+            overflow-x: auto;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        .msg-content .code-block-wrapper pre {
+            background: #1e1e1e;
+        }
+        .msg-content pre code {
+            padding: 0;
+            background: none;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        }
+        .msg-content :not(pre) > code {
+            padding: 0.2em 0.4em;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.08);
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        /* --- Modals --- */
+        .modal {
+            position: fixed;
+            inset: 0;
+            z-index: 9000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(4px);
+            animation: modalBgIn 0.15s ease-out;
+        }
+        @keyframes modalBgIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        @keyframes modalFadeIn {
+            from { opacity: 0; transform: scale(0.95) translateY(10px); }
+            to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        .modal-content {
+            background: var(--bg-sidebar, #0f1629);
+            border: 1px solid var(--border-subtle, #1b2a55);
+            border-radius: 14px;
+            padding: 0;
+            min-width: 320px;
+            max-width: 480px;
+            width: 90%;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            animation: modalFadeIn 0.15s ease-out;
+            overflow: hidden;
+        }
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-subtle, #1b2a55);
+        }
+        .modal-header h3 {
+            margin: 0;
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-main, #eef3ff);
+        }
+        .modal-body {
+            padding: 16px 20px;
+            color: var(--text-muted, #a9b4d0);
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        .modal-body label {
+            display: block;
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+        .light-theme .modal-content {
+            background: var(--bg-card);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+        }
+
+        /* --- Toast types: warning + info --- */
+        .toast.warning {
+            background: #4a3518;
+            border-color: #fb923c;
+        }
+        .toast.info {
+            background: #1e3a5f;
+            border-color: #60a5fa;
+        }
+
+    </style>
+</head>
+<body>
+    <div class="app-layout">
+        <!-- Sidebar -->
+        <div class="sidebar open" id="sidebar">
+            <div class="sidebar-header">
+                <div class="brand">
+                    <img src="./assets/logo.png" alt="MIKA5" class="brand-logo" id="brandLogo">
+                    <div class="brand-name">MIKA5</div>
+                </div>
+                <button class="btn-icon mobile-toggle" id="sidebarToggle" aria-label="Toggle sidebar">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="3" y1="12" x2="21" y2="12"></line>
+                        <line x1="3" y1="6" x2="21" y2="6"></line>
+                        <line x1="3" y1="18" x2="21" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+            
+            <div class="sidebar-section">
+                <div class="section-title">
+                    <span>PROYECTOS</span>
+                    <div class="section-actions">
+                        <button class="btn-icon" id="btnCreateProject" aria-label="Crear proyecto">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="12" y1="5" x2="12" y2="19"></line>
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="sidebar-content">
+                    <input type="text" id="projectName" placeholder="Nombre del proyecto" aria-label="Nombre del proyecto" />
+                    <div class="item-list" id="projectList">
+                        <!-- Proyectos se cargarán aquí -->
+                    </div>
+                </div>
+            </div>
+            
+            <div class="sidebar-section">
+                <div class="section-title">
+                    <span>CHATS RECIENTES</span>
+                    <div class="section-actions">
+                        <button class="btn-icon" id="btnNewChat" aria-label="Nuevo chat">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="12" y1="5" x2="12" y2="19"></line>
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="sidebar-content">
+                    <div class="item-list" id="chatList">
+                        <!-- Chats se cargarán aquí -->
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="main-header">
+                <!-- Row 1: Sidebar toggle + title + model selector + privacy -->
+                <div class="header-section" style="flex:1 1 auto;min-width:0;">
+                    <button class="mobile-toggle" id="mobileSidebarToggle" aria-label="Toggle sidebar">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="3" y1="12" x2="21" y2="12"></line>
+                            <line x1="3" y1="6" x2="21" y2="6"></line>
+                            <line x1="3" y1="18" x2="21" y2="18"></line>
+                        </svg>
+                    </button>
+                    
+                    <span id="activeTitle">Selecciona un proyecto</span>
+                    
+                    <div class="model-selector">
+                        <div class="model-trigger" id="modelTrigger" aria-haspopup="listbox" aria-expanded="false">
+                            <span id="currentModel">Cargando modelos...</span>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M6 9l6 6 6-6" />
+                            </svg>
+                        </div>
+                        <div class="model-options" id="modelOptions" role="listbox"></div>
+                    </div>
+                    
+                    <select id="modelSelect" aria-label="Selecciona un modelo"></select>
+
+                    <!-- Indicador de Privacidad -->
+                    <div id="privacyIndicator" class="privacy-indicator private">
+                        <span id="privacyBadge" class="privacy-badge private">🔒 Privado</span>
+                    </div>
+                </div>
+
+                <!-- Row 2: Actions toolbar -->
+                <div class="header-toolbar">
+                    <!-- Provider selector (compact) -->
+                    <div class="provider-selector">
+                        <button class="provider-trigger" id="providerTrigger" onclick="event.stopPropagation();(function(){const o=document.getElementById('providerOptions'); o.style.display = (o.style.display==='none' || !o.style.display) ? 'block' : 'none';})()">
+                            <span id="currentProviderName">Ollama Local</span>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M6 9l6 6 6-6"/>
+                            </svg>
+                        </button>
+                        <div class="provider-options" id="providerOptions" style="display: none;">
+                            <div class="provider-option" onclick="switchProvider('local')">
+                                <div class="provider-option-header">
+                                    <span class="provider-name">🖥️ Ollama (Local)</span>
+                                    <span class="privacy-tag private">100% Privado</span>
+                                </div>
+                                <div class="provider-desc">Modelos locales. Tus datos nunca salen de tu PC.</div>
+                            </div>
+                            <div class="provider-divider"></div>
+                            <div class="provider-option" onclick="switchProvider('openai')">
+                                <div class="provider-option-header">
+                                    <span class="provider-name">☁️ OpenAI</span>
+                                    <span class="privacy-tag cloud">Cloud</span>
+                                </div>
+                                <div class="provider-desc">Requiere API Key.</div>
+                            </div>
+                            <div class="provider-option" onclick="switchProvider('anthropic')">
+                                <div class="provider-option-header">
+                                    <span class="provider-name">☁️ Claude (Anthropic)</span>
+                                    <span class="privacy-tag cloud">Cloud</span>
+                                </div>
+                                <div class="provider-desc">Requiere API Key.</div>
+                            </div>
+                            <div class="provider-option" onclick="switchProvider('groq')">
+                                <div class="provider-option-header">
+                                    <span class="provider-name">⚡ Groq</span>
+                                    <span class="privacy-tag cloud">Cloud</span>
+                                </div>
+                                <div class="provider-desc">Llama/Mistral ultrarrápido.</div>
+                            </div>
+                            <div class="provider-option" onclick="switchProvider('moonshot')">
+                                <div class="provider-option-header">
+                                    <span class="provider-name">🌙 Moonshot (Kimi)</span>
+                                    <span class="privacy-tag cloud">Cloud</span>
+                                </div>
+                                <div class="provider-desc">Contexto 256k tokens.</div>
+                            </div>
+                            <div class="provider-divider"></div>
+                            <div class="provider-option" onclick="switchProvider('llamacpp')">
+                                <div class="provider-option-header">
+                                    <span class="provider-name">⚙️ llama.cpp (Local)</span>
+                                    <span class="privacy-tag private">100% Privado</span>
+                                </div>
+                                <div class="provider-desc">GGUF directo. Inicia: ./server -m modelo.gguf --port 8080</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Botón Configurar API Key -->
+                    <button id="btnConfigApiKey" class="btn-icon" style="display: none;" onclick="(typeof showApiKeyModal==='function')?showApiKeyModal():null" title="Configurar API Key">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+                        </svg>
+                    </button>
+
+                    <span id="rtStatus" class="status-pill status-loading" title="Estado de Ollama">
+                        <span class="loading-pulse">●</span> Conectando...
+                    </span>
+                    <button type="button" class="theme-toggle" id="themeToggle" aria-label="Cambiar tema">
+                        <span id="themeIcon">🌙</span>
+                        <span id="themeLabel">Claro</span>
+                    </button>
+                    <button class="btn-icon" id="btnPull" type="button" aria-label="Abrir biblioteca de modelos" title="Descargar modelo">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="7 10 12 15 17 10"></polyline>
+                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                        </svg>
+                    </button>
+                    <button class="btn-icon" id="btnPullLocal" type="button" disabled title="Pull modelo local" aria-label="Pull modelo">Pull</button>
+                    <button class="btn-primary btn-sm" type="button" id="btnSaveChatDoc" disabled aria-label="Guardar chat">📄 Guardar</button>
+                    <button class="btn-icon" type="button" id="btnExportChat" disabled aria-label="Exportar chat" title="Exportar chat">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                            <line x1="16" y1="13" x2="8" y2="13"></line>
+                            <line x1="16" y1="17" x2="8" y2="17"></line>
+                        </svg>
+                    </button>
+                    <button class="btn-icon" type="button" id="btnContextToggle" aria-label="Contexto del proyecto" title="Contexto del proyecto">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 20h9"></path>
+                            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                        </svg>
+                    </button>
+                    <button class="btn-icon" type="button" id="btnLangToggle" aria-label="Language" title="Cambiar idioma / Change language" style="font-size:12px;font-weight:600;min-width:28px;">
+                        ES
+                    </button>
+                </div>
+
+                <!-- Cloud Warning (flotante) -->
+                <div id="cloudWarning" class="cloud-warning" style="display: none;">
+                    ⚠️ <strong>Cloud activo:</strong> Mensajes a servidores externos. 
+                    <a href="#" onclick="(typeof showPrivacyInfo==='function')?showPrivacyInfo():false;return false;">Más info</a>
+                </div>
+            </div>
+            
+            <div class="context-panel" id="contextPanel">
+                <div class="context-panel-header">
+                    <span>Contexto del proyecto</span>
+                    <button type="button" class="btn-icon" id="contextPanelClose" aria-label="Cerrar">×</button>
+                </div>
+                <div class="context-panel-body">
+                    <div class="context-section">
+                        <label class="context-label">Instrucciones del sistema</label>
+                        <textarea id="projectContextInput" class="context-textarea" placeholder="Define cómo debe comportarse la IA en este proyecto..." rows="4"></textarea>
+                        <button type="button" class="btn-primary btn-sm" id="btnSaveContext">Guardar instrucciones</button>
+                    </div>
+                    <div class="context-section">
+                        <label class="context-label">Base de conocimiento</label>
+                        <p class="context-hint">Archivos de texto para contexto permanente (RAG).</p>
+                        <div id="knowledgeList" class="knowledge-list"></div>
+                        <input type="file" id="knowledgeFileInput" multiple accept=".txt,.md,.json,.js,.py,.html,.css,.ts,.tsx,.jsx,.xml,.yaml,.yml,.toml,.ini,.cfg,.conf,.log,.sh,.bat,.ps1,.sql,.r,.rb,.php,.go,.rs,.c,.cpp,.h,.hpp,.java,.kt,.swift,.m,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.tsv,.rtf,.odt,.ods,.odp,.png,.jpg,.jpeg,.gif,.bmp,.webp" style="display:none;">
+                        <button type="button" class="btn-secondary btn-block" id="btnAddKnowledge">+ Añadir archivos</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="chat-area">
+                <div class="chat-search-bar" id="chatSearchBar" style="display:none;">
+                    <input type="text" id="chatSearchInput" class="chat-search-input" placeholder="Buscar en el chat…" autocomplete="off" />
+                    <span id="chatSearchCount" class="chat-search-count"></span>
+                    <button type="button" class="btn-icon chat-search-nav" id="chatSearchPrev" aria-label="Anterior" title="Anterior">&#9650;</button>
+                    <button type="button" class="btn-icon chat-search-nav" id="chatSearchNext" aria-label="Siguiente" title="Siguiente">&#9660;</button>
+                    <button type="button" class="btn-icon chat-search-close" id="chatSearchClose" aria-label="Cerrar">&#10005;</button>
+                </div>
+                <div class="messages-container" id="chat">
+                    <!-- Mensajes se cargarán aquí -->
+                </div>
+                
+                <div class="input-area">
+                    <div class="cloud-input-banner" id="cloudInputBanner">
+                        ⚠️ <strong>Cloud mode:</strong> This message will be sent to external servers. Do not share passwords or sensitive data.
+                    </div>
+                    <div class="attachment-preview" id="attachmentPreview" style="display: none;">
+                        <!-- Previsualizaciones de archivos adjuntos -->
+                    </div>
+                    
+                    <div id="replyPreview" class="reply-preview" style="display:none;">
+                        <div class="reply-preview-body">
+                            <div class="reply-preview-role" id="replyPreviewRole"></div>
+                            <div class="reply-preview-text" id="replyPreviewText"></div>
+                        </div>
+                        <button type="button" class="reply-preview-close" id="replyPreviewClose" aria-label="Cancelar respuesta">&#10005;</button>
+                    </div>
+                    <div class="input-box">
+                        <textarea
+                            class="input-textarea"
+                            id="input"
+                            placeholder="Escribe tu mensaje aquí..."
+                            rows="2"
+                            aria-label="Escribe tu mensaje"></textarea>
+                        
+                        <div class="input-actions">
+                            <div class="input-actions-left">
+                                <button class="btn-secondary" id="attachBtn" aria-label="Adjuntar archivo">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+                                    </svg>
+                                </button>
+                                <input type="file" id="fileInput" multiple accept=".txt,.md,.json,.js,.py,.html,.css,.ts,.tsx,.jsx,.xml,.yaml,.yml,.toml,.ini,.cfg,.conf,.log,.sh,.bat,.ps1,.sql,.r,.rb,.php,.go,.rs,.c,.cpp,.h,.hpp,.java,.kt,.swift,.m,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.tsv,.rtf,.odt,.ods,.odp,.png,.jpg,.jpeg,.gif,.bmp,.webp" style="display: none;">
+                            </div>
+                            
+                            <button class="btn-primary" id="btnSend" disabled aria-label="Enviar mensaje">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="22" y1="2" x2="11" y2="13"></line>
+                                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                                </svg>
+                                Enviar
+                            </button>
+                            <button class="btn-stop" id="btnStop" style="display:none;" aria-label="Detener generación">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                    <rect x="4" y="4" width="16" height="16" rx="2"></rect>
+                                </svg>
+                                Stop
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div style="text-align:center; font-size:11px; color:#555; margin-top:8px;">
+                        Ollama Local AI • Privado y Seguro • 100% en tu PC
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div id="toast-container"></div>
+    
+    <script>
+    (function() {
+        var STORAGE_KEY = 'theme';
+        function getPreferred() {
+            var stored = localStorage.getItem(STORAGE_KEY);
+            if (stored === 'light' || stored === 'dark') return stored;
+            return window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        }
+        function applyTheme(isLight) {
+            document.body.classList.toggle('light-theme', isLight);
+            var label = document.getElementById('themeLabel');
+            var icon = document.getElementById('themeIcon');
+            if (label) label.textContent = isLight ? 'Oscuro' : 'Claro';
+            if (icon) icon.textContent = isLight ? '☀️' : '🌙';
+            localStorage.setItem(STORAGE_KEY, isLight ? 'light' : 'dark');
+        }
+        document.addEventListener('DOMContentLoaded', function() {
+            var isLight = getPreferred() === 'light';
+            applyTheme(isLight);
+            var btn = document.getElementById('themeToggle');
+            if (btn) btn.addEventListener('click', function() {
+                isLight = document.body.classList.contains('light-theme');
+                applyTheme(!isLight);
+            });
+        });
+    })();
+    </script>
+    <!-- PDF.js para renderizar PDFs escaneados como imágenes -->
+    <script type="module">
+      import * as pdfjsLib from './vendor/pdf.min.mjs';
+      pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdf.worker.min.mjs';
+      window.pdfjsLib = pdfjsLib;
+      window.dispatchEvent(new Event('pdfjsReady'));
+    </script>
+    <script src="./i18n.js"></script>
+    <script src="./app.js"></script>
+
+    <!-- Modal API Key -->
+    <div id="apiKeyModal" class="modal" style="display: none;" onclick="if(event.target===this)closeApiKeyModal()">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Configurar API Key</h3>
+                <button onclick="closeApiKeyModal()" class="btn-icon">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="provider-tabs" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:16px;">
+                    <button class="tab-btn active" onclick="switchTab('openai')">OpenAI</button>
+                    <button class="tab-btn" onclick="switchTab('anthropic')">Anthropic</button>
+                    <button class="tab-btn" onclick="switchTab('groq')">Groq</button>
+                    <button class="tab-btn" onclick="switchTab('moonshot')">Moonshot</button>
+                </div>
+      
+                <div id="tab-openai" class="tab-content">
+                    <label>Ingresa tu OpenAI API Key:</label>
+                    <input type="password" id="openaiKeyInput" placeholder="sk-..." />
+                    <p class="hint">Se almacena cifrada localmente (AES-256-GCM).</p>
+                    <button class="btn-primary" onclick="saveApiKey('openai')">Guardar</button>
+                </div>
+      
+                <div id="tab-anthropic" class="tab-content" style="display: none;">
+                    <label>Ingresa tu Anthropic API Key:</label>
+                    <input type="password" id="anthropicKeyInput" placeholder="sk-ant-..." />
+                    <p class="hint">Se almacena cifrada localmente.</p>
+                    <button class="btn-primary" onclick="saveApiKey('anthropic')">Guardar</button>
+                </div>
+
+                <div id="tab-groq" class="tab-content" style="display: none;">
+                    <label>Ingresa tu Groq API Key:</label>
+                    <input type="password" id="groqKeyInput" placeholder="gsk_..." />
+                    <p class="hint">Obtén tu clave en console.groq.com</p>
+                    <button class="btn-primary" onclick="saveApiKey('groq')">Guardar</button>
+                </div>
+
+                <div id="tab-moonshot" class="tab-content" style="display: none;">
+                    <label>Ingresa tu Moonshot API Key:</label>
+                    <input type="password" id="moonshotKeyInput" placeholder="sk-..." />
+                    <p class="hint">Obtén tu clave en platform.moonshot.cn</p>
+                    <button class="btn-primary" onclick="saveApiKey('moonshot')">Guardar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Exportar Chat -->
+    <div id="exportModal" class="modal" style="display: none;" onclick="if(event.target===this)closeExportModal()">
+        <div class="modal-content" style="max-width:360px;">
+            <div class="modal-header">
+                <h3>Exportar chat</h3>
+                <button onclick="closeExportModal()" class="btn-icon">×</button>
+            </div>
+            <div class="modal-body" style="padding:12px 0;">
+                <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">Selecciona el formato de exportación:</p>
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                    <button class="btn-export-option" onclick="doExport(1)">📝 Markdown (.md)</button>
+                    <button class="btn-export-option" onclick="doExport(2)">📄 Texto (.txt)</button>
+                    <button class="btn-export-option" onclick="doExport(3)">🌐 HTML (.html)</button>
+                    <button class="btn-export-option" onclick="doExport(5)">📑 PDF (.pdf)</button>
+                    <button class="btn-export-option" onclick="doExport(4)">🐍 Python (.py)</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Generic Prompt Modal (replaces window.prompt) -->
+    <div id="mikaPromptModal" class="modal" style="display:none;" onclick="if(event.target===this)mikaPromptCancel()">
+        <div class="modal-content" style="max-width:400px;">
+            <div class="modal-header">
+                <h3 id="mikaPromptTitle">Ingresa un valor</h3>
+                <button class="btn-icon" onclick="mikaPromptCancel()">×</button>
+            </div>
+            <div class="modal-body" style="padding:12px 0;">
+                <p id="mikaPromptMessage" style="font-size:13px;color:var(--text-muted);margin-bottom:12px;"></p>
+                <input type="text" id="mikaPromptInput" style="width:100%;background:var(--bg-base);border:1px solid var(--border-subtle);color:var(--text-main);padding:10px;border-radius:8px;font-size:14px;" />
+                <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;">
+                    <button class="btn-icon" style="padding:8px 16px;" onclick="mikaPromptCancel()">Cancelar</button>
+                    <button class="btn-primary" onclick="mikaPromptOk()">Aceptar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Generic Confirm Modal (replaces window.confirm) -->
+    <div id="mikaConfirmModal" class="modal" style="display:none;" onclick="if(event.target===this)mikaConfirmCancel()">
+        <div class="modal-content" style="max-width:400px;">
+            <div class="modal-header">
+                <h3 id="mikaConfirmTitle">Confirmar</h3>
+                <button class="btn-icon" onclick="mikaConfirmCancel()">×</button>
+            </div>
+            <div class="modal-body" style="padding:12px 0;">
+                <p id="mikaConfirmMessage" style="font-size:14px;color:var(--text-muted);line-height:1.6;"></p>
+                <div style="display:flex;gap:8px;margin-top:20px;justify-content:flex-end;">
+                    <button class="btn-icon" style="padding:8px 16px;" onclick="mikaConfirmCancel()">Cancelar</button>
+                    <button class="btn-primary" style="background:#ef4444;" id="mikaConfirmOkBtn" onclick="mikaConfirmOk()">Aceptar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Generic Select Modal (replaces prompt for move chat) -->
+    <div id="mikaSelectModal" class="modal" style="display:none;" onclick="if(event.target===this)mikaSelectCancel()">
+        <div class="modal-content" style="max-width:400px;">
+            <div class="modal-header">
+                <h3 id="mikaSelectTitle">Seleccionar</h3>
+                <button class="btn-icon" onclick="mikaSelectCancel()">×</button>
+            </div>
+            <div class="modal-body" style="padding:12px 0;">
+                <div id="mikaSelectOptions" style="display:flex;flex-direction:column;gap:6px;"></div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

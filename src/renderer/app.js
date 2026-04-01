@@ -1,0 +1,4273 @@
+﻿let activeProjectId = null;
+let activeChatId = null;
+let isGenerating = false;
+let chatAttachments = [];
+let replyToMessage = null; // { role, content, msgId } for WhatsApp-style reply
+const chatDrafts = new Map(); // chatId -> { attachments: [], inputText: '', replyTo: null }
+// ============================================
+// Detectar si el modelo soporta visión
+// ============================================
+function modelSupportsVision(modelName) {
+  if (!modelName) return false;
+  // Check the select option's data-vision attribute (set from server probe)
+  const sel = el("modelSelect");
+  if (sel) {
+    const opt = Array.from(sel.options).find(o => o.value === modelName);
+    if (opt && opt.dataset.vision === '1') return true;
+  }
+  // Fallback: name-based detection for models not yet probed
+  const name = modelName.toLowerCase();
+  const patterns = [
+    'vision', 'vl', 'ocr', 'img', 'clip',
+    'llava', 'bakllava', 'moondream', 'cogvlm', 'pixtral',
+    'minicpm-v', 'gemma3', 'gemma-3',
+    'gpt-4o', 'gpt-4-vision', 'gpt-4-turbo',
+    'claude-3', 'claude-3.5', 'claude-4',
+    'gemini-1.5', 'gemini-2', 'gemini',
+    'kimi', 'glm',
+  ];
+  return patterns.some(p => name.includes(p));
+}
+
+(function addImageStyles() {
+  const style = document.createElement('style');
+  style.textContent = '.embedded-image{margin:12px 0;border-radius:8px;overflow:hidden;border:1px solid var(--border-subtle,#1b2a55);display:inline-block;max-width:100%}.embedded-image img{max-width:100%;max-height:400px;object-fit:contain;cursor:zoom-in;transition:transform .2s}.embedded-image img:hover{transform:scale(1.02)}.msg.user .embedded-image{border-color:var(--accent,#49C2F4)}.image-modal{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.9);display:flex;align-items:center;justify-content:center;cursor:zoom-out}.image-modal img{max-width:90vw;max-height:90vh;object-fit:contain;border-radius:8px}.embedded-image-preview{max-width:120px;max-height:120px;border-radius:6px;margin:4px;border:1px solid var(--border-subtle,#1b2a55);display:inline-block;object-fit:contain;background:var(--bg-card,#101a33);padding:2px;cursor:zoom-in;transition:transform .15s}.embedded-image-preview:hover{transform:scale(1.05);border-color:var(--accent,#49C2F4)}.msg.user .embedded-image-preview{border-color:var(--accent,#49C2F4)}';
+  document.head.appendChild(style);
+})();
+
+function openImageModal(src) {
+  const existing = document.getElementById('imageModal');
+  if (existing) { existing.remove(); return; }
+  const modal = document.createElement('div');
+  modal.id = 'imageModal';
+  modal.className = 'image-modal';
+  modal.onclick = () => modal.remove();
+  const img = document.createElement('img');
+  img.src = src;
+  modal.appendChild(img);
+  document.body.appendChild(modal);
+}
+
+// Event delegation: click on zoomable images opens modal
+document.addEventListener('click', (e) => {
+  const img = e.target.closest('img[data-zoomable]');
+  if (img) openImageModal(img.src);
+});
+
+// Sistema de gestión progresiva de contexto
+const CONTEXT_MANAGEMENT = {
+  SOFT_LIMIT: 25,        // Mensajes antes de alerta
+  HARD_LIMIT: 40,        // Máximo mensajes permitidos
+  AUTO_SAVE_TRIGGER: 30, // Sugerir guardar
+  PRESERVE_RATIO: 0.3    // 30% iniciales + 70% recientes
+};
+// Track which chats have already been warned/prompted to avoid repetition
+const _contextWarningShown = new Set(); // chatId -> soft warning already shown
+const _contextSavePrompted = new Set(); // chatId -> save dialog already shown
+
+let conversationHistory = []; // Historial completo
+
+// ============================================
+// Anti-freeze navigation state
+// ============================================
+let isSwitchingView = false;
+let abortController = null;
+let pendingTimeouts = [];
+let pendingRafs = [];
+
+function cancelPendingOperations() {
+  if (abortController) {
+    abortController.abort();
+    abortController = null;
+  }
+  pendingTimeouts.forEach(clearTimeout);
+  pendingRafs.forEach(cancelAnimationFrame);
+  pendingTimeouts = [];
+  pendingRafs = [];
+}
+
+
+function withTimeout(promise, ms, label, signal) {
+  let t;
+  const timeout = new Promise((_, reject) => {
+    t = setTimeout(() => {
+      const err = new Error(`Timeout: ${label || 'operación'} (${ms}ms)`);
+      err.code = 'TIMEOUT';
+      reject(err);
+    }, ms);
+  });
+
+  const aborted = new Promise((_, reject) => {
+    if (!signal) return;
+    if (signal.aborted) return reject(new DOMException('Aborted', 'AbortError'));
+    signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+  });
+
+  return Promise.race([promise, timeout, aborted]).finally(() => clearTimeout(t));
+}
+
+async function safeViewChange(operation) {
+  if (isSwitchingView) {
+    console.warn('[safeViewChange] Already switching, skipped');
+    return;
+  }
+  isSwitchingView = true;
+
+  // limpia estado visual + cancela operaciones pendientes
+  resetViewState();
+
+  // nuevo controller para esta navegación
+  const controller = new AbortController();
+  abortController = controller;
+
+  try {
+    setUiBusy(true);
+    return await operation(controller.signal);
+  } catch (err) {
+    if (err?.name !== 'AbortError') {
+      console.error('error durante safeViewChange', err);
+      showToast('Error inesperado', 'error');
+    }
+    // Don't re-throw — callers should not crash if a view change fails
+  } finally {
+    if (abortController === controller) abortController = null;
+    setUiBusy(false);
+    isSwitchingView = false;
+  }
+}
+
+// AI provider state
+let currentProvider = 'local';
+let providerPrivacy = 'private'; // 'private' | 'cloud'
+
+function formatBytesRenderer(bytes) {
+  if (!bytes) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+const el = (id) => document.getElementById(id);
+
+let _uiBusyTimer = null;
+function setUiBusy(busy) {
+  document.body.classList.toggle('ui-busy', !!busy);
+
+  const ids = ['projectList', 'chatList'];
+  for (const id of ids) {
+    const node = el(id);
+    if (node) node.style.pointerEvents = busy ? 'none' : '';
+  }
+
+  // Safety: auto-unlock after 10s to prevent permanent freeze
+  if (_uiBusyTimer) { clearTimeout(_uiBusyTimer); _uiBusyTimer = null; }
+  if (busy) {
+    _uiBusyTimer = setTimeout(() => {
+      console.warn('[setUiBusy] Auto-unlock after 10s timeout');
+      setUiBusy(false);
+      isSwitchingView = false;
+    }, 10000);
+  }
+}
+
+function resetViewState() {
+  // Cancela cualquier trabajo pendiente / in-flight
+  cancelPendingOperations();
+
+  // Save draft before clearing attachments
+  if (activeChatId) {
+    const inputEl = el("input");
+    const inputText = inputEl ? inputEl.value : '';
+    if (chatAttachments.length > 0 || inputText.trim() || replyToMessage) {
+      chatDrafts.set(activeChatId, {
+        attachments: [...chatAttachments],
+        inputText,
+        replyTo: replyToMessage ? { ...replyToMessage } : null
+      });
+    }
+  }
+
+  // Limpia adjuntos del chat actual
+  chatAttachments = [];
+
+  // Cierra pickers flotantes si existen
+  try {
+    document.querySelectorAll('.project-style-picker').forEach((p) => p.remove());
+  } catch (_) {}
+
+  // Resetea scroll del chat para evitar "saltos" al cambiar vista
+  const chatEl = el('chat');
+  if (chatEl) chatEl.scrollTop = 0;
+}
+
+// ============================================
+// Modal replacements for prompt/confirm
+// (Electron blocks window.prompt and confirm)
+// ============================================
+let _mikaPromptResolve = null;
+let _mikaConfirmResolve = null;
+let _mikaSelectResolve = null;
+
+function mikaPrompt(title, message, defaultValue) {
+  return new Promise((resolve) => {
+    _mikaPromptResolve = resolve;
+    const modal = el('mikaPromptModal');
+    const titleEl = el('mikaPromptTitle');
+    const msgEl = el('mikaPromptMessage');
+    const input = el('mikaPromptInput');
+    if (titleEl) titleEl.textContent = title || 'Ingresa un valor';
+    if (msgEl) msgEl.textContent = message || '';
+    if (input) { input.value = defaultValue || ''; }
+    if (modal) modal.style.display = 'flex';
+    if (input) setTimeout(() => { input.focus(); input.select(); }, 50);
+  });
+}
+function mikaPromptOk() {
+  const input = el('mikaPromptInput');
+  const val = input ? input.value : '';
+  el('mikaPromptModal').style.display = 'none';
+  if (_mikaPromptResolve) { _mikaPromptResolve(val); _mikaPromptResolve = null; }
+}
+function mikaPromptCancel() {
+  el('mikaPromptModal').style.display = 'none';
+  if (_mikaPromptResolve) { _mikaPromptResolve(null); _mikaPromptResolve = null; }
+}
+
+function mikaConfirm(title, message, okLabel) {
+  return new Promise((resolve) => {
+    _mikaConfirmResolve = resolve;
+    const modal = el('mikaConfirmModal');
+    const titleEl = el('mikaConfirmTitle');
+    const msgEl = el('mikaConfirmMessage');
+    const okBtn = el('mikaConfirmOkBtn');
+    if (titleEl) titleEl.textContent = title || 'Confirmar';
+    if (msgEl) msgEl.textContent = message || '¿Estás seguro?';
+    if (okBtn) okBtn.textContent = okLabel || t('action.accept') || 'Aceptar';
+    if (modal) modal.style.display = 'flex';
+  });
+}
+function mikaConfirmOk() {
+  el('mikaConfirmModal').style.display = 'none';
+  if (_mikaConfirmResolve) { _mikaConfirmResolve(true); _mikaConfirmResolve = null; }
+}
+function mikaConfirmCancel() {
+  el('mikaConfirmModal').style.display = 'none';
+  if (_mikaConfirmResolve) { _mikaConfirmResolve(false); _mikaConfirmResolve = null; }
+}
+
+function mikaSelect(title, options) {
+  // options: [{label, value, icon?, color?}]
+  return new Promise((resolve) => {
+    _mikaSelectResolve = resolve;
+
+    // Always create a fresh modal to avoid stale DOM issues
+    const existing = document.getElementById('mikaSelectModal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'mikaSelectModal';
+    modal.className = 'modal';
+    modal.style.cssText = 'display:flex;position:fixed;inset:0;z-index:9000;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);';
+
+    const box = document.createElement('div');
+    box.className = 'modal-content';
+    box.style.cssText = 'background:var(--bg-sidebar,#0f1629);border:1px solid var(--border-subtle,#1b2a55);border-radius:14px;padding:0;min-width:320px;max-width:420px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.5);animation:modalFadeIn 0.15s ease-out;overflow:hidden;';
+
+    // Header
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border-subtle,#1b2a55);';
+    const titleEl = document.createElement('h3');
+    titleEl.style.cssText = 'margin:0;font-size:15px;font-weight:600;color:var(--text-main,#eef3ff);';
+    titleEl.textContent = title || 'Seleccionar';
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.style.cssText = 'background:transparent;border:none;color:var(--text-muted,#a9b4d0);font-size:18px;cursor:pointer;padding:4px 8px;border-radius:6px;line-height:1;';
+    closeBtn.textContent = '×';
+    closeBtn.onclick = () => { modal.remove(); if (_mikaSelectResolve) { _mikaSelectResolve(null); _mikaSelectResolve = null; } };
+    header.appendChild(titleEl);
+    header.appendChild(closeBtn);
+
+    // Options container
+    const container = document.createElement('div');
+    container.style.cssText = 'padding:8px;max-height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;';
+
+    if (!options || options.length === 0) {
+      const empty = document.createElement('div');
+      empty.style.cssText = 'padding:20px;text-align:center;color:var(--text-muted,#a9b4d0);font-size:13px;';
+      empty.textContent = 'No hay opciones disponibles';
+      container.appendChild(empty);
+    } else {
+      options.forEach(opt => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.style.cssText = 'display:flex;align-items:center;gap:10px;width:100%;background:var(--bg-base,#070b16);border:1px solid var(--border-subtle,#1b2a55);color:var(--text-main,#eef3ff);padding:12px 14px;border-radius:8px;cursor:pointer;font-size:14px;text-align:left;transition:all 0.15s;';
+
+        // Icon/color indicator
+        if (opt.icon || opt.color) {
+          const iconSpan = document.createElement('span');
+          const color = opt.color || '#3b82f6';
+          iconSpan.style.cssText = `width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;background:${color}20;border:1px solid ${color}40;color:${color};`;
+          iconSpan.textContent = opt.icon || '📁';
+          btn.appendChild(iconSpan);
+        }
+
+        const labelSpan = document.createElement('span');
+        labelSpan.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        labelSpan.textContent = opt.label;
+        btn.appendChild(labelSpan);
+
+        btn.onmouseenter = () => { btn.style.background = 'var(--bg-hover,#152044)'; btn.style.borderColor = 'var(--accent,#2d8cff)'; };
+        btn.onmouseleave = () => { btn.style.background = 'var(--bg-base,#070b16)'; btn.style.borderColor = 'var(--border-subtle,#1b2a55)'; };
+        btn.onclick = () => {
+          modal.remove();
+          if (_mikaSelectResolve) { _mikaSelectResolve(opt.value); _mikaSelectResolve = null; }
+        };
+        container.appendChild(btn);
+      });
+    }
+
+    // Cancel button
+    const footer = document.createElement('div');
+    footer.style.cssText = 'padding:8px 8px 12px;border-top:1px solid var(--border-subtle,#1b2a55);';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.style.cssText = 'width:100%;background:transparent;border:1px solid var(--border-subtle,#1b2a55);color:var(--text-muted,#a9b4d0);padding:10px;border-radius:8px;cursor:pointer;font-size:13px;transition:all 0.15s;';
+    cancelBtn.textContent = 'Cancelar';
+    cancelBtn.onmouseenter = () => { cancelBtn.style.color = 'var(--text-main,#eef3ff)'; cancelBtn.style.borderColor = 'var(--text-muted,#a9b4d0)'; };
+    cancelBtn.onmouseleave = () => { cancelBtn.style.color = 'var(--text-muted,#a9b4d0)'; cancelBtn.style.borderColor = 'var(--border-subtle,#1b2a55)'; };
+    cancelBtn.onclick = () => { modal.remove(); if (_mikaSelectResolve) { _mikaSelectResolve(null); _mikaSelectResolve = null; } };
+    footer.appendChild(cancelBtn);
+
+    box.appendChild(header);
+    box.appendChild(container);
+    box.appendChild(footer);
+    modal.appendChild(box);
+
+    // Click backdrop to cancel
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) { modal.remove(); if (_mikaSelectResolve) { _mikaSelectResolve(null); _mikaSelectResolve = null; } }
+    });
+
+    document.body.appendChild(modal);
+  });
+}
+function mikaSelectCancel() {
+  const modal = document.getElementById('mikaSelectModal');
+  if (modal) modal.remove();
+  if (_mikaSelectResolve) { _mikaSelectResolve(null); _mikaSelectResolve = null; }
+}
+
+// Handle Enter key in prompt modal
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && el('mikaPromptModal')?.style.display === 'flex') {
+    e.preventDefault();
+    mikaPromptOk();
+  }
+  if (e.key === 'Escape') {
+    if (el('mikaPromptModal')?.style.display === 'flex') mikaPromptCancel();
+    if (el('mikaConfirmModal')?.style.display === 'flex') mikaConfirmCancel();
+    if (el('mikaSelectModal')) mikaSelectCancel();
+    if (el('exportModal')?.style.display === 'flex') closeExportModal();
+    if (el('apiKeyModal')?.style.display === 'flex') closeApiKeyModal();
+    if (el('privacyInfoModal')?.style.display === 'flex') el('privacyInfoModal').style.display = 'none';
+  }
+});
+
+function setBtnPullText(text) {
+  const label = el("btnPullLabel");
+  if (label) label.textContent = text;
+  else if (el("btnPull")) el("btnPull").textContent = text;
+}
+
+function syncModelDropdown() {
+  const select = el("modelSelect");
+  const optionsContainer = el("modelOptions");
+  const currentSpan = el("currentModel");
+  const trigger = el("modelTrigger");
+  if (!select || !optionsContainer || !currentSpan) return;
+  const selectedVal = select.value;
+  const options = Array.from(select.options);
+  optionsContainer.innerHTML = "";
+  options.forEach(opt => {
+    const div = document.createElement("div");
+    const source = opt.dataset.source || 'local';
+    div.className = "model-option " + (source === 'local' ? 'local-model' : 'cloud-model') + (opt.value === selectedVal ? " selected" : "");
+    div.dataset.value = opt.value;
+
+    const info = document.createElement('div');
+    info.className = 'model-info';
+    const name = document.createElement('span');
+    name.className = 'model-name';
+    name.textContent = opt.textContent;
+    const meta = document.createElement('span');
+    meta.className = 'model-meta';
+
+    if (source === 'local') {
+      const badge = document.createElement('span'); badge.className = 'badge local'; badge.textContent = '🔒 Local';
+      const size = document.createElement('span'); size.className = 'size'; size.textContent = opt.dataset.sizeFormatted || '';
+      const caps = document.createElement('span'); caps.className = 'caps'; caps.textContent = opt.dataset.caps || '';
+      meta.appendChild(badge); meta.appendChild(size); meta.appendChild(caps);
+    } else {
+      const badge = document.createElement('span'); badge.className = 'badge cloud'; badge.textContent = '☁️ Cloud';
+      const speed = document.createElement('span'); speed.className = 'speed'; speed.textContent = opt.dataset.speed || 'Disponible';
+      meta.appendChild(badge); meta.appendChild(speed);
+    }
+
+    info.appendChild(name); info.appendChild(meta);
+
+    const status = document.createElement('span');
+    status.className = 'status-indicator';
+    if (source === 'local') {
+      if (opt.dataset.size && Number(opt.dataset.size) > 0) {
+        status.classList.add('downloaded');
+        status.textContent = '✓ Descargado';
+      } else {
+        status.textContent = 'No descargado';
+      }
+    } else {
+      status.textContent = opt.dataset.speed ? opt.dataset.speed : 'Disponible';
+    }
+
+    div.appendChild(info);
+    div.appendChild(status);
+
+    div.onclick = (e) => {
+      e.stopPropagation();
+      select.value = opt.value;
+      currentSpan.textContent = opt.textContent;
+      optionsContainer.classList.remove("open");
+      if (trigger) trigger.setAttribute("aria-expanded", "false");
+      optionsContainer.querySelectorAll(".model-option").forEach(o => o.classList.toggle("selected", o.dataset.value === opt.value));
+      // Persist selected model
+      if (opt.value) {
+        window.mika5.setAppState("lastModel", opt.value).catch(() => {});
+      }
+    };
+    optionsContainer.appendChild(div);
+  });
+  const selectedOpt = options.find(o => o.value === selectedVal);
+  currentSpan.textContent = selectedOpt ? selectedOpt.textContent : (options[0] && options[0].value === "" ? options[0].textContent : "Selecciona modelo");
+  if (select.disabled) currentSpan.textContent = "Ollama offline";
+}
+
+// === Storage Adapter (Fase 1) ===
+const Store = {
+  async listProjects() {
+    return await window.mika5.db.listProjects();
+  },
+  async createProject(name) {
+    return await window.mika5.db.createProject({ name, description: "" });
+  },
+  async updateProject(id, payload) {
+    return await window.mika5.db.updateProject(id, payload);
+  },
+  async deleteProject(id) {
+    return await window.mika5.db.deleteProject(id);
+  },
+  async listChats(projectId) {
+    return await window.mika5.db.listChats(projectId);
+  },
+  async createChat(projectId, title) {
+    return await window.mika5.db.createChat({ projectId, title });
+  },
+  async updateChat(chatId, payload) {
+    return await window.mika5.db.updateChat(chatId, payload);
+  },
+  async listMessages(chatId, opts) {
+    return await window.mika5.db.listMessages(chatId, opts);
+  },
+  async countMessages(chatId) {
+    return await window.mika5.db.countMessages(chatId);
+  },
+  async addMessage(chatId, role, content, replyToId, model) {
+    return await window.mika5.db.addMessage({ chatId, role, content, replyToId: replyToId || null, model: model || null });
+  },
+  async clearChat(chatId) {
+    return await window.mika5.db.clearChat(chatId);
+  },
+  async deleteChat(chatId) {
+    return await window.mika5.db.deleteChat(chatId);
+  }
+};
+
+// -------------------------------
+// guarda un documento en Knowledge
+// -------------------------------
+async function saveDocument({ projectId, title, content, mimeType = "text/markdown", chatId }) {
+  if (!projectId) {
+    console.warn("saveDocument: projectId requerido");
+    return { ok: false, error: "NO_PROJECT" };
+  }
+  const payload = {
+    projectId,
+    title: title || "Documento",
+    content: content || "",
+    mimeType
+  };
+  if (chatId) payload.chatId = chatId;
+  const resp = await window.mika5.db.addKnowledgeFromText(payload);
+  return resp;
+}
+
+// ----------------------------------------------
+// adjuntos: lectura y previsualización
+// ----------------------------------------------
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(file, "UTF-8");
+  });
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      // result is "data:image/png;base64,xxxx" — extract just the base64 part
+      const b64 = reader.result.split(',')[1] || reader.result;
+      resolve(b64);
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function isImageFile(file) {
+  if (file.type && file.type.startsWith('image/')) return true;
+  return /\.(png|jpg|jpeg|gif|bmp|webp)$/i.test(file.name);
+}
+
+// ----------------------------------------------
+// Document extraction: DOCX, XLSX, PPTX, PDF, CSV, etc.
+// These are Office Open XML formats (ZIP containing XML)
+// ----------------------------------------------
+const DOCUMENT_EXTS = /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|csv|tsv|rtf|odt|ods|odp|html|htm)$/i;
+const OOXML_EXTS = /\.(docx|xlsx|pptx|odt|ods|odp)$/i;
+const LEGACY_BINARY_EXTS = /\.(doc|xls|ppt)$/i;
+const TRUE_BINARY_EXTS = /\.(zip|rar|7z|tar|gz|exe|dll|so|bin|mp3|mp4|avi|mov|mkv|woff|woff2|ttf|eot|ico|db|sqlite)$/i;
+
+function isDocumentFile(file) {
+  return DOCUMENT_EXTS.test(file.name);
+}
+
+function readFileAsArrayBuffer(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+/**
+ * Extract text from a ZIP-based Office file (docx, xlsx, pptx)
+ * Uses the built-in DecompressionStream API or manual ZIP parsing
+ */
+async function docFileToBase64(file) {
+  const buffer = await readFileAsArrayBuffer(file);
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 8192;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+async function extractTextFromDocument(file) {
+  const ext = (file.name.match(/\.(\w+)$/i) || [])[1]?.toLowerCase();
+
+  // CSV/TSV — just read as text
+  if (ext === 'csv' || ext === 'tsv') {
+    return await readFileAsText(file);
+  }
+
+  // RTF — strip RTF commands, return plain text
+  if (ext === 'rtf') {
+    const raw = await readFileAsText(file);
+    return extractTextFromRTF(raw);
+  }
+
+  // PDF — robust server-side extraction, vision OCR for scanned, fallback to manual parser
+  if (ext === 'pdf') {
+    // Leer una sola vez como ArrayBuffer y derivar base64 si es necesario
+    const buffer = await readFileAsArrayBuffer(file);
+
+    const tryOCR = async () => {
+      const model = el("modelSelect")?.value;
+      console.log('[PDF OCR] intentando con modelo:', model);
+      const ocrText = await extractTextFromScannedPDF(buffer, model);
+      if (ocrText && ocrText.trim()) return ocrText;
+      throw new Error('PDF_NO_TEXT');
+    };
+
+    if (window.mika5?.extractPDF) {
+      try {
+        const bytes = new Uint8Array(buffer);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += 8192) {
+          binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+        }
+        const base64 = btoa(binary);
+        const result = await window.mika5.extractPDF(base64);
+        console.log('[PDF] extractPDF result:', result?.ok, result?.error, 'chars:', result?.text?.length);
+        if (result?.ok && result.text && result.text.length > 30) return result.text;
+        // PDF sin texto o con texto mínimo (escaneado) — intentar OCR
+        try {
+          return await tryOCR();
+        } catch (ocrErr) {
+          if (ocrErr.message === 'PDF_SCANNED_NO_VISION' || ocrErr.message === 'PDF_LIB_UNAVAILABLE') throw ocrErr;
+          throw new Error('PDF_NO_TEXT');
+        }
+      } catch (e) {
+        console.log('[PDF] extractPDF catch:', e.message);
+        if (e.message === 'PDF_NO_TEXT' || e.message === 'PDF_SCANNED_NO_VISION' || e.message === 'PDF_LIB_UNAVAILABLE') throw e;
+        // pdf-parse lanzó excepción — intentar OCR antes de rendirse
+        try {
+          return await tryOCR();
+        } catch (ocrErr) {
+          if (ocrErr.message === 'PDF_SCANNED_NO_VISION' || ocrErr.message === 'PDF_LIB_UNAVAILABLE') throw ocrErr;
+        }
+      }
+    }
+    const manualText = await extractTextFromPDF(buffer);
+    console.log('[PDF] manual parser chars:', manualText?.length);
+    if (!manualText || manualText.length <= 30) {
+      try { return await tryOCR(); } catch (ocrErr) {
+        if (ocrErr.message === 'PDF_SCANNED_NO_VISION' || ocrErr.message === 'PDF_LIB_UNAVAILABLE') throw ocrErr;
+        throw new Error('PDF_NO_TEXT');
+      }
+    }
+    return manualText;
+  }
+
+  // Word (.doc, .docx) — server-side extraction via mammoth
+  if (ext === 'doc' || ext === 'docx') {
+    if (window.mika5?.extractWord) {
+      try {
+        const base64 = await docFileToBase64(file);
+        const result = await window.mika5.extractWord(base64);
+        if (result?.ok && result.text) return result.text;
+      } catch (_) {}
+    }
+    // Fallback for .docx only: regex-based XML extraction
+    if (ext === 'docx') {
+      const buffer = await readFileAsArrayBuffer(file);
+      const entries = await unzipEntries(buffer);
+      return extractTextFromDOCX(entries);
+    }
+    throw new Error('LEGACY_FORMAT');
+  }
+
+  // Excel (.xls, .xlsx) — server-side extraction via SheetJS
+  if (ext === 'xls' || ext === 'xlsx') {
+    if (window.mika5?.extractSpreadsheet) {
+      try {
+        const base64 = await docFileToBase64(file);
+        const result = await window.mika5.extractSpreadsheet(base64);
+        if (result?.ok && result.text) return result.text;
+      } catch (_) {}
+    }
+    // Fallback for .xlsx only: regex-based XML extraction
+    if (ext === 'xlsx') {
+      const buffer = await readFileAsArrayBuffer(file);
+      const entries = await unzipEntries(buffer);
+      return extractTextFromXLSX(entries);
+    }
+    throw new Error('LEGACY_FORMAT');
+  }
+
+  // PowerPoint (.ppt, .pptx)
+  if (ext === 'pptx') {
+    const buffer = await readFileAsArrayBuffer(file);
+    const entries = await unzipEntries(buffer);
+    return extractTextFromPPTX(entries);
+  }
+  if (ext === 'ppt') {
+    throw new Error('LEGACY_FORMAT');
+  }
+
+  // ODF formats (odt, ods, odp)
+  if (OOXML_EXTS.test(file.name)) {
+    const buffer = await readFileAsArrayBuffer(file);
+    const entries = await unzipEntries(buffer);
+    if (ext === 'odt' || ext === 'ods' || ext === 'odp') return extractTextFromODF(entries);
+  }
+  // HTML — read as text
+  if (ext === 'html' || ext === 'htm') {
+    return await readFileAsText(file);
+  }
+
+  throw new Error('UNSUPPORTED_FORMAT');
+}
+
+/**
+ * Minimal ZIP parser — extracts file entries from a ZIP ArrayBuffer
+ * Supports DEFLATE and STORE compression (covers 99% of Office files)
+ */
+async function unzipEntries(buffer) {
+  const view = new DataView(buffer);
+  const bytes = new Uint8Array(buffer);
+  const entries = {};
+
+  // Find End of Central Directory record (scan from end)
+  let eocdOffset = -1;
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i--) {
+    if (view.getUint32(i, true) === 0x06054b50) {
+      eocdOffset = i;
+      break;
+    }
+  }
+  if (eocdOffset === -1) throw new Error('Not a valid ZIP file');
+
+  const cdOffset = view.getUint32(eocdOffset + 16, true);
+  const cdEntries = view.getUint16(eocdOffset + 10, true);
+
+  let pos = cdOffset;
+  for (let i = 0; i < cdEntries; i++) {
+    if (pos + 46 > bytes.length) break;
+    if (view.getUint32(pos, true) !== 0x02014b50) break;
+
+    const compression = view.getUint16(pos + 10, true);
+    const compressedSize = view.getUint32(pos + 20, true);
+    const uncompressedSize = view.getUint32(pos + 24, true);
+    const nameLen = view.getUint16(pos + 28, true);
+    const extraLen = view.getUint16(pos + 30, true);
+    const commentLen = view.getUint16(pos + 32, true);
+    const localHeaderOffset = view.getUint32(pos + 42, true);
+
+    const nameBytes = bytes.slice(pos + 46, pos + 46 + nameLen);
+    const fileName = new TextDecoder().decode(nameBytes);
+
+    // Read data from local file header
+    if (localHeaderOffset + 30 <= bytes.length) {
+      const localNameLen = view.getUint16(localHeaderOffset + 26, true);
+      const localExtraLen = view.getUint16(localHeaderOffset + 28, true);
+      const dataStart = localHeaderOffset + 30 + localNameLen + localExtraLen;
+      const rawData = bytes.slice(dataStart, dataStart + compressedSize);
+
+      if (compression === 0) {
+        // STORE — no compression
+        entries[fileName] = rawData;
+      } else if (compression === 8) {
+        // DEFLATE — use DecompressionStream if available, else raw inflate
+        try {
+          entries[fileName] = await inflateData(rawData);
+        } catch (e) {
+          // Skip entries that fail to decompress
+          console.warn(`Failed to decompress: ${fileName}`, e.message);
+        }
+      }
+    }
+
+    pos += 46 + nameLen + extraLen + commentLen;
+  }
+
+  return entries;
+}
+
+/**
+ * Inflate DEFLATE-compressed data using DecompressionStream API
+ */
+async function inflateData(compressedBytes) {
+  if (typeof DecompressionStream === 'undefined') {
+    if (typeof pako !== 'undefined') return pako.inflateRaw(compressedBytes);
+    throw new Error('No decompression available');
+  }
+
+  // Try deflate-raw first, then deflate (zlib), then gzip
+  const formats = ['deflate-raw', 'deflate', 'gzip'];
+  for (const fmt of formats) {
+    try {
+      const ds = new DecompressionStream(fmt);
+      const writer = ds.writable.getWriter();
+      const reader = ds.readable.getReader();
+
+      // Write and close in background, catch errors
+      const writePromise = writer.write(compressedBytes).then(() => writer.close()).catch(() => {});
+
+      const chunks = [];
+      let done = false;
+      while (!done) {
+        const result = await reader.read();
+        if (result.value) chunks.push(result.value);
+        done = result.done;
+      }
+      await writePromise;
+
+      const total = chunks.reduce((s, c) => s + c.length, 0);
+      if (total === 0) continue; // empty result, try next format
+      const out = new Uint8Array(total);
+      let offset = 0;
+      for (const chunk of chunks) { out.set(chunk, offset); offset += chunk.length; }
+      return out;
+    } catch (_) {
+      continue; // try next format
+    }
+  }
+
+  // All formats failed — try pako as last resort
+  if (typeof pako !== 'undefined') return pako.inflateRaw(compressedBytes);
+  throw new Error('Decompression failed for all formats');
+}
+
+/**
+ * Extract text from DOCX (word/document.xml)
+ */
+function extractTextFromDOCX(entries) {
+  const docXml = entries['word/document.xml'];
+  if (!docXml) throw new Error('No document.xml found in DOCX');
+
+  const xmlStr = new TextDecoder().decode(docXml);
+  const paragraphs = [];
+
+  // Parse <w:p> paragraphs containing <w:t> text nodes
+  const pRegex = /<w:p[\s>][^]*?<\/w:p>/g;
+  const tRegex = /<w:t[^>]*>([^<]*)<\/w:t>/g;
+  let pMatch;
+
+  while ((pMatch = pRegex.exec(xmlStr)) !== null) {
+    const pXml = pMatch[0];
+    let paraText = '';
+    let tMatch;
+    tRegex.lastIndex = 0;
+    while ((tMatch = tRegex.exec(pXml)) !== null) {
+      paraText += tMatch[1];
+    }
+    // Also check for tabs and breaks
+    if (/<w:tab\s*\/?>/.test(pXml)) paraText = paraText.replace(/\t/g, '\t') || paraText;
+    if (paraText || /<w:br\s*\/?>/.test(pXml)) {
+      paragraphs.push(paraText);
+    }
+  }
+
+  // Also try to extract from headers/footers
+  for (const [name, data] of Object.entries(entries)) {
+    if (/^word\/(header|footer)\d*\.xml$/.test(name)) {
+      const hfXml = new TextDecoder().decode(data);
+      let hfText = '';
+      tRegex.lastIndex = 0;
+      let m;
+      while ((m = tRegex.exec(hfXml)) !== null) {
+        hfText += m[1];
+      }
+      if (hfText.trim()) paragraphs.unshift(`[${name.includes('header') ? 'Encabezado' : 'Pie'}] ${hfText.trim()}`);
+    }
+  }
+
+  const text = paragraphs.join('\n');
+  if (!text.trim()) throw new Error('No text content found in DOCX');
+  return text;
+}
+
+/**
+ * Extract text from XLSX (xl/sharedStrings.xml + xl/worksheets/sheet*.xml)
+ */
+function extractTextFromXLSX(entries) {
+  // 1. Parse shared strings
+  const sharedStrings = [];
+  const ssXml = entries['xl/sharedStrings.xml'];
+  if (ssXml) {
+    const ssStr = new TextDecoder().decode(ssXml);
+    const siRegex = /<si[^>]*>([\s\S]*?)<\/si>/g;
+    const tInnerRegex = /<t[^>]*>([^<]*)<\/t>/g;
+    let siMatch;
+    while ((siMatch = siRegex.exec(ssStr)) !== null) {
+      let cellText = '';
+      let tMatch;
+      tInnerRegex.lastIndex = 0;
+      while ((tMatch = tInnerRegex.exec(siMatch[1])) !== null) {
+        cellText += tMatch[1];
+      }
+      sharedStrings.push(cellText);
+    }
+  }
+
+  // 2. Parse each worksheet
+  const sheets = [];
+  const sheetNames = Object.keys(entries)
+    .filter(n => /^xl\/worksheets\/sheet\d+\.xml$/.test(n))
+    .sort();
+
+  for (const sheetName of sheetNames) {
+    const sheetData = entries[sheetName];
+    if (!sheetData) continue;
+    const sheetStr = new TextDecoder().decode(sheetData);
+    const rows = [];
+
+    const rowRegex = /<row[^>]*>([\s\S]*?)<\/row>/g;
+    const cellRegex = /<c\s+[^>]*?(?:t="([^"]*)")?[^>]*>[\s\S]*?(?:<v>([^<]*)<\/v>)?[\s\S]*?<\/c>/g;
+    let rowMatch;
+
+    while ((rowMatch = rowRegex.exec(sheetStr)) !== null) {
+      const cells = [];
+      let cellMatch;
+      cellRegex.lastIndex = 0;
+      while ((cellMatch = cellRegex.exec(rowMatch[1])) !== null) {
+        const type = cellMatch[1]; // 's' = shared string, 'b' = boolean, else number
+        const rawValue = cellMatch[2] || '';
+        if (type === 's' && sharedStrings[parseInt(rawValue, 10)] !== undefined) {
+          cells.push(sharedStrings[parseInt(rawValue, 10)]);
+        } else {
+          cells.push(rawValue);
+        }
+      }
+      if (cells.some(c => c.trim())) {
+        rows.push(cells.join('\t'));
+      }
+    }
+
+    const sheetNum = sheetName.match(/sheet(\d+)/)?.[1] || '?';
+    if (rows.length > 0) {
+      sheets.push(`--- Hoja ${sheetNum} ---\n${rows.join('\n')}`);
+    }
+  }
+
+  const text = sheets.join('\n\n');
+  if (!text.trim()) throw new Error('No text content found in XLSX');
+  return text;
+}
+
+/**
+ * Extract text from PPTX (ppt/slides/slide*.xml)
+ */
+function extractTextFromPPTX(entries) {
+  const slides = [];
+  const slideNames = Object.keys(entries)
+    .filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n))
+    .sort((a, b) => {
+      const na = parseInt(a.match(/slide(\d+)/)?.[1] || '0');
+      const nb = parseInt(b.match(/slide(\d+)/)?.[1] || '0');
+      return na - nb;
+    });
+
+  const aTextRegex = /<a:t>([^<]*)<\/a:t>/g;
+
+  for (const slideName of slideNames) {
+    const slideData = entries[slideName];
+    if (!slideData) continue;
+    const slideStr = new TextDecoder().decode(slideData);
+    const texts = [];
+    let m;
+    aTextRegex.lastIndex = 0;
+    while ((m = aTextRegex.exec(slideStr)) !== null) {
+      if (m[1].trim()) texts.push(m[1]);
+    }
+    const slideNum = slideName.match(/slide(\d+)/)?.[1] || '?';
+    if (texts.length > 0) {
+      slides.push(`--- Diapositiva ${slideNum} ---\n${texts.join('\n')}`);
+    }
+  }
+
+  const text = slides.join('\n\n');
+  if (!text.trim()) throw new Error('No text content found in PPTX');
+  return text;
+}
+
+/**
+ * Extract text from ODF formats (content.xml)
+ */
+function extractTextFromODF(entries) {
+  const contentXml = entries['content.xml'];
+  if (!contentXml) throw new Error('No content.xml found');
+
+  const xmlStr = new TextDecoder().decode(contentXml);
+  // Extract text between XML tags, stripping all markup
+  const text = xmlStr
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!text) throw new Error('No text content found');
+  return text;
+}
+
+/**
+ * Extract text from RTF
+ */
+function extractTextFromRTF(rtfContent) {
+  // Strip RTF control words and groups, keep text
+  let text = rtfContent
+    .replace(/\{\\[^{}]*\}/g, '')        // remove nested groups like {\fonttbl...}
+    .replace(/\\[a-z]+\d*\s?/gi, '')     // remove control words
+    .replace(/[{}]/g, '')                 // remove remaining braces
+    .replace(/\\\'([0-9a-f]{2})/gi, function(_, hex) { return String.fromCharCode(parseInt(hex, 16)); })
+    .replace(/\\./g, '')                  // remove remaining escapes
+    .replace(/\r\n?/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  if (!text) throw new Error('No text content found in RTF');
+  return text;
+}
+
+/**
+ * PDF text extraction (async) — uses DecompressionStream for FlateDecode
+ * Handles compressed and uncompressed text-based PDFs
+ */
+async function extractTextFromPDF(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const raw = new TextDecoder('latin1').decode(bytes);
+  const textBlocks = [];
+
+  // Helper: extract text operators from a decoded stream
+  function extractTextOps(content) {
+    const blocks = [];
+    // Tj operator: (text) Tj
+    const tjRegex = /\(([^)]*)\)\s*Tj/g;
+    let m;
+    while ((m = tjRegex.exec(content)) !== null) {
+      blocks.push(decodePDFString(m[1]));
+    }
+    // TJ operator: [(text) num (text) ...] TJ
+    const tjArrayRegex = /\[([^\]]*)\]\s*TJ/gi;
+    while ((m = tjArrayRegex.exec(content)) !== null) {
+      const parts = [];
+      const innerRegex = /\(([^)]*)\)/g;
+      let im;
+      while ((im = innerRegex.exec(m[1])) !== null) {
+        parts.push(decodePDFString(im[1]));
+      }
+      if (parts.length) blocks.push(parts.join(''));
+    }
+    return blocks;
+  }
+
+  // Find all stream...endstream sections
+  const streamRegex = /stream\r?\n([\s\S]*?)endstream/g;
+  let sMatch;
+
+  while ((sMatch = streamRegex.exec(raw)) !== null) {
+    let streamContent = sMatch[1];
+
+    // Check if the stream is FlateDecode compressed
+    const prelude = raw.substring(Math.max(0, sMatch.index - 300), sMatch.index);
+    if (/\/FlateDecode/.test(prelude)) {
+      // Extract raw compressed bytes
+      const streamStart = sMatch.index + sMatch[0].indexOf('\n') + 1;
+      const streamEnd = sMatch.index + sMatch[0].length - 'endstream'.length;
+      // Trim trailing whitespace/newlines from stream end
+      let actualEnd = streamEnd;
+      while (actualEnd > streamStart && (bytes[actualEnd - 1] === 0x0A || bytes[actualEnd - 1] === 0x0D || bytes[actualEnd - 1] === 0x20)) {
+        actualEnd--;
+      }
+      const streamBytes = bytes.slice(streamStart, actualEnd);
+
+      try {
+        const inflated = await inflateData(streamBytes);
+        streamContent = new TextDecoder('latin1').decode(inflated);
+      } catch (_) {
+        continue; // inflateData already tries all formats; skip this stream
+      }
+    }
+
+    textBlocks.push(...extractTextOps(streamContent));
+  }
+
+  // Also try uncompressed BT...ET text blocks directly in raw PDF
+  const btRegex = /BT\s([\s\S]*?)ET/g;
+  let btMatch;
+  while ((btMatch = btRegex.exec(raw)) !== null) {
+    textBlocks.push(...extractTextOps(btMatch[1]));
+  }
+
+  const text = textBlocks.join(' ')
+    .replace(/\s+/g, ' ')
+    .replace(/ ([.,;:!?])/g, '$1')
+    .trim();
+
+  if (!text) {
+    throw new Error('PDF_NO_TEXT');
+  }
+  return text;
+}
+
+function decodePDFString(s) {
+  return s
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\r')
+    .replace(/\\t/g, '\t')
+    .replace(/\\\(/g, '(')
+    .replace(/\\\)/g, ')')
+    .replace(/\\\\/g, '\\')
+    .replace(/\\(\d{3})/g, (_, oct) => String.fromCharCode(parseInt(oct, 8)));
+}
+
+// ============================================
+// OCR para PDFs escaneados via modelo de visión
+// ============================================
+
+async function waitForPdfjsLib() {
+  if (window.pdfjsLib) return;
+  await new Promise((resolve) => {
+    const timer = setTimeout(() => { cleanup(); resolve(); }, 10000);
+    const onReady = () => { cleanup(); resolve(); };
+    const cleanup = () => { clearTimeout(timer); window.removeEventListener('pdfjsReady', onReady); };
+    window.addEventListener('pdfjsReady', onReady, { once: true });
+  });
+}
+
+/**
+ * Extrae texto de un PDF escaneado: renderiza cada página como imagen,
+ * la envía al modelo de visión para OCR, y descarta la imagen antes de
+ * la siguiente página (memoria O(1) en imágenes).
+ * @param {ArrayBuffer} arrayBuffer - datos del PDF ya leídos
+ * @param {string} model - nombre del modelo de visión a usar
+ * @param {number} maxPages - máximo de páginas a procesar
+ * @returns {Promise<string>} texto extraído
+ */
+async function extractTextFromScannedPDF(arrayBuffer, model, maxPages = 20) {
+  if (!model || !modelSupportsVision(model)) {
+    throw new Error('PDF_SCANNED_NO_VISION');
+  }
+
+  await waitForPdfjsLib();
+  if (!window.pdfjsLib) throw new Error('PDF_LIB_UNAVAILABLE');
+
+  const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const totalPages = pdf.numPages;
+  const pageCount = Math.min(totalPages, maxPages);
+
+  if (pageCount === 0) { pdf.destroy(); throw new Error('PDF_NO_PAGES'); }
+
+  showToast(`OCR: procesando ${pageCount} página${pageCount > 1 ? 's' : ''}…`, "info");
+
+  const extractedTexts = [];
+  for (let i = 1; i <= pageCount; i++) {
+    const page = await pdf.getPage(i);
+    const viewport = page.getViewport({ scale: 1.5 });
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    const ctx = canvas.getContext('2d');
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+    // Liberar pixel buffer inmediatamente
+    canvas.width = 0;
+    canvas.height = 0;
+    page.cleanup();
+
+    try {
+      const result = await window.mika5.ai.chat({
+        model,
+        messages: [{
+          role: 'user',
+          content: `Extrae TODO el texto visible de esta imagen de documento escaneado. Devuelve SOLO el texto extraído, sin comentarios ni explicaciones. Si hay tablas, represéntalas en formato texto alineado. Página ${i} de ${totalPages}.`
+        }],
+        images: [base64]
+      });
+      if (result?.message?.content) {
+        extractedTexts.push(result.message.content.trim());
+      }
+    } catch (pageErr) {
+      console.warn(`OCR error en página ${i}:`, pageErr);
+    }
+  }
+
+  pdf.destroy();
+
+  if (extractedTexts.length === 0) throw new Error('PDF_OCR_FAILED');
+
+  showToast(`OCR completado: ${extractedTexts.length} de ${pageCount} páginas extraídas`, "success");
+  return extractedTexts.join('\n\n--- Página ---\n\n');
+}
+
+/**
+ * Maneja errores de extracción de documentos con mensajes consistentes.
+ */
+function handleDocExtractionError(docErr, fileName) {
+  const map = {
+    LEGACY_FORMAT:         { msg: `${fileName}: formato antiguo. Guárdalo como .docx/.xlsx/.pptx`, level: 'warning' },
+    PDF_SCANNED_NO_VISION: { msg: `${fileName}: PDF escaneado. Selecciona un modelo con visión (llava, gpt-4o, etc.) para OCR`, level: 'warning' },
+    PDF_LIB_UNAVAILABLE:   { msg: `${fileName}: no se pudo cargar el motor PDF. Reinicia la aplicación`, level: 'error' },
+    PDF_OCR_FAILED:        { msg: `${fileName}: OCR no pudo extraer texto del PDF`, level: 'error' },
+    PDF_NO_PAGES:          { msg: `${fileName}: el PDF no contiene páginas`, level: 'warning' },
+    PDF_NO_TEXT:            { msg: `${fileName}: PDF sin texto extraíble`, level: 'warning' },
+    UNSUPPORTED_FORMAT:    { msg: `${fileName}: formato no soportado`, level: 'warning' },
+  };
+  const entry = map[docErr.message];
+  if (entry) {
+    showToast(entry.msg, entry.level);
+  } else {
+    console.warn('Document extraction error:', docErr);
+    showToast(`Error al leer ${fileName}`, 'error');
+  }
+}
+
+function renderAttachmentPreview() {
+  const container = el("attachmentPreview");
+  if (!container) return;
+  container.innerHTML = "";
+  if (chatAttachments.length === 0) {
+    container.style.display = "none";
+    updateSendButtonState();
+    return;
+  }
+  container.style.display = "flex";
+  chatAttachments.forEach((att, i) => {
+    const div = document.createElement("div");
+    div.className = "preview-item";
+    
+    if (att.type === 'image' && att.base64) {
+      const img = document.createElement("img");
+      img.src = `data:image/png;base64,${att.base64}`;
+      img.style.cssText = "width:40px;height:40px;object-fit:cover;border-radius:4px;";
+      img.alt = att.name;
+      div.appendChild(img);
+    }
+    
+    const nameSpan = document.createElement("span");
+    nameSpan.style.cssText = "font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:80px;";
+    const docIcon = /\.(docx?|xlsx?|pptx?|pdf|rtf|odt|ods|odp|csv|tsv)$/i.test(att.name) ? '📄 ' : '';
+    nameSpan.textContent = att.type === 'image' ? '🖼️ ' + att.name : docIcon + att.name;
+    div.appendChild(nameSpan);
+    
+    const removeSpan = document.createElement("span");
+    removeSpan.className = "preview-remove";
+    removeSpan.setAttribute("data-index", i);
+    removeSpan.textContent = "×";
+    removeSpan.onclick = (e) => {
+      e.preventDefault();
+      removeAttachment(parseInt(e.currentTarget.getAttribute("data-index"), 10));
+    };
+    div.appendChild(removeSpan);
+    
+    container.appendChild(div);
+  });
+  updateSendButtonState();
+}
+
+function removeAttachment(index) {
+  if (index < 0 || index >= chatAttachments.length) return;
+  chatAttachments.splice(index, 1);
+  renderAttachmentPreview();
+}
+
+function updateSendButtonState() {
+  const sendBtn = el("btnSend");
+  const input = el("input");
+  const hasText = input && input.value.trim().length > 0;
+  const hasAttachments = chatAttachments.length > 0;
+  if (sendBtn) sendBtn.disabled = isGenerating || (!hasText && !hasAttachments);
+}
+
+// ----------------------------------------------
+// renderiza markdown (código, listas, negrita, etc.) en mensajes
+// ----------------------------------------------
+function renderMarkdown(text) {
+  const raw = (text || "").toString().trim();
+  if (!raw) return "";
+  if (typeof marked === "undefined") return raw.replace(/</g, "&lt;").replace(/\n/g, "<br>");
+  try {
+    let html = marked.parse(raw);
+    if (!html) return raw.replace(/</g, "&lt;").replace(/\n/g, "<br>");
+    // Sanitize: strip dangerous tags and attributes (XSS protection)
+    html = sanitizeHtml(html);
+    return html;
+  } catch (e) {
+    return raw.replace(/</g, "&lt;").replace(/\n/g, "<br>");
+  }
+}
+
+// Sanitize HTML output from marked - strip dangerous elements without breaking code blocks
+function sanitizeHtml(html) {
+  // Remove script tags and their content
+  let safe = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+  // Remove iframe, object, embed tags
+  safe = safe.replace(/<\/?(?:iframe|object|embed|form|input|textarea|select|button|link|meta|base)\b[^>]*>/gi, '');
+  // Remove event handler attributes (onclick, onerror, onload, etc.)
+  safe = safe.replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+  // Remove javascript: URLs in href/src
+  safe = safe.replace(/(href|src)\s*=\s*(['"])\s*javascript:/gi, '$1=$2#blocked:');
+  // Force links to open in new tab safely
+  safe = safe.replace(/<a\s/gi, '<a target="_blank" rel="noopener noreferrer" ');
+  return safe;
+}
+
+function wrapTablesResponsive(container) {
+  if (!container) return;
+  const tables = Array.from(container.querySelectorAll('table'));
+  for (const table of tables) {
+    // Skip if already wrapped
+    if (table.parentNode?.classList?.contains('table-responsive')) continue;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'table-responsive';
+    table.parentNode.insertBefore(wrapper, table);
+    wrapper.appendChild(table);
+  }
+}
+
+function highlightCodeBlocks(container) {
+  if (!container || typeof hljs === "undefined") return;
+  container.querySelectorAll("pre code").forEach((block) => {
+    try {
+      // Skip already highlighted
+      if (block.classList.contains("hljs")) return;
+      const lang = (block.className.match(/language-(\w+)/) || [])[1];
+      if (lang && hljs.getLanguage(lang)) {
+        block.innerHTML = hljs.highlight(block.textContent, { language: lang }).value;
+      }
+      // REMOVED: hljs.highlightAuto() — it's extremely expensive and freezes UI
+      // on chats with many code blocks
+      block.classList.add("hljs");
+    } catch (_) {}
+  });
+}
+
+function addCopyButtonsToCodeBlocks(container) {
+  if (!container) return;
+  
+  // Usar Array.from para evitar problemas de NodeList dinámica
+  const pres = Array.from(container.querySelectorAll("pre"));
+  
+  pres.forEach((pre) => {
+    try {
+      // Skip if already wrapped
+      if (pre.parentNode && pre.parentNode.classList && pre.parentNode.classList.contains('code-block-wrapper')) return;
+    const code = pre.querySelector("code");
+    const langMatch = code && code.className.match(/language-(\w+)/);
+    const lang = langMatch ? langMatch[1] : "code";
+
+    // Guardar referencia al padre ANTES de mover el nodo
+    const originalParent = pre.parentNode;
+    if (!originalParent) return;
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "code-block-wrapper";
+
+    const header = document.createElement("div");
+    header.className = "code-block-header";
+    
+    const langSpan = document.createElement("span");
+    langSpan.className = "code-block-lang";
+    langSpan.textContent = lang;
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "copy-code-btn";
+    btn.textContent = "Copiar";
+    btn.addEventListener("click", () => {
+      const text = (pre.querySelector("code") || pre).textContent;
+      navigator.clipboard.writeText(text).then(
+        () => showToast("Código copiado", "success"),
+        () => showToast("Error al copiar", "error")
+      );
+    });
+
+    header.appendChild(langSpan);
+    header.appendChild(btn);
+    wrapper.appendChild(header);
+    
+    // Insert wrapper where pre is, THEN move pre into wrapper
+    originalParent.insertBefore(wrapper, pre);
+    wrapper.appendChild(pre);
+    } catch (e) {
+      console.warn('addCopyButtonsToCodeBlocks: skipped block', e.message);
+    }
+  });
+}
+
+
+// ----------------------------------------------
+// genera un texto concatenado de un chat completo
+// ----------------------------------------------
+function compileChatAsMarkdown(messages) {
+  let md = "";
+  for (const msg of messages) {
+    const prefix =
+      msg.role === "user"
+        ? "**Usuario:**"
+        : msg.role === "assistant"
+        ? "**Asistente:**"
+        : `**${msg.role}:**`;
+    md += `${prefix}\n\n${msg.content || ""}\n\n---\n\n`;
+  }
+  return md;
+}
+
+// Toast discreto (éxito / error)
+function showToast(message, type = "success") {
+  let container = document.getElementById("toast-container");
+  if (!container) {
+    container = document.createElement("div");
+    container.id = "toast-container";
+    document.body.appendChild(container);
+  }
+  // Limit visible toasts to avoid stacking overflow
+  const MAX_TOASTS = 3;
+  while (container.children.length >= MAX_TOASTS) {
+    container.firstElementChild.remove();
+  }
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    setTimeout(() => toast.remove(), 300);
+  }, 2500);
+}
+
+function generateId() {
+  return Date.now().toString(36) + Math.random().toString(36).substr(2);
+}
+
+async function manageConversationContext(currentMessages) {
+  const totalMessages = currentMessages.length;
+  const chatId = activeChatId || '_none';
+
+  // Soft warning: show once per chat session
+  if (totalMessages >= CONTEXT_MANAGEMENT.SOFT_LIMIT &&
+      totalMessages < CONTEXT_MANAGEMENT.AUTO_SAVE_TRIGGER) {
+    if (!_contextWarningShown.has(chatId)) {
+      _contextWarningShown.add(chatId);
+      showContextWarning(totalMessages);
+    }
+  }
+
+  // Save suggestion: show once per chat session
+  if (totalMessages >= CONTEXT_MANAGEMENT.AUTO_SAVE_TRIGGER &&
+      totalMessages < CONTEXT_MANAGEMENT.HARD_LIMIT) {
+    if (!_contextSavePrompted.has(chatId)) {
+      _contextSavePrompted.add(chatId);
+      await suggestSaveConversation(currentMessages);
+    }
+  }
+
+  // Hard limit: always trim (this is silent, no UI prompt)
+  if (totalMessages >= CONTEXT_MANAGEMENT.HARD_LIMIT) {
+    return smartContextTrim(currentMessages);
+  }
+
+  return currentMessages;
+}
+
+function smartContextTrim(messages) {
+  const preserveCount = Math.floor(CONTEXT_MANAGEMENT.HARD_LIMIT * CONTEXT_MANAGEMENT.PRESERVE_RATIO);
+  const keepCount = CONTEXT_MANAGEMENT.HARD_LIMIT - preserveCount - 1;
+
+  const initialContext = messages.slice(0, preserveCount);
+  const recentContext = messages.slice(-keepCount);
+  const summaryMessage = {
+    role: 'system',
+    content: `[Resumen contextual: ${messages.length - (preserveCount + keepCount)} mensajes anteriores omitidos]`
+  };
+
+  return [...initialContext, summaryMessage, ...recentContext];
+}
+
+function showContextWarning(messageCount) {
+  // Don't duplicate if already visible
+  const existing = document.querySelector('.context-warning');
+  if (existing) return;
+
+  const warningEl = document.createElement('div');
+  warningEl.className = 'context-warning';
+  warningEl.innerHTML = `
+    <div class="context-warning-content">
+      <span class="warning-icon">⚠️</span>
+      <span>Conversación larga (${messageCount} mensajes). Considera guardar.</span>
+      <button type="button" class="btn-small context-warning-save">Guardar</button>
+      <button type="button" class="btn-small context-warning-dismiss" aria-label="Cerrar">×</button>
+    </div>
+  `;
+  const btn = warningEl.querySelector('.context-warning-save');
+  if (btn) btn.addEventListener('click', () => saveCurrentConversation());
+  const dismissBtn = warningEl.querySelector('.context-warning-dismiss');
+  if (dismissBtn) dismissBtn.addEventListener('click', () => {
+    if (warningEl.parentNode) warningEl.parentNode.removeChild(warningEl);
+  });
+
+  const chatContainer = document.querySelector('.chat-area') || document.querySelector('#chat')?.parentElement || document.body;
+  chatContainer.insertBefore(warningEl, chatContainer.firstChild);
+
+  setTimeout(() => {
+    if (warningEl.parentNode) warningEl.parentNode.removeChild(warningEl);
+  }, 15000);
+}
+
+async function suggestSaveConversation(messages) {
+  const yes = await mikaConfirm(
+    'Guardar conversación',
+    `La conversación está creciendo (${messages.length} mensajes). ¿Deseas guardarla para liberar espacio y continuar?`
+  );
+  if (yes) await saveCurrentConversation(messages);
+}
+
+async function saveCurrentConversation(messages = conversationHistory) {
+  const defaultTitle = generateChatDocTitle(messages.filter(m => m.role !== 'system'));
+  const conversationName = await mikaPrompt('Guardar conversación', 'Nombre para guardar esta conversación:', defaultTitle);
+  if (conversationName == null || !conversationName.trim()) return;
+
+  const name = conversationName.trim();
+
+  // Save as Knowledge document in DB instead of localStorage
+  const body = messages.map(m => {
+    const prefix = m.role === 'user' ? '**Usuario:**' : m.role === 'assistant' ? '**Asistente:**' : `**${m.role}:**`;
+    return `${prefix}\n\n${m.content || ''}\n\n---\n\n`;
+  }).join('');
+
+  const content = `# ${name}\n\nFecha: ${new Date().toISOString()}\nMensajes: ${messages.length}\n\n---\n\n${body}`;
+
+  const savePayload = {
+    projectId: activeProjectId || QUICK_CHAT_ID,
+    title: name,
+    content,
+    mimeType: 'text/markdown'
+  };
+  if (activeProjectId === QUICK_CHAT_ID && activeChatId) {
+    savePayload.chatId = activeChatId;
+  }
+
+  try {
+    const result = await saveDocument(savePayload);
+    if (result?.ok) {
+      showToast(`Conversación "${name}" guardada en Knowledge`, 'success');
+      await renderKnowledgeList();
+    } else {
+      showToast('Error al guardar: ' + (result?.error || 'desconocido'), 'error');
+    }
+  } catch (e) {
+    showToast('Error al guardar conversación', 'error');
+  }
+
+  if (messages.length > 20) {
+    conversationHistory = messages.slice(-10);
+  }
+}
+
+async function loadRuntime() {
+  // Intentar obtener estado y modelos desde el proveedor AI actual
+  let st;
+  try {
+    st = await window.mika5.ai.status();
+  } catch (e) {
+    st = { ok: false, message: e?.message || String(e) };
+  }
+
+  const statusEl = el("rtStatus");
+  if (st.ok) {
+    statusEl.textContent = t('status.connected');
+    statusEl.className = "status-pill status-ok";
+  } else {
+    statusEl.textContent = t('status.disconnected');
+    statusEl.className = "status-pill status-offline";
+  }
+
+  el("modelSelect").innerHTML = "";
+  if (st.ok) {
+    let modelsRes = null;
+    try {
+      modelsRes = await window.mika5.ai.listModels();
+    } catch (e) {
+      modelsRes = null;
+    }
+
+    // Normalizar la respuesta a un array de objetos { name, size, sizeFormatted, capabilities, speed }
+    let models = [];
+    const mapper = (raw) => {
+      if (!raw) return null;
+      if (typeof raw === 'string') return { name: raw };
+      const name = raw.name || raw.id || raw.model || raw.tag || String(raw);
+      const size = raw.size || raw.bytes || raw.modelSize || 0;
+      const sizeFormatted = raw.sizeFormatted || raw.size_human || (size ? formatBytesRenderer(Number(size)) : '');
+      const capabilities = raw.capabilities || raw.caps || raw.tags || [];
+      const speed = raw.speed || raw.latency || raw.quality || '';
+      const description = raw.description || raw.info || '';
+      return { name, size, sizeFormatted, capabilities, speed, description };
+    };
+
+    if (Array.isArray(modelsRes)) models = modelsRes.map(mapper).filter(Boolean);
+    else if (modelsRes && Array.isArray(modelsRes.models)) models = modelsRes.models.map(mapper).filter(Boolean);
+    else if (modelsRes && Array.isArray(modelsRes.tags)) models = modelsRes.tags.map(mapper).filter(Boolean);
+
+    // Filter out embedding-only models that don't support chat
+    // Keep :cloud models (kimi-k2.5:cloud, glm-5:cloud, etc.)
+    models = models.filter(m => {
+      const n = (m.name || '').toLowerCase();
+      if (n.includes(':cloud')) return true; // always keep cloud models
+      return !/^(nomic-embed|bge-|e5-|gte-|mxbai-embed|snowflake-arctic-embed|all-minilm)/i.test(n) 
+             && !(/embed/i.test(n) && !n.includes('code'));
+    });
+
+    if (models.length === 0) {
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "Sin modelos (descarga uno o configura Cloud)";
+      el("modelSelect").appendChild(opt);
+    } else {
+      for (const m of models) {
+        const opt = document.createElement("option");
+        opt.value = m.name;
+        opt.textContent = m.name;
+        opt.dataset.source = (currentProvider === 'local' ? 'local' : 'cloud');
+        if (m.size) opt.dataset.size = String(m.size);
+        if (m.sizeFormatted) opt.dataset.sizeFormatted = m.sizeFormatted;
+        if (m.capabilities && Array.isArray(m.capabilities)) opt.dataset.caps = m.capabilities.join(' • ');
+        if (m.speed) opt.dataset.speed = m.speed;
+        if (m.description) opt.dataset.description = m.description;
+        if (m.supportsVision) opt.dataset.vision = '1';
+        el("modelSelect").appendChild(opt);
+      }
+    }
+  } else {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "Proveedor no disponible";
+    el("modelSelect").appendChild(opt);
+    el("modelSelect").disabled = true;
+    const pullLocal = el("btnPullLocal");
+    if (pullLocal) pullLocal.disabled = true;
+    syncModelDropdown();
+    return;
+  }
+
+  el("modelSelect").disabled = false;
+
+  // Restore last used model
+  try {
+    const lastModel = await window.mika5.getAppState("lastModel");
+    if (lastModel) {
+      const sel = el("modelSelect");
+      const available = Array.from(sel.options).map(o => o.value);
+      if (available.includes(lastModel)) {
+        sel.value = lastModel;
+      }
+    }
+  } catch (_) {}
+
+  const pullLocal = el("btnPullLocal");
+  if (pullLocal) pullLocal.disabled = (currentProvider !== 'local');
+  syncModelDropdown();
+}
+
+// --- AI provider helpers ---
+async function loadProvider() {
+  try {
+    const provider = await window.mika5.ai.getCurrentProvider();
+    if (provider && provider.id) {
+      currentProvider = provider.id;
+      providerPrivacy = provider.privacy || (provider.privacy === 'private' ? 'private' : 'cloud');
+      updatePrivacyUI();
+    }
+  } catch (e) {
+    console.warn('loadProvider failed:', e);
+  }
+}
+
+function updatePrivacyUI() {
+  const indicator = el('privacyIndicator');
+  const badge = el('privacyBadge');
+  const warning = el('cloudWarning');
+  const apiKeyBtn = el('btnConfigApiKey');
+  const providerName = el('currentProviderName');
+  const inputBanner = el('cloudInputBanner');
+  
+  const providerLabel = currentProvider === 'local' ? t('provider.local') 
+    : currentProvider.charAt(0).toUpperCase() + currentProvider.slice(1);
+  
+  if (providerPrivacy === 'private') {
+    if (indicator) {
+      indicator.className = 'privacy-indicator private';
+      indicator.setAttribute('data-tooltip', t('privacy.tooltipPrivate'));
+    }
+    if (badge) {
+      badge.innerHTML = '🟢 🔒 ' + t('privacy.private');
+      badge.className = 'privacy-badge private';
+    }
+    if (warning) warning.style.display = 'none';
+    if (apiKeyBtn) apiKeyBtn.style.display = 'none';
+    if (providerName) providerName.textContent = t('provider.local');
+    if (inputBanner) inputBanner.classList.remove('visible');
+  } else {
+    if (indicator) {
+      indicator.className = 'privacy-indicator cloud';
+      indicator.setAttribute('data-tooltip', t('privacy.tooltipCloud'));
+    }
+    if (badge) {
+      badge.innerHTML = '🟠 ☁️ ' + t('privacy.cloud');
+      badge.className = 'privacy-badge cloud';
+    }
+    if (warning) {
+      warning.style.display = '';
+      warning.innerHTML = `⚠️ <strong>${t('provider.cloudWarning').split(':')[0]}:</strong> ${t('provider.cloudWarning').split(':').slice(1).join(':')} <a href="#" onclick="(typeof showPrivacyInfo==='function')?showPrivacyInfo():false;return false;">${t('provider.moreInfo')}</a>`;
+    }
+    if (apiKeyBtn) apiKeyBtn.style.display = '';
+    if (providerName) providerName.textContent = providerLabel;
+    if (inputBanner) {
+      inputBanner.classList.add('visible');
+      inputBanner.innerHTML = `⚠️ <strong>${providerLabel}:</strong> ${t('privacy.inputWarning')}`;
+    }
+  }
+}
+
+async function switchProvider(providerId) {
+  try {
+    const result = await window.mika5.ai.setProvider(providerId);
+    currentProvider = providerId;
+    providerPrivacy = result.privacy;
+    
+    updatePrivacyUI();
+    await loadRuntime();
+    
+    // Close the provider dropdown
+    const opts = el('providerOptions');
+    if (opts) opts.style.display = 'none';
+    
+    if (result.privacy === 'cloud') {
+      showToast(t('toast.cloudMode'), 'warning');
+    } else {
+      showToast(t('toast.privateMode'), 'success');
+    }
+  } catch (e) {
+    showToast('Error: ' + (e?.message || e), 'error');
+  }
+}
+
+const QUICK_CHAT_ID = 'quick-chat';
+
+async function ensureQuickChat() {
+  // Create the quick-chat project if it doesn't exist
+  try {
+    const projects = await Store.listProjects();
+    if (!projects.find(p => p.id === QUICK_CHAT_ID)) {
+      await window.mika5.db.createProject({ name: 'Quick Chat', description: '', _internal: QUICK_CHAT_ID });
+    }
+  } catch (e) {
+    console.warn('ensureQuickChat error:', e);
+  }
+}
+
+const PROJECT_ICONS = ['📁', '🏠', '💼', '🎯', '📚', '🔬', '🎨', '💻', '🌐', '🧠', '⚡', '🔧', '📊', '🎮', '🏗️', '📝'];
+const PROJECT_COLORS = ['#3b82f6', '#22c55e', '#ef4444', '#eab308', '#a855f7', '#06b6d4', '#f97316', '#ec4899'];
+
+async function loadProjects() {
+  const projects = await withTimeout(Store.listProjects(), 8000, 'cargar proyectos');
+  const list = el("projectList");
+  list.innerHTML = "";
+
+  // Sort: Quick Chat first, then by created_at desc
+  const sorted = [...projects].sort((a, b) => {
+    if (a.id === QUICK_CHAT_ID) return -1;
+    if (b.id === QUICK_CHAT_ID) return 1;
+    return (b.created_at || 0) - (a.created_at || 0);
+  });
+
+  let userIdx = 0;
+  for (const p of sorted) {
+    const isQC = p.id === QUICK_CHAT_ID;
+    const projColor = p.color || (isQC ? '#60a5fa' : PROJECT_COLORS[userIdx % PROJECT_COLORS.length]);
+    const projIcon = p.icon || (isQC ? '💬' : PROJECT_ICONS[userIdx % PROJECT_ICONS.length]);
+    if (!isQC) userIdx++;
+
+    const div = document.createElement("div");
+    div.className = "item project-item" + (p.id === activeProjectId ? " active" : "");
+
+    const iconBtn = document.createElement("span");
+    iconBtn.className = "project-icon-btn";
+    iconBtn.textContent = projIcon;
+    iconBtn.style.cssText = `background:${projColor}20;border:1px solid ${projColor}40;color:${projColor};width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;cursor:${isQC ? 'default' : 'pointer'};`;
+    if (!isQC) {
+      iconBtn.title = "Cambiar icono/color";
+      iconBtn.onclick = (e) => { e.stopPropagation(); showProjectStylePicker(p.id, iconBtn, projIcon, projColor); };
+    }
+
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = isQC ? (t('project.quickChat') || 'Quick Chat') : p.name;
+    nameSpan.style.cssText = "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;line-height:1.4;";
+
+    div.onclick = (e) => {
+      if (e.target.closest('.btn-icon, .knowledge-item-remove, .project-icon-btn')) return;
+      if (isSwitchingView) return; // Prevent double-clicks during switch
+      selectProject(p.id, isQC ? (t('project.quickChat') || 'Quick Chat') : p.name);
+    };
+
+    div.appendChild(iconBtn);
+    div.appendChild(nameSpan);
+
+    if (!isQC) {
+      const renameBtn = document.createElement("button");
+      renameBtn.type = "button";
+    renameBtn.className = "btn-icon knowledge-item-remove project-action-btn project-action-btn--rename";
+      renameBtn.textContent = "✏️";
+      renameBtn.style.cssText = "flex-shrink:0;padding:2px 6px;font-size:12px;";
+      renameBtn.onclick = async (e) => {
+        e.stopPropagation();
+        const name = await mikaPrompt(t('modal.renameProject'), '', p.name);
+        if (name == null || name.trim() === "") return;
+        await Store.updateProject(p.id, { name: name.trim() });
+        await loadProjects();
+        if (activeProjectId === p.id) el("activeTitle").textContent = name.trim();
+        showToast(t('toast.projectRenamed'), "success");
+      };
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+    delBtn.className = "btn-icon knowledge-item-remove project-action-btn project-action-btn--delete";
+      delBtn.textContent = "🗑";
+      delBtn.style.cssText = "flex-shrink:0;padding:2px 6px;font-size:12px;";
+      delBtn.onclick = async (e) => {
+        e.stopPropagation();
+        const yes = await mikaConfirm(t('modal.deleteProject'), t('modal.deleteProjectMsg'), t('action.delete'));
+        if (!yes) return;
+        try {
+          await Store.deleteProject(p.id);
+          if (activeProjectId === p.id) { activeProjectId = null; activeChatId = null; el("chat").innerHTML = ""; }
+          await loadProjects();
+          showToast(t('toast.projectDeleted'), "success");
+        } catch (_) { showToast(t('toast.errorDelete'), "error"); }
+      };
+      div.appendChild(renameBtn);
+      div.appendChild(delBtn);
+    }
+    list.appendChild(div);
+  }
+}
+
+function showProjectStylePicker(projectId, iconBtnEl, currentIcon, currentColor) {
+  document.querySelectorAll('.project-style-picker').forEach(p => p.remove());
+  
+  const picker = document.createElement('div');
+  picker.className = 'project-style-picker';
+  picker.style.cssText = 'position:absolute;left:0;top:100%;background:var(--bg-sidebar,#0f1629);border:1px solid var(--border-subtle);border-radius:10px;padding:10px;z-index:60;box-shadow:0 8px 24px rgba(0,0,0,0.4);width:200px;';
+  
+  // Color row
+  const colorLabel = document.createElement('div');
+  colorLabel.style.cssText = 'font-size:11px;color:var(--text-muted);margin-bottom:6px;';
+  colorLabel.textContent = 'Color';
+  picker.appendChild(colorLabel);
+  
+  const colorRow = document.createElement('div');
+  colorRow.style.cssText = 'display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px;';
+  PROJECT_COLORS.forEach(color => {
+    const dot = document.createElement('span');
+    dot.style.cssText = `width:20px;height:20px;border-radius:6px;background:${color};cursor:pointer;border:2px solid ${color === currentColor ? '#fff' : 'transparent'};transition:transform 0.15s;`;
+    dot.onclick = async (e) => {
+      e.stopPropagation();
+      try { await Store.updateProject(projectId, { color }); } catch(_){}
+      picker.remove();
+      await loadProjects();
+    };
+    colorRow.appendChild(dot);
+  });
+  picker.appendChild(colorRow);
+  
+  // Icon grid
+  const iconLabel = document.createElement('div');
+  iconLabel.style.cssText = 'font-size:11px;color:var(--text-muted);margin-bottom:6px;';
+  iconLabel.textContent = 'Icono';
+  picker.appendChild(iconLabel);
+  
+  const iconGrid = document.createElement('div');
+  iconGrid.style.cssText = 'display:flex;gap:4px;flex-wrap:wrap;';
+  PROJECT_ICONS.forEach(icon => {
+    const btn = document.createElement('span');
+    btn.style.cssText = `width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:6px;cursor:pointer;font-size:16px;background:${icon === currentIcon ? 'var(--bg-hover,#152044)' : 'transparent'};border:1px solid ${icon === currentIcon ? 'var(--accent)' : 'transparent'};`;
+    btn.textContent = icon;
+    btn.onclick = async (e) => {
+      e.stopPropagation();
+      try { await Store.updateProject(projectId, { icon }); } catch(_){}
+      picker.remove();
+      await loadProjects();
+    };
+    iconGrid.appendChild(btn);
+  });
+  picker.appendChild(iconGrid);
+  
+  iconBtnEl.parentElement.style.position = 'relative';
+  iconBtnEl.parentElement.appendChild(picker);
+  
+  setTimeout(() => {
+    const close = (e) => { if (!picker.contains(e.target) && e.target !== iconBtnEl) { picker.remove(); document.removeEventListener('click', close); } };
+    document.addEventListener('click', close);
+  }, 10);
+}
+
+async function selectProject(projectId, name) {
+  if (!projectId) { console.warn('[selectProject] Ignored: missing projectId'); return; }
+  return safeViewChange(async (signal) => {
+    console.log('[selectProject] START', projectId, name);
+
+    // 1. IMMEDIATE SYNCHRONOUS UI CLEANUP
+    // (draft already saved by resetViewState in safeViewChange)
+    activeProjectId = projectId;
+    activeChatId = null;
+    chatAttachments = [];
+
+    const chatEl = el("chat");
+    if (chatEl) {
+      chatEl.innerHTML = "";
+    }
+
+    el("activeTitle").textContent = name || "Proyecto";
+    el("btnNewChat").disabled = false;
+    el("btnSend").disabled = true;
+    el("btnSaveChatDoc").disabled = true;
+    const exp = el("btnExportChat");
+    if (exp) exp.disabled = true;
+    renderAttachmentPreview();
+
+    if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+
+    // 2. LOAD CHATS WITH TIMEOUT
+    let chats = [];
+    try {
+      chats = await withTimeout(Store.listChats(activeProjectId), 5000, 'cargar chats del proyecto', signal);
+      if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+    } catch (e) {
+      if (e.name === 'AbortError') throw e;
+      console.warn('[selectProject] Error cargando chats:', e);
+      chats = [];
+    }
+
+    // Update chat list with debounce
+    await new Promise((resolve) => {
+      const id = setTimeout(async () => {
+        try {
+          if (!signal.aborted) await refreshChats();
+        } catch (e) { console.warn('refreshChats error:', e); }
+        resolve();
+      }, 0);
+      pendingTimeouts.push(id);
+    });
+
+    if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+
+    // 3. OPEN OR CREATE CHAT
+    if (!chats || chats.length === 0) {
+      console.log('[selectProject] Creating initial chat...');
+      try {
+        const res = await withTimeout(Store.createChat(activeProjectId, "Chat"), 8000, 'crear chat inicial', signal);
+        if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+        if (res?.ok && res.id) {
+          await openChatInternal(res.id, signal);
+        }
+      } catch (e) {
+        if (e.name === 'AbortError') throw e;
+        console.error('[selectProject] Error creating chat:', e);
+        if (chatEl) {
+          chatEl.innerHTML = '<div class="empty-chat-hint">Crea un nuevo chat para empezar</div>';
+        }
+      }
+    } else {
+      console.log('[selectProject] Opening existing chat:', chats[0].id);
+      await openChatInternal(chats[0].id, signal);
+    }
+
+    if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+
+    // 4. SAVE STATE + LOAD CONTEXT/KNOWLEDGE (non-blocking, with timeout)
+    try {
+      await Promise.race([
+        window.mika5.setAppState("lastProjectId", activeProjectId),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000))
+      ]);
+    } catch (e) { console.warn('Error saving state:', e); }
+
+    // Fire-and-forget — don't block UI
+    Promise.all([
+      loadProjectContext(),
+      renderKnowledgeList()
+    ]).catch(e => console.warn('Context/knowledge load error:', e));
+
+    console.log('[selectProject] DONE');
+  });
+}
+
+async function createProject() {
+  const name = el("projectName").value.trim();
+  if (!name) {
+    showToast(t('toast.enterProjectName'), "error");
+    el("projectName").focus();
+    return;
+  }
+  const res = await Store.createProject(name);
+
+  if (!res.ok) {
+    showToast(t('toast.errorGeneric'), "error");
+    return;
+  }
+
+  el("projectName").value = "";
+  await loadProjects();
+  const projects = await Store.listProjects();
+  if (projects.length > 0) el("activeTitle").textContent = t('chat.selectProject');
+  showToast(t('toast.projectCreated'), "success");
+}
+
+async function refreshChats() {
+  const list = document.getElementById("chatList");
+  if (!list) return;
+
+  list.innerHTML = "";
+  if (!activeProjectId) return;
+
+  const chats = await withTimeout(Store.listChats(activeProjectId), 8000, 'cargar lista de chats');
+
+  if (chats.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "item";
+    empty.style.opacity = "0.7";
+    empty.textContent = "Sin chats todavía";
+    list.appendChild(empty);
+    return;
+  }
+
+  for (const c of chats) {
+    const div = document.createElement("div");
+    div.className = "item" + (c.id === activeChatId ? " active" : "");
+    div.style.display = "flex";
+    div.style.alignItems = "center";
+    div.style.gap = "6px";
+
+    const titleSpan = document.createElement("span");
+    titleSpan.textContent = c.title || "Chat";
+    titleSpan.style.flex = "1";
+    titleSpan.style.minWidth = "0";
+    titleSpan.style.overflow = "hidden";
+    titleSpan.style.textOverflow = "ellipsis";
+    titleSpan.style.cursor = "pointer";
+
+    const renameBtn = document.createElement("button");
+    renameBtn.type = "button";
+    renameBtn.className = "btn-icon knowledge-item-remove";
+    renameBtn.title = "Renombrar chat";
+    renameBtn.setAttribute("aria-label", "Renombrar");
+    renameBtn.textContent = "✏️";
+    renameBtn.style.flexShrink = "0";
+    renameBtn.style.padding = "2px 6px";
+    renameBtn.style.fontSize = "12px";
+
+    const moveBtn = document.createElement("button");
+    moveBtn.type = "button";
+    moveBtn.className = "btn-icon item-action-move";
+    moveBtn.title = "Mover a otro proyecto";
+    moveBtn.setAttribute("aria-label", "Mover a otro proyecto");
+    moveBtn.textContent = "→";
+    moveBtn.style.flexShrink = "0";
+    moveBtn.style.fontSize = "12px";
+    moveBtn.style.padding = "2px 6px";
+
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "btn-icon knowledge-item-remove";
+    delBtn.title = "Eliminar chat";
+    delBtn.setAttribute("aria-label", "Eliminar chat");
+    delBtn.textContent = "×";
+    delBtn.style.flexShrink = "0";
+    delBtn.style.padding = "2px 6px";
+    delBtn.style.fontSize = "14px";
+
+    const openChatId = c.id;
+    div.onclick = (e) => {
+      if (e.target.closest('.btn-icon')) return;
+      openChat(openChatId);
+    };
+
+    renameBtn.onclick = async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const newTitle = await mikaPrompt(t('modal.renameChat'), '', c.title || 'Chat');
+      if (newTitle == null || newTitle.trim() === "") return;
+      try {
+        const res = await Store.updateChat(c.id, { title: newTitle.trim() });
+        if (!res || !res.ok) {
+          showToast("Error al renombrar: " + (res?.error || 'desconocido'), "error");
+        } else {
+          await refreshChats();
+          showToast("Chat renombrado", "success");
+        }
+      } catch (err) {
+        showToast("Error al renombrar: " + (err?.message || err), "error");
+      }
+    };
+
+    moveBtn.onclick = async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      try {
+        const projects = await Store.listProjects();
+        // Exclude current project AND Quick Chat (can't move TO quick chat)
+        const others = projects.filter((pr) => pr.id !== activeProjectId);
+
+        if (others.length === 0) { 
+          showToast(t('toast.noProjects') || 'No hay otros proyectos disponibles', "error"); 
+          return; 
+        }
+
+        const selectOptions = others.map((pr, i) => {
+          const isQC = pr.id === QUICK_CHAT_ID;
+          return {
+            label: isQC ? (t('project.quickChat') || 'Chat rápido') : pr.name,
+            value: pr.id,
+            icon: pr.icon || (isQC ? '💬' : PROJECT_ICONS[i % PROJECT_ICONS.length]),
+            color: pr.color || (isQC ? '#60a5fa' : PROJECT_COLORS[i % PROJECT_COLORS.length])
+          };
+        });
+        const targetId = await mikaSelect(t('modal.moveChat') || 'Mover chat a:', selectOptions);
+
+        if (!targetId) return;
+
+        const target = others.find(pr => pr.id === targetId);
+        if (!target) { showToast("Proyecto no encontrado", "error"); return; }
+
+        console.log('Moviendo chat', c.id, 'a proyecto', target.id);
+
+        const res = await Store.updateChat(c.id, { projectId: target.id });
+
+        if (!res || !res.ok) { 
+          showToast("Error al mover: " + (res?.error || 'desconocido'), "error"); 
+          return; 
+        }
+
+        if (activeChatId === c.id) {
+          activeChatId = null;
+          el("chat").innerHTML = "";
+          el("input").disabled = true;
+          el("btnSend").disabled = true;
+          const saveBtn = el("btnSaveChatDoc");
+          if (saveBtn) saveBtn.disabled = true;
+          const ex = el("btnExportChat");
+          if (ex) ex.disabled = true;
+        }
+
+        await refreshChats();
+        showToast(`Chat movido a "${target.name}"`, "success");
+      } catch (err) {
+        showToast("Error al mover: " + (err?.message || err), "error");
+      }
+    };
+
+    delBtn.onclick = async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const yes = await mikaConfirm(t('modal.deleteChat'), t('modal.deleteChatMsg'), t('action.delete'));
+      if (!yes) return;
+      try {
+        const wasActive = activeChatId === c.id;
+        await Store.deleteChat(c.id);
+        // Clean up per-chat tracking state
+        _contextWarningShown.delete(c.id);
+        _contextSavePrompted.delete(c.id);
+        chatDrafts.delete(c.id);
+        await refreshChats();
+        if (wasActive) {
+          const chats = await Store.listChats(activeProjectId);
+          if (chats && chats.length > 0) {
+            await openChat(chats[0].id);
+          } else {
+            const res = await withTimeout(Store.createChat(activeProjectId, "Chat"), 8000, 'crear chat inicial');
+            if (res && res.ok && res.id) await openChat(res.id);
+            else {
+              activeChatId = null;
+              el("chat").innerHTML = "";
+              el("input").disabled = true;
+              el("btnSend").disabled = true;
+              el("btnSaveChatDoc").disabled = true;
+              const ex = el("btnExportChat");
+              if (ex) ex.disabled = true;
+            }
+          }
+        }
+        showToast("Chat eliminado", "success");
+      } catch (_) {
+        showToast("Error al eliminar", "error");
+      }
+    };
+
+    div.appendChild(titleSpan);
+    div.appendChild(renameBtn);
+    div.appendChild(moveBtn);
+    div.appendChild(delBtn);
+    list.appendChild(div);
+  }
+}
+
+// --- Pagination constants ---
+const MESSAGES_PAGE_SIZE = 50;
+let chatHasOlderMessages = false;
+let chatOldestLoadedOffset = 0;
+
+// openChatInternal: used inside safeViewChange (signal-aware, no guard)
+async function openChatInternal(chatId, signal) {
+  console.log('[openChat] START', chatId);
+
+  // Draft already saved by resetViewState in safeViewChange
+  activeChatId = chatId;
+  _lastRenderedModel = null;
+  chatHasOlderMessages = false;
+  chatOldestLoadedOffset = 0;
+
+  const chatEl = el("chat");
+  if (chatEl) chatEl.innerHTML = "";
+
+  try {
+    await refreshChats();
+    if (signal && signal.aborted) throw new DOMException('Aborted', 'AbortError');
+
+    const totalCount = await withTimeout(Store.countMessages(chatId), 5000, 'contar mensajes', signal);
+    if (signal && signal.aborted) throw new DOMException('Aborted', 'AbortError');
+
+    let messages;
+    if (totalCount > MESSAGES_PAGE_SIZE) {
+      // Load only the most recent N messages
+      const offset = totalCount - MESSAGES_PAGE_SIZE;
+      messages = await withTimeout(
+        Store.listMessages(chatId, { limit: MESSAGES_PAGE_SIZE, offset }),
+        8000, 'cargar mensajes', signal
+      );
+      chatOldestLoadedOffset = offset;
+      chatHasOlderMessages = offset > 0;
+    } else {
+      messages = await withTimeout(Store.listMessages(chatId), 8000, 'cargar mensajes', signal);
+      chatOldestLoadedOffset = 0;
+      chatHasOlderMessages = false;
+    }
+
+    if (signal && signal.aborted) throw new DOMException('Aborted', 'AbortError');
+    console.log('[openChat] messages:', messages?.length, 'total:', totalCount);
+
+    // Enrich messages with _replyTo data from DB
+    if (messages && messages.length > 0) {
+      // Build a local lookup of loaded messages for fast access
+      const msgMap = {};
+      for (const m of messages) { if (m.id) msgMap[m.id] = m; }
+
+      for (const m of messages) {
+        if (m.reply_to_id) {
+          // Try local lookup first, then fetch from DB
+          const ref = msgMap[m.reply_to_id];
+          if (ref) {
+            m._replyTo = { role: ref.role, content: ref.content, msgId: ref.id };
+          } else {
+            try {
+              const fetched = await window.mika5.db.getMessage(m.reply_to_id);
+              if (fetched) {
+                m._replyTo = { role: fetched.role, content: fetched.content, msgId: fetched.id };
+              }
+            } catch (_) {}
+          }
+        }
+      }
+    }
+
+    // Full history needed for AI context (load all for conversationHistory)
+    let allMessages;
+    if (totalCount > MESSAGES_PAGE_SIZE) {
+      allMessages = await withTimeout(Store.listMessages(chatId), 10000, 'cargar historial completo', signal);
+    } else {
+      allMessages = messages;
+    }
+    conversationHistory = (allMessages || []).map((m) => ({ role: m.role, content: m.content }));
+
+    // Render only the recent page, with "load more" button if needed
+    renderMessagesSafe(messages, signal, chatHasOlderMessages);
+
+    el("btnSaveChatDoc").disabled = false;
+    const exp = el("btnExportChat");
+    if (exp) exp.disabled = false;
+    window.mika5.setAppState("lastChatId", activeChatId).catch(() => {});
+
+    // Restore draft if one exists for this chat
+    const draft = chatDrafts.get(chatId);
+    const inputEl = el("input");
+    if (draft) {
+      chatAttachments = draft.attachments || [];
+      if (inputEl) inputEl.value = draft.inputText || '';
+      replyToMessage = draft.replyTo || null;
+      chatDrafts.delete(chatId);
+      renderAttachmentPreview();
+      if (replyToMessage) {
+        try {
+          const replyBar = document.querySelector('.reply-bar');
+          if (!replyBar) {
+            // Re-show reply bar if function exists
+            if (typeof setReplyTo === 'function') setReplyTo(replyToMessage);
+          }
+        } catch (_) {}
+      }
+    } else {
+      chatAttachments = [];
+      if (inputEl) inputEl.value = '';
+      replyToMessage = null;
+      renderAttachmentPreview();
+      clearReplyTo();
+    }
+  } catch (error) {
+    if (error.name === 'AbortError') throw error;
+    console.error("[openChat] ERROR:", error);
+    showToast("Error al cargar el chat", "error");
+    if (chatEl) {
+      chatEl.innerHTML = '<div class="empty-chat-hint">Error cargando mensajes. Intenta de nuevo.</div>';
+    }
+  }
+  console.log('[openChat] DONE');
+}
+
+// Load older messages and prepend to chat
+async function loadOlderMessages() {
+  if (!activeChatId || !chatHasOlderMessages || chatOldestLoadedOffset <= 0) return;
+
+  const chatEl = el("chat");
+  if (!chatEl) return;
+
+  const prevScrollHeight = chatEl.scrollHeight;
+
+  const loadCount = Math.min(MESSAGES_PAGE_SIZE, chatOldestLoadedOffset);
+  const newOffset = chatOldestLoadedOffset - loadCount;
+
+  try {
+    const olderMsgs = await Store.listMessages(activeChatId, { limit: loadCount, offset: newOffset });
+    chatOldestLoadedOffset = newOffset;
+    chatHasOlderMessages = newOffset > 0;
+
+    // Sync conversationHistory: prepend older messages so AI has full context
+    if (olderMsgs && olderMsgs.length > 0) {
+      const olderForHistory = olderMsgs.map(m => ({ role: m.role, content: m.content }));
+      conversationHistory = [...olderForHistory, ...conversationHistory];
+    }
+
+    // Enrich older messages with _replyTo
+    if (olderMsgs && olderMsgs.length > 0) {
+      const msgMap = {};
+      for (const m of olderMsgs) { if (m.id) msgMap[m.id] = m; }
+      for (const m of olderMsgs) {
+        if (m.reply_to_id) {
+          const ref = msgMap[m.reply_to_id];
+          if (ref) {
+            m._replyTo = { role: ref.role, content: ref.content, msgId: ref.id };
+          } else {
+            try {
+              const fetched = await window.mika5.db.getMessage(m.reply_to_id);
+              if (fetched) {
+                m._replyTo = { role: fetched.role, content: fetched.content, msgId: fetched.id };
+              }
+            } catch (_) {}
+          }
+        }
+      }
+    }
+
+    // Remove existing "load more" button
+    const existingBtn = chatEl.querySelector('.load-more-btn');
+    if (existingBtn) existingBtn.remove();
+
+    // Prepend messages
+    const fragment = document.createDocumentFragment();
+
+    // Add new "load more" button if still needed
+    if (chatHasOlderMessages) {
+      const btn = document.createElement("button");
+      btn.className = "load-more-btn";
+      btn.textContent = `Cargar mensajes anteriores (${newOffset} restantes)`;
+      btn.addEventListener("click", loadOlderMessages);
+      fragment.appendChild(btn);
+    }
+
+    for (const msg of olderMsgs) {
+      try { appendMsg(msg, fragment); } catch (e) { console.warn("appendMsg error:", e.message); }
+    }
+
+    chatEl.insertBefore(fragment, chatEl.firstChild?.nextSibling || chatEl.firstChild);
+
+    // Preserve scroll position
+    chatEl.scrollTop = chatEl.scrollHeight - prevScrollHeight;
+  } catch (e) {
+    console.error("[loadOlderMessages] ERROR:", e);
+    showToast("Error al cargar mensajes anteriores", "error");
+  }
+}
+
+// openChat: external use (from chat list clicks) — wrapped in safeViewChange
+async function openChat(chatId) {
+  const chatEl = el("chat");
+  if (activeChatId === chatId && chatEl && chatEl.children.length > 0) return;
+  return safeViewChange(async (signal) => {
+    await openChatInternal(chatId, signal);
+    // Reload context panel when switching chats in quick-chat (per-chat context)
+    if (activeProjectId === QUICK_CHAT_ID) {
+      Promise.all([loadProjectContext(), renderKnowledgeList()]).catch(() => {});
+    }
+  });
+}
+
+// renderMessagesSafe: DocumentFragment + abort signal + tracked setTimeout + load-more
+function renderMessagesSafe(messages, signal, showLoadMore) {
+  const chatEl = el("chat");
+  const input = el("input");
+
+  if (!chatEl) {
+    if (input) input.disabled = false;
+    return;
+  }
+
+  chatEl.innerHTML = "";
+
+  if (!Array.isArray(messages) || messages.length === 0) {
+    const hint = document.createElement("div");
+    hint.className = "empty-chat-hint";
+    hint.textContent = messages?.length === 0
+      ? "Escribe un mensaje abajo para empezar."
+      : "Error al cargar mensajes.";
+    chatEl.appendChild(hint);
+    if (input) { input.disabled = false; try { input.focus(); } catch(e) {} }
+    try { updateSendButtonState(); } catch(e) {}
+    return;
+  }
+
+  // "Load more" button at the top if there are older messages
+  if (showLoadMore) {
+    const btn = document.createElement("button");
+    btn.className = "load-more-btn";
+    btn.textContent = `Cargar mensajes anteriores (${chatOldestLoadedOffset} restantes)`;
+    btn.addEventListener("click", loadOlderMessages);
+    chatEl.appendChild(btn);
+  }
+
+  const BATCH_SIZE = 5;
+  let index = 0;
+  let cancelled = false;
+
+  // Cancel rendering if the signal is aborted (view change during render)
+  if (signal) {
+    signal.addEventListener('abort', () => { cancelled = true; }, { once: true });
+    if (signal.aborted) return;
+  }
+
+  function renderBatch() {
+    if (cancelled || (signal && signal.aborted)) return;
+
+    const fragment = document.createDocumentFragment();
+    const end = Math.min(index + BATCH_SIZE, messages.length);
+
+    for (let i = index; i < end; i++) {
+      try {
+        appendMsg(messages[i], fragment);
+      } catch (e) {
+        console.warn("appendMsg error:", e.message);
+      }
+    }
+
+    if (cancelled || (signal && signal.aborted)) return;
+
+    chatEl.appendChild(fragment);
+    index = end;
+
+    if (index < messages.length && !cancelled) {
+      const tid = setTimeout(renderBatch, 0);
+      pendingTimeouts.push(tid);
+    } else if (!cancelled) {
+      // All done — single scroll at the end
+      chatEl.scrollTop = chatEl.scrollHeight;
+      if (input) { input.disabled = false; try { input.focus(); } catch(e) {} }
+      try { updateSendButtonState(); } catch(e) {}
+    }
+  }
+
+  const tid = setTimeout(renderBatch, 0);
+  pendingTimeouts.push(tid);
+}
+
+// Legacy wrapper for code that still calls renderMessages
+function renderMessages(messages) {
+  renderMessagesSafe(messages, null);
+}
+
+async function loadProjectContext() {
+  const input = el("projectContextInput");
+  const btnAdd = el("btnAddKnowledge");
+  if (!input) return;
+  if (!activeProjectId) {
+    input.value = "";
+    input.disabled = true;
+    if (btnAdd) btnAdd.disabled = true;
+    return;
+  }
+  // For quick-chat, require an active chat to enable per-chat context
+  if (activeProjectId === QUICK_CHAT_ID && !activeChatId) {
+    input.value = "";
+    input.disabled = true;
+    if (btnAdd) btnAdd.disabled = true;
+    return;
+  }
+  input.disabled = false;
+  if (btnAdd) btnAdd.disabled = false;
+
+  // Update placeholder based on context type
+  const isChat = activeProjectId === QUICK_CHAT_ID;
+  input.placeholder = isChat
+    ? (t('context.chatSystemPromptPlaceholder') || 'Define cómo debe comportarse la IA en este chat...')
+    : (t('context.systemPromptPlaceholder') || 'Define cómo debe comportarse la IA en este proyecto...');
+
+  try {
+    let text;
+    if (isChat && activeChatId) {
+      text = await window.mika5.db.getChatContext(activeChatId);
+    } else {
+      text = await window.mika5.db.getProjectContext(activeProjectId);
+    }
+    input.value = text || "";
+  } catch (_) {
+    input.value = "";
+  }
+}
+
+async function saveProjectContext() {
+  if (!activeProjectId) return;
+  const input = el("projectContextInput");
+  if (!input) return;
+  try {
+    if (activeProjectId === QUICK_CHAT_ID && activeChatId) {
+      await window.mika5.db.setChatContext(activeChatId, input.value.trim());
+    } else {
+      await window.mika5.db.setProjectContext(activeProjectId, input.value.trim());
+    }
+    showToast("Instrucciones guardadas", "success");
+  } catch (_) {
+    showToast("Error al guardar", "error");
+  }
+}
+
+async function renderKnowledgeList() {
+  const list = el("knowledgeList");
+  if (!list) return;
+  list.innerHTML = "";
+  if (!activeProjectId) {
+    list.innerHTML = '<div class="context-hint">Selecciona un proyecto para gestionar la base de conocimiento.</div>';
+    return;
+  }
+  if (activeProjectId === QUICK_CHAT_ID && !activeChatId) {
+    list.innerHTML = '<div class="context-hint">Selecciona un chat para gestionar su base de conocimiento.</div>';
+    return;
+  }
+  try {
+    const items = (activeProjectId === QUICK_CHAT_ID && activeChatId)
+      ? await window.mika5.db.listKnowledge(activeProjectId, activeChatId)
+      : await window.mika5.db.listKnowledge(activeProjectId);
+    if (!items || items.length === 0) {
+      list.innerHTML = '<div class="context-hint">Sin archivos. Añade archivos de texto.</div>';
+      return;
+    }
+    for (const it of items) {
+      const div = document.createElement("div");
+      div.className = "knowledge-item";
+      const STATUS_MAP = {
+        ready:    { icon: '✓', color: '#22c55e', titleKey: 'knowledge.statusReady' },
+        error:    { icon: '✗', color: '#ef4444', titleKey: 'knowledge.statusError' },
+        indexing: { icon: '⏳', color: '#eab308', titleKey: 'knowledge.statusPending' },
+        pending:  { icon: '⏳', color: '#eab308', titleKey: 'knowledge.statusPending' }
+      };
+      const s = STATUS_MAP[it.index_status] || STATUS_MAP.pending;
+      const statusTitle = s.titleKey === 'knowledge.statusError' ? `${t(s.titleKey)}: ${it.index_error || '?'}` : t(s.titleKey);
+      div.innerHTML = `<span class="knowledge-item-status" title="${statusTitle}" style="color:${s.color};margin-right:4px;font-size:0.75rem">${s.icon}</span><span class="knowledge-item-name" title="${(it.title || "").replace(/"/g, "&quot;")}">${escapeHtml(it.title || "Sin título")}</span><button type="button" class="knowledge-item-remove" data-id="${escapeHtml(it.id)}" aria-label="Eliminar">×</button>`;
+      div.querySelector(".knowledge-item-remove").onclick = async () => {
+        try {
+          await window.mika5.db.deleteKnowledge(it.id);
+          await renderKnowledgeList();
+          showToast("Archivo eliminado del conocimiento", "success");
+        } catch (_) {
+          showToast("Error al eliminar", "error");
+        }
+      };
+      list.appendChild(div);
+    }
+  } catch (_) {
+    list.innerHTML = '<div class="context-hint">Error al cargar.</div>';
+  }
+}
+
+function escapeHtml(s) {
+  const div = document.createElement("div");
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+function applyTranslations() {
+  // Apply i18n to static UI elements
+  const map = {
+    'projectName': { attr: 'placeholder', key: 'sidebar.projectName' },
+    'input': { attr: 'placeholder', key: 'chat.placeholder' },
+  };
+  for (const [id, cfg] of Object.entries(map)) {
+    const elem = el(id);
+    if (elem) elem[cfg.attr] = t(cfg.key);
+  }
+  // Footer
+  const footer = document.querySelector('.input-area > div:last-child');
+  if (footer && footer.style.textAlign === 'center') footer.textContent = t('footer.tagline');
+  // Section titles
+  document.querySelectorAll('.section-title > span').forEach(span => {
+    if (span.textContent.includes('PROYECTO') || span.textContent.includes('PROJECT')) span.textContent = t('sidebar.projects');
+    if (span.textContent.includes('CHAT') ) span.textContent = t('sidebar.recentChats');
+  });
+  // Buttons
+  const sendBtn = el('btnSend');
+  if (sendBtn && !isGenerating) {
+    const svgContent = sendBtn.querySelector('svg')?.outerHTML || '';
+    sendBtn.innerHTML = svgContent + ' ' + t('action.send');
+  }
+}
+
+function toggleContextPanel() {
+  const panel = el("contextPanel");
+  if (!panel) return;
+  panel.classList.toggle("open");
+  // Update panel header based on context type
+  const headerSpan = panel.querySelector('.context-panel-header span');
+  if (headerSpan) {
+    headerSpan.textContent = (activeProjectId === QUICK_CHAT_ID)
+      ? (t('context.chatTitle') || 'Contexto del chat')
+      : (t('context.title') || 'Contexto del proyecto');
+  }
+  if (panel.classList.contains("open") && activeProjectId) {
+    loadProjectContext();
+    renderKnowledgeList();
+  }
+}
+
+async function newChat() {
+  if (!activeProjectId) return;
+
+  const res = await withTimeout(Store.createChat(activeProjectId, "Chat"), 8000, 'crear chat inicial');
+  if (res?.ok && res.id) {
+    await openChat(res.id);
+  } else {
+    showToast("No se pudo crear el chat.", "error");
+  }
+}
+
+let _lastRenderedModel = null; // Track last model for change indicators
+
+function appendMsg(msg, target) {
+  const role = msg.role;
+  const content = msg.content || "";
+  const msgModel = msg.model || null;
+  const msgId = msg.id || ('msg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7));
+
+  // Insert model-change indicator if model switched
+  const container = target || el("chat");
+  if (msgModel && _lastRenderedModel && msgModel !== _lastRenderedModel && container) {
+    const indicator = document.createElement("div");
+    indicator.className = "model-change-indicator";
+    indicator.innerHTML = `<span class="model-change-line"></span><span class="model-change-label">${escapeHtml(msgModel)}</span><span class="model-change-line"></span>`;
+    container.appendChild(indicator);
+  }
+  if (msgModel) _lastRenderedModel = msgModel;
+
+  const div = document.createElement("div");
+  div.className = `msg ${role}`;
+  div.dataset.msgId = msgId;
+  if (msgModel) div.dataset.model = msgModel;
+
+  // Render reply quote if this message is replying to another
+  if (msg._replyTo) {
+    const quote = document.createElement("div");
+    quote.className = "msg-reply-quote";
+    quote.innerHTML = `<div class="reply-role">${escapeHtml(msg._replyTo.role === 'user' ? 'Usuario' : 'Asistente')}</div><div class="reply-text">${escapeHtml((msg._replyTo.content || '').slice(0, 120))}</div>`;
+    if (msg._replyTo.msgId) {
+      quote.addEventListener("click", () => scrollToMessage(msg._replyTo.msgId));
+    }
+    div.appendChild(quote);
+  }
+
+  const contentEl = document.createElement("div");
+  contentEl.className = "msg-content";
+
+  // Collapse very long messages (e.g. pasted documents) with expand toggle
+  const MSG_COLLAPSE_CHARS = 2000;
+  const isLong = content.length > MSG_COLLAPSE_CHARS;
+  const renderContent = isLong ? content.slice(0, MSG_COLLAPSE_CHARS) : content;
+
+  try {
+    contentEl.innerHTML = renderMarkdown(renderContent);
+    wrapTablesResponsive(contentEl);
+    if (isLong) {
+      contentEl.insertAdjacentHTML('beforeend',
+        '<span class="msg-truncated-indicator">… (vista previa)</span>');
+      const expandBtn = document.createElement("button");
+      expandBtn.className = "btn-save-message msg-expand-btn";
+      expandBtn.textContent = "Mostrar completo";
+      expandBtn.addEventListener("click", () => {
+        try {
+          contentEl.innerHTML = renderMarkdown(content);
+          wrapTablesResponsive(contentEl);
+          highlightCodeBlocks(contentEl);
+          addCopyButtonsToCodeBlocks(contentEl);
+        } catch (e) {
+          contentEl.textContent = content;
+        }
+        expandBtn.remove();
+      });
+      contentEl.appendChild(expandBtn);
+    }
+    highlightCodeBlocks(contentEl);
+    addCopyButtonsToCodeBlocks(contentEl);
+  } catch (e) {
+    console.warn('Markdown render error:', e.message);
+    contentEl.textContent = renderContent;
+  }
+  div.appendChild(contentEl);
+
+  // Actions for ALL messages (copy)
+  const actions = document.createElement("div");
+  actions.className = "msg-actions";
+
+  const copyBtn = document.createElement("button");
+  copyBtn.className = "btn-save-message";
+  copyBtn.textContent = t('action.copy');
+  copyBtn.type = "button";
+  copyBtn.addEventListener("click", () => {
+    navigator.clipboard.writeText(content).then(
+      () => showToast(t('toast.copied'), "success"),
+      () => showToast("Error", "error")
+    );
+  });
+  actions.appendChild(copyBtn);
+
+  // Reply button — WhatsApp-style reply to this message
+  const replyBtn = document.createElement("button");
+  replyBtn.className = "btn-save-message";
+  replyBtn.textContent = "Responder";
+  replyBtn.type = "button";
+  replyBtn.addEventListener("click", () => {
+    setReplyTo({ role, content, msgId });
+  });
+  actions.appendChild(replyBtn);
+
+  // Save as doc — only for assistant messages
+  if (role === "assistant") {
+    const btn = document.createElement("button");
+    btn.className = "btn-save-message";
+    btn.textContent = t('action.saveAsDoc');
+    btn.type = "button";
+    btn.addEventListener("click", async () => {
+      if (!activeProjectId) {
+        showToast("Selecciona un proyecto primero", "error");
+        return;
+      }
+      const suggestedTitle = generateSmartTitle(content);
+      const title = await mikaPrompt('Guardar como documento', 'Título del documento:', suggestedTitle);
+      if (title == null || title.trim() === "") return;
+      btn.disabled = true;
+      try {
+        const savePayload = {
+          projectId: activeProjectId,
+          title: title.trim(),
+          content,
+          mimeType: "text/markdown"
+        };
+        if (activeProjectId === QUICK_CHAT_ID && activeChatId) {
+          savePayload.chatId = activeChatId;
+        }
+        const result = await saveDocument(savePayload);
+        if (!result.ok) {
+          showToast("Error: " + (result.error || "desconocido"), "error");
+          return;
+        }
+        showToast("Documento guardado en Knowledge.", "success");
+        await renderKnowledgeList();
+      } finally {
+        btn.disabled = false;
+      }
+    });
+    actions.appendChild(btn);
+  }
+
+  // Model badge for assistant messages
+  if (role === "assistant" && msgModel) {
+    const badge = document.createElement("span");
+    badge.className = "model-badge";
+    badge.textContent = msgModel;
+    badge.title = `Respondido por ${msgModel}`;
+    actions.appendChild(badge);
+  }
+
+  div.appendChild(actions);
+
+  if (container) {
+    container.appendChild(div);
+    // Only scroll if appending directly to chat (not to fragment)
+    if (!target) {
+      const chatEl = el("chat");
+      if (chatEl) chatEl.scrollTop = chatEl.scrollHeight;
+    }
+  }
+}
+
+function appendGeneratingPlaceholder() {
+  const chatEl = el("chat");
+  if (!chatEl) return null;
+  const div = document.createElement("div");
+  div.id = "msg-generating-placeholder";
+  div.className = "msg assistant msg-generating";
+  div.textContent = "Generando…";
+  chatEl.appendChild(div);
+  chatEl.scrollTop = chatEl.scrollHeight;
+  return div;
+}
+
+function removeGeneratingPlaceholder() {
+  const placeholder = document.getElementById("msg-generating-placeholder");
+  if (placeholder) placeholder.remove();
+}
+
+// ============================================
+// Reply-to system (WhatsApp-style)
+// ============================================
+function setReplyTo(msg) {
+  replyToMessage = msg;
+  const preview = el("replyPreview");
+  if (!preview) return;
+  el("replyPreviewRole").textContent = msg.role === 'user' ? 'Usuario' : 'Asistente';
+  el("replyPreviewText").textContent = (msg.content || '').slice(0, 150);
+  preview.style.display = "flex";
+  try { el("input").focus(); } catch (_) {}
+}
+
+function clearReplyTo() {
+  replyToMessage = null;
+  const preview = el("replyPreview");
+  if (preview) preview.style.display = "none";
+}
+
+function scrollToMessage(msgId) {
+  const target = document.querySelector(`[data-msg-id="${msgId}"]`);
+  if (!target) return;
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  target.classList.remove('reply-flash');
+  void target.offsetWidth; // force reflow
+  target.classList.add('reply-flash');
+  setTimeout(() => target.classList.remove('reply-flash'), 1600);
+}
+
+// ============================================
+// Chat search system (Ctrl+F in chat)
+// ============================================
+let searchMatches = [];
+let searchCurrentIdx = -1;
+
+function openChatSearch() {
+  const bar = el("chatSearchBar");
+  if (!bar) return;
+  bar.style.display = "flex";
+  const input = el("chatSearchInput");
+  if (input) { input.value = ""; input.focus(); }
+  clearSearchHighlights();
+  el("chatSearchCount").textContent = "";
+}
+
+function closeChatSearch() {
+  const bar = el("chatSearchBar");
+  if (bar) bar.style.display = "none";
+  clearSearchHighlights();
+  searchMatches = [];
+  searchCurrentIdx = -1;
+  el("chatSearchCount").textContent = "";
+}
+
+function clearSearchHighlights() {
+  const chatEl = el("chat");
+  if (!chatEl) return;
+  chatEl.querySelectorAll('.msg-search-highlight').forEach(hl => {
+    const parent = hl.parentNode;
+    parent.replaceChild(document.createTextNode(hl.textContent), hl);
+    parent.normalize();
+  });
+  chatEl.querySelectorAll('.msg.search-match').forEach(m => m.classList.remove('search-match'));
+}
+
+function performChatSearch(query) {
+  clearSearchHighlights();
+  searchMatches = [];
+  searchCurrentIdx = -1;
+  const countEl = el("chatSearchCount");
+
+  if (!query || query.length < 2) {
+    if (countEl) countEl.textContent = "";
+    return;
+  }
+
+  const chatEl = el("chat");
+  if (!chatEl) return;
+
+  const msgs = chatEl.querySelectorAll('.msg .msg-content');
+  const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+
+  msgs.forEach(contentEl => {
+    const walker = document.createTreeWalker(contentEl, NodeFilter.SHOW_TEXT, null);
+    const textNodes = [];
+    while (walker.nextNode()) textNodes.push(walker.currentNode);
+
+    for (const node of textNodes) {
+      if (!regex.test(node.textContent)) continue;
+      regex.lastIndex = 0;
+      const frag = document.createDocumentFragment();
+      let lastIdx = 0;
+      const text = node.textContent;
+      let m;
+      while ((m = regex.exec(text)) !== null) {
+        if (m.index > lastIdx) frag.appendChild(document.createTextNode(text.slice(lastIdx, m.index)));
+        const span = document.createElement("span");
+        span.className = "msg-search-highlight";
+        span.textContent = m[1];
+        frag.appendChild(span);
+        searchMatches.push(span);
+        lastIdx = regex.lastIndex;
+      }
+      if (lastIdx < text.length) frag.appendChild(document.createTextNode(text.slice(lastIdx)));
+      node.parentNode.replaceChild(frag, node);
+    }
+
+    if (contentEl.querySelector('.msg-search-highlight')) {
+      contentEl.closest('.msg')?.classList.add('search-match');
+    }
+  });
+
+  if (countEl) countEl.textContent = searchMatches.length ? `${searchMatches.length} resultados` : 'Sin resultados';
+  if (searchMatches.length > 0) navigateSearch(0);
+}
+
+function navigateSearch(idx) {
+  if (searchMatches.length === 0) return;
+  if (searchMatches[searchCurrentIdx]) searchMatches[searchCurrentIdx].classList.remove('active');
+  searchCurrentIdx = ((idx % searchMatches.length) + searchMatches.length) % searchMatches.length;
+  const current = searchMatches[searchCurrentIdx];
+  current.classList.add('active');
+  current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  const countEl = el("chatSearchCount");
+  if (countEl) countEl.textContent = `${searchCurrentIdx + 1}/${searchMatches.length}`;
+}
+
+async function send() {
+  const model = el("modelSelect").value;
+  if (!model) {
+    showToast("Selecciona un modelo.", "error");
+    return;
+  }
+  // Persist model on each send
+  window.mika5.setAppState("lastModel", model).catch(() => {});
+
+  const text = el("input").value.trim();
+  const hasAttachments = chatAttachments.length > 0;
+  if (!text && !hasAttachments) return;
+
+  // Separate image attachments from text attachments
+  const imageAttachments = chatAttachments.filter(a => a.type === 'image');
+  const textAttachments = chatAttachments.filter(a => a.type === 'text');
+  
+  let contentToSend = text;
+  if (textAttachments.length) {
+    const parts = textAttachments.map((att) => `--- ${att.name} ---\n${att.text}`);
+    contentToSend = contentToSend ? contentToSend + "\n\n" + parts.join("\n\n") : parts.join("\n\n");
+  }
+  if (imageAttachments.length && !contentToSend) {
+    contentToSend = "Describe this image.";
+  }
+
+  // Display content for user message — show summary for large text attachments
+  let displayContent = text || '';
+  if (textAttachments.length > 0) {
+    const summaries = textAttachments.map(att => {
+      const chars = (att.text || '').length;
+      return `**${att.name}** (${chars.toLocaleString()} caracteres)`;
+    });
+    const attachSummary = summaries.join(' | ');
+    displayContent = displayContent
+      ? `${displayContent}\n\n${attachSummary}`
+      : attachSummary;
+  }
+  if (imageAttachments.length > 0) {
+    const MAX_PREVIEWS = 5;
+    const previewsToShow = imageAttachments.slice(0, MAX_PREVIEWS);
+    const imagePreviews = previewsToShow.map(att => {
+      const mimeType = att.name.endsWith('.png') ? 'image/png' : 'image/jpeg';
+      return `<span class="image-preview-clickable" style="display:inline-block;margin:2px;">`
+        + `<img src="data:${mimeType};base64,${att.base64}" `
+        + `class="embedded-image-preview" `
+        + `loading="lazy" `
+        + `data-zoomable="true" `
+        + `role="img" aria-label="Imagen adjunta: ${att.name}" `
+        + `alt="${att.name}" /></span>`;
+    }).join('');
+    const overflow = imageAttachments.length > MAX_PREVIEWS
+      ? `\n\n*+${imageAttachments.length - MAX_PREVIEWS} imagen(es) mas*`
+      : '';
+    displayContent = displayContent
+      ? `${displayContent}\n\n${imagePreviews}${overflow}`
+      : `${imagePreviews}${overflow}`;
+  }
+
+  if (!activeProjectId) {
+    showToast("Selecciona un proyecto primero.", "error");
+    return;
+  }
+  if (!activeChatId) {
+    const res = await withTimeout(Store.createChat(activeProjectId, "Chat"), 8000, 'crear chat inicial');
+    if (!res || !res.ok) {
+      showToast("No se pudo crear el chat.", "error");
+      return;
+    }
+    await openChat(res.id);
+  }
+
+  el("input").value = "";
+  el("input").style.height = 'auto';
+  chatAttachments = [];
+  renderAttachmentPreview();
+
+  // Save lightweight version to DB (no base64 images — they bloat DB and cause layout issues on reload)
+  let dbContent = contentToSend;
+  if (imageAttachments.length > 0) {
+    const imgNames = imageAttachments.map(a => a.name).join(', ');
+    dbContent = dbContent
+      ? `${dbContent}\n\n[Adjuntos: ${imgNames}]`
+      : `[Adjuntos: ${imgNames}]`;
+  }
+
+  // Capture reply context before clearing
+  const currentReply = replyToMessage ? { ...replyToMessage } : null;
+  clearReplyTo();
+
+  // If replying, prepend quote context to what the AI sees and to what gets saved
+  if (currentReply) {
+    const quoteSnippet = (currentReply.content || '').slice(0, 300);
+    const replyPrefix = `[En respuesta a ${currentReply.role === 'user' ? 'Usuario' : 'Asistente'}: "${quoteSnippet}"]\n\n`;
+    contentToSend = replyPrefix + contentToSend;
+    dbContent = replyPrefix + dbContent;
+  }
+
+  // Render rich version with thumbnails in current session only
+  appendMsg({ role: "user", content: displayContent, _replyTo: currentReply });
+  await Store.addMessage(activeChatId, "user", dbContent, currentReply?.msgId || null, model);
+
+  isGenerating = true;
+  let wasCanceled = false;
+  const sendBtn = el("btnSend");
+  const stopBtn = el("btnStop");
+  
+  if (sendBtn) sendBtn.style.display = "none";
+  if (stopBtn) {
+    stopBtn.style.display = "";
+    stopBtn.disabled = false;
+    stopBtn.onclick = () => {
+      wasCanceled = true;
+      showToast(t('toast.generationStopped') || 'Generation stopped', 'info');
+      // Signal abort to main process
+      try { window.mika5.ai.abort(); } catch(_) {}
+      removeGeneratingPlaceholder();
+      isGenerating = false;
+      if (sendBtn) { sendBtn.style.display = ""; sendBtn.disabled = false; }
+      if (stopBtn) stopBtn.style.display = "none";
+      updateSendButtonState();
+    };
+  }
+  appendGeneratingPlaceholder();
+
+  try {
+    const msgs = await Store.listMessages(activeChatId);
+
+    // === KNOWLEDGE CONTEXT: Always inject document content ===
+    let ragContext = null;
+    let knowledgeListContext = null;
+
+    // Load chunk text directly from DB (no embeddings, no Ollama, no disk I/O)
+    try {
+      const kProjId = activeProjectId === QUICK_CHAT_ID ? null : activeProjectId;
+      const kChatId = activeProjectId === QUICK_CHAT_ID ? activeChatId : null;
+      if (kProjId || kChatId) {
+        // Use cached provider privacy (set by loadProvider) — no IPC needed
+        const maxRagChars = (typeof providerPrivacy !== 'undefined' && providerPrivacy === 'private') ? 12000 : 24000;
+
+        // Server-side truncation: only returns chunks up to maxRagChars
+        // Use complete mode for project-level context to avoid round-robin bias
+        const mode = kProjId !== null ? 'complete' : 'selective';
+        const chunks = await window.mika5.rag.listChunksRaw(kProjId, kChatId, maxRagChars, mode);
+        if (chunks && chunks.length > 0) {
+          const titles = [...new Set(chunks.map(c => c.title))];
+          knowledgeListContext = `Documentos en la base de conocimiento del proyecto (${titles.length}):\n${titles.map(t => '- ' + t).join('\n')}`;
+
+          const contextText = chunks.map(c =>
+            `[Documento: ${c.title || "Sin título"}] (fragmento ${(c.chunk_index || 0) + 1}):\n${c.chunk_text}`
+          ).join("\n\n---\n\n");
+          ragContext = `El usuario tiene los siguientes documentos cargados en la base de conocimiento de este proyecto. Cuando el usuario pregunte sobre "archivos", "documentos", "contexto del proyecto" o el contenido del proyecto, se refiere a ESTE contenido:\n\n${contextText}\n\nFin de los documentos del proyecto. Basa tu respuesta en este contenido.`;
+        }
+      }
+    } catch (chunkErr) {
+      console.error('[KNOWLEDGE] CRITICAL: Failed to load chunks:', chunkErr);
+      // Last resort: try loading knowledge item list only (titles without content)
+      try {
+        const kProjId2 = activeProjectId === QUICK_CHAT_ID ? null : activeProjectId;
+        const kChatId2 = activeProjectId === QUICK_CHAT_ID ? activeChatId : null;
+        if (kProjId2 || kChatId2) {
+          const items = await window.mika5.db.listKnowledge(kProjId2, kChatId2);
+          const readyItems = (items || []).filter(i => i.index_status === 'ready');
+          if (readyItems.length) {
+            knowledgeListContext = `Documentos en la base de conocimiento (${readyItems.length}):\n${readyItems.map(i => '- ' + i.title).join('\n')}\n(El contenido no pudo ser cargado. Informa al usuario que reinicie la aplicación.)`;
+          }
+        }
+      } catch (_) {}
+    }
+
+    // Note: RAG semantic search removed — direct chunk injection is more reliable
+    // and doesn't depend on Ollama loading the embedding model
+
+    const baseMessages = msgs.map((m) => ({ role: m.role, content: m.content }));
+    // Replace last user message with full content (DB has lightweight version without file text)
+    if (baseMessages.length > 0 && contentToSend) {
+      const lastIdx = baseMessages.length - 1;
+      if (baseMessages[lastIdx].role === 'user') {
+        baseMessages[lastIdx] = { role: 'user', content: contentToSend };
+      }
+    }
+    conversationHistory = baseMessages;
+
+    // === Gestión progresiva de contexto (mensajes) ===
+    let managedContext = await manageConversationContext(conversationHistory);
+    if (managedContext !== conversationHistory) conversationHistory = managedContext;
+    let trimmedMessages = managedContext;
+
+    // === Context Window Management (caracteres) ===
+    // Fallback: limitar por tamaño si sigue siendo grande
+    const MAX_CONTEXT_CHARS = 32000;
+    const MIN_RECENT_PAIRS = 2;
+    const totalChars = trimmedMessages.reduce((sum, m) => sum + (m.content || '').length, 0);
+
+    if (totalChars > MAX_CONTEXT_CHARS) {
+      let charCount = 0;
+      let cutIndex = trimmedMessages.length;
+      for (let i = trimmedMessages.length - 1; i >= 0; i--) {
+        charCount += (trimmedMessages[i].content || '').length;
+        cutIndex = i;
+        const keptMessages = trimmedMessages.length - i;
+        if (charCount > MAX_CONTEXT_CHARS && keptMessages >= MIN_RECENT_PAIRS * 2) {
+          cutIndex = i + 1;
+          break;
+        }
+      }
+      trimmedMessages = trimmedMessages.slice(cutIndex);
+      if (cutIndex > 0) {
+        trimmedMessages.unshift({
+          role: 'system',
+          content: `[Previous ${cutIndex} messages omitted to fit context window.]`
+        });
+        console.log(`Context trimmed (chars): ${managedContext.length} → ${trimmedMessages.length} messages`);
+      }
+    }
+
+    // Build ONE combined system message (many models ignore all but the first system message)
+    const systemParts = [];
+
+    // Part 1: Project/chat instructions
+    if (activeProjectId && activeProjectId !== QUICK_CHAT_ID) {
+      try {
+        const projectPrompt = await window.mika5.db.getProjectContext(activeProjectId);
+        if (projectPrompt && projectPrompt.trim()) systemParts.push(projectPrompt.trim());
+      } catch (e) {
+        console.warn("Project context error:", e);
+        showToast(t('toast.contextError') || 'Could not load project instructions', 'warning');
+      }
+    } else if (activeProjectId === QUICK_CHAT_ID && activeChatId) {
+      try {
+        const chatPrompt = await window.mika5.db.getChatContext(activeChatId);
+        if (chatPrompt && chatPrompt.trim()) systemParts.push(chatPrompt.trim());
+      } catch (e) {
+        console.warn("Chat context error:", e);
+        showToast(t('toast.contextError') || 'Could not load chat instructions', 'warning');
+      }
+    }
+
+    // Part 2: Knowledge content (ragContext already has document text)
+    if (ragContext) systemParts.push(ragContext);
+    else if (knowledgeListContext) systemParts.push(knowledgeListContext);
+
+    // Merge into a single system message
+    const systemMessages = [];
+    if (systemParts.length) {
+      systemMessages.push({ role: "system", content: systemParts.join("\n\n") });
+    }
+
+    const finalMessages = [...systemMessages, ...trimmedMessages];
+
+    // Add images to the last user message if present (Ollama vision format)
+    const payload = { model, messages: finalMessages };
+    if (imageAttachments.length > 0) {
+      if (modelSupportsVision(model)) {
+        payload.images = imageAttachments.map(a => a.base64);
+      } else {
+        // Model doesn't support vision — warn user, send text-only with image names
+        const imgNames = imageAttachments.map(a => a.name).join(', ');
+        showToast(`El modelo "${model}" no soporta imágenes. Se envió solo el texto.`, 'warning');
+        // Append image names to the last user message so AI knows images were intended
+        const lastMsg = payload.messages[payload.messages.length - 1];
+        if (lastMsg && lastMsg.role === 'user') {
+          lastMsg.content = (lastMsg.content || '') + `\n\n[El usuario adjuntó imágenes (${imgNames}) pero el modelo no soporta visión]`;
+        }
+      }
+    }
+
+    try {
+      if (wasCanceled) throw new Error('Canceled');
+      const out = await window.mika5.ai.chat(payload);
+      if (wasCanceled) throw new Error('Canceled');
+      if (!out || !out.message) throw new Error('Respuesta vacía');
+      const answer = out.message.content;
+      appendMsg({ role: "assistant", content: answer, model });
+      await Store.addMessage(activeChatId, "assistant", answer, null, model);
+
+      // Auto-rename chat based on user's first message
+      try {
+        const allMsgs = await Store.listMessages(activeChatId);
+        const chatList = await Store.listChats(activeProjectId);
+        const thisChat = chatList.find(c => c.id === activeChatId);
+        if (thisChat && (thisChat.title === 'Chat' || thisChat.title === 'New Chat') && allMsgs.length <= 3) {
+          const firstUserMsg = allMsgs.find(m => m.role === 'user');
+          if (firstUserMsg) {
+            const autoTitle = firstUserMsg.content.replace(/\s+/g, ' ').trim().substring(0, 40);
+            if (autoTitle) {
+              await Store.updateChat(activeChatId, { title: autoTitle + (firstUserMsg.content.length > 40 ? '...' : '') });
+            }
+          }
+        }
+      } catch (_) {}
+    } catch (e) {
+      if (wasCanceled) {
+        // Don't show error for user-initiated cancel
+      } else {
+        console.error('Chat error:', e);
+        let msg = e?.message || 'Error desconocido';
+        
+        if (currentProvider === 'local') {
+          if (/ECONNREFUSED/i.test(msg)) {
+            msg = t('toast.ollamaNotRunning') || 'Ollama no está ejecutándose. Inicia con: ollama serve';
+          } else if (/GGML_ASSERT/i.test(msg)) {
+            msg = 'Error interno del modelo. Es probable que el modelo no soporte el tipo de datos enviado (ej: imágenes en un modelo sin visión). Prueba otro modelo compatible.';
+          } else if (/500.*Internal Server Error/i.test(msg) || /HTTP 500/i.test(msg)) {
+            msg = 'El modelo devolvió error 500. Si usas un modelo :cloud, el servidor remoto puede estar caído. Prueba otro modelo.';
+          }
+        } else if (/401|Unauthorized/i.test(msg)) {
+          msg = t('toast.invalidApiKey');
+        }
+        
+        appendMsg({ role: "assistant", content: `**Error:** ${msg}` });
+        showToast(msg, 'error');
+      }
+    }
+
+    await refreshChats();
+  } finally {
+    removeGeneratingPlaceholder();
+    isGenerating = false;
+    if (sendBtn) { sendBtn.style.display = ""; sendBtn.disabled = false; }
+    if (stopBtn) stopBtn.style.display = "none";
+    updateSendButtonState();
+  }
+}
+
+async function saveChatAsDoc() {
+  if (!activeProjectId) {
+    showToast("Selecciona un proyecto primero", "error");
+    return;
+  }
+  if (!activeChatId) {
+    showToast("Abre un chat.", "error");
+    return;
+  }
+  const msgs = await window.mika5.db.listMessages(activeChatId);
+  if (!Array.isArray(msgs) || !msgs.length) {
+    showToast("No hay mensajes que guardar.", "error");
+    return;
+  }
+
+  // Generate a descriptive default title from chat content
+  const defaultTitle = generateChatDocTitle(msgs);
+  const title = await mikaPrompt('Guardar chat como documento', 'Título del documento:', defaultTitle);
+  if (title == null || title.trim() === "") return;
+
+  const activeProjectName = (el("activeTitle") && el("activeTitle").textContent) || "Proyecto";
+  const isQuickChat = activeProjectId === QUICK_CHAT_ID;
+  const header = `# ${title.trim()}
+
+${isQuickChat ? 'Chat individual' : `Proyecto: ${activeProjectName}`}
+Fecha: ${new Date().toISOString()}
+Mensajes: ${msgs.length}
+
+---
+`;
+  const body = compileChatAsMarkdown(msgs);
+  const content = header + body;
+
+  const saveBtn = el("btnSaveChatDoc");
+  if (saveBtn) saveBtn.disabled = true;
+  try {
+    const savePayload = {
+      projectId: activeProjectId,
+      title: title.trim(),
+      content,
+      mimeType: "text/markdown"
+    };
+    // In quick-chat, save to the chat's own knowledge base
+    if (isQuickChat && activeChatId) {
+      savePayload.chatId = activeChatId;
+    }
+    const result = await saveDocument(savePayload);
+    if (!result.ok) {
+      showToast("Error: " + (result.error || "desconocido"), "error");
+      return;
+    }
+    showToast("Chat guardado en Knowledge.", "success");
+    await renderKnowledgeList();
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+  }
+}
+
+function generateChatDocTitle(msgs) {
+  // Find the first user message to extract the topic
+  const firstUser = msgs.find(m => m.role === 'user');
+  if (!firstUser || !firstUser.content) {
+    return `Chat - ${new Date().toLocaleDateString()}`;
+  }
+
+  // Clean the content: remove file attachments, reply quotes, markdown
+  let text = firstUser.content
+    .replace(/\[En respuesta a .*?\]\n*/s, '')
+    .replace(/\[Adjuntos:.*?\]/g, '')
+    .replace(/---\s+.*?\s+---\n/gs, '')
+    .replace(/[#*_`~>]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!text) {
+    return `Chat - ${new Date().toLocaleDateString()}`;
+  }
+
+  // Take first meaningful sentence or fragment (up to 60 chars)
+  const maxLen = 60;
+  if (text.length <= maxLen) {
+    return text;
+  }
+
+  // Try to cut at a word boundary
+  const cut = text.lastIndexOf(' ', maxLen);
+  return text.substring(0, cut > 20 ? cut : maxLen) + '...';
+}
+
+function generateSmartTitle(content) {
+  if (!content) return `Respuesta - ${new Date().toLocaleDateString()}`;
+
+  let text = (content || '').toString();
+
+  // 1. Try to use the first markdown heading
+  const headingMatch = text.match(/^#{1,3}\s+(.+)$/m);
+  if (headingMatch) {
+    const heading = headingMatch[1].replace(/[#*_`~]/g, '').trim();
+    if (heading.length >= 5 && heading.length <= 80) return heading;
+  }
+
+  // 2. Try the first bold text (often a title/topic)
+  const boldMatch = text.match(/\*\*(.{5,80}?)\*\*/);
+  if (boldMatch) {
+    const bold = boldMatch[1].replace(/[#*_`~]/g, '').trim();
+    if (bold.length >= 5) return bold.substring(0, 70);
+  }
+
+  // 3. First meaningful line of content
+  const lines = text
+    .replace(/```[\s\S]*?```/g, '') // remove code blocks
+    .replace(/[#*_`~>|]/g, '')
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l.length > 10 && !/^[-=]{3,}$/.test(l));
+
+  if (lines.length > 0) {
+    const first = lines[0];
+    if (first.length <= 70) return first;
+    const cut = first.lastIndexOf(' ', 70);
+    return first.substring(0, cut > 20 ? cut : 70) + '...';
+  }
+
+  return `Respuesta - ${new Date().toLocaleDateString()}`;
+}
+
+async function exportChatToFile() {
+  if (!activeChatId) {
+    showToast("Abre un chat.", "error");
+    return;
+  }
+  const msgs = await window.mika5.db.listMessages(activeChatId);
+  if (!Array.isArray(msgs) || !msgs.length) {
+    showToast("No hay mensajes que exportar.", "error");
+    return;
+  }
+  // Show export modal instead of prompt
+  const modal = el("exportModal");
+  if (modal) modal.style.display = "flex";
+}
+
+function closeExportModal() {
+  const modal = el("exportModal");
+  if (modal) modal.style.display = "none";
+}
+
+// --- Export system: standalone HTML builder ---
+// NEVER uses renderMarkdown from the app — builds safe standalone docs
+function renderExportMarkdown(text) {
+  const raw = (text || '').toString().trim();
+  if (!raw) return '';
+  if (typeof marked === 'undefined') return escapeHtml(raw).replace(/\n/g, '<br>');
+  try {
+    let html = marked.parse(raw);
+    // Strip dangerous elements — export must be inert
+    html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+    html = html.replace(/<\/?(?:iframe|object|embed|form|input|textarea|select|button|link|meta|base)\b[^>]*>/gi, '');
+    html = html.replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+    html = html.replace(/(href|src)\s*=\s*(['"])\s*javascript:/gi, '$1=$2#blocked:');
+    return html;
+  } catch (e) {
+    return escapeHtml(raw).replace(/\n/g, '<br>');
+  }
+}
+
+const EXPORT_CSS = `
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; width: 100%; max-width: 100%; margin: 0; padding: 12px 16px; color: #1a1a1a; font-size: 14px; line-height: 1.7; }
+  .export-header { border-bottom: 2px solid #49C2F4; padding-bottom: 12px; margin-bottom: 20px; }
+  .export-header h1 { font-size: 20px; margin-bottom: 4px; }
+  .export-meta { color: #666; font-size: 12px; }
+  .export-meta span { margin-right: 16px; }
+  .msg { margin: 12px 0; padding: 10px 14px; border-radius: 4px; page-break-inside: avoid; }
+  .msg-user { background: #eef6ff; border-left: 3px solid #49C2F4; }
+  .msg-assistant { background: #f8f8f8; border-left: 3px solid #999; }
+  .msg-system { background: #fffbeb; border-left: 3px solid #f59e0b; font-style: italic; }
+  .role { font-weight: 700; margin-bottom: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .msg-user .role { color: #2a7ab5; }
+  .msg-assistant .role { color: #777; }
+  .msg-system .role { color: #b45309; }
+  p { margin-bottom: 8px; }
+  p:last-child { margin-bottom: 0; }
+  strong { font-weight: 700; }
+  em { font-style: italic; }
+  h2 { font-size: 17px; margin: 14px 0 6px; }
+  h3 { font-size: 15px; margin: 12px 0 4px; }
+  h4 { font-size: 14px; margin: 10px 0 4px; font-weight: 600; }
+  ul, ol { margin: 6px 0; padding-left: 22px; }
+  li { margin-bottom: 3px; }
+  pre { background: #2d2d2d; color: #d4d4d4; padding: 10px; border-radius: 4px; font-size: 11px; line-height: 1.4; margin: 8px 0; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word; }
+  code { font-family: Consolas, 'Courier New', monospace; font-size: 0.9em; }
+  p code, li code { background: #e8e8e8; padding: 1px 4px; border-radius: 3px; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+  th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; font-size: 12px; }
+  th { background: #f0f0f0; font-weight: 600; }
+  blockquote { border-left: 3px solid #ccc; margin: 8px 0; padding: 6px 12px; color: #555; background: #fafafa; }
+  hr { border: none; border-top: 1px solid #ddd; margin: 16px 0; }
+  a { color: #2563eb; text-decoration: none; }
+  img { max-width: 200px; height: auto; }
+  @media print {
+    body { margin: 0; padding: 0; }
+    .msg { break-inside: avoid; }
+    pre { font-size: 10px; }
+    .export-header { break-after: avoid; }
+  }
+`;
+
+function buildExportHTML(msgs, projectName, options = {}) {
+  const theme = options.theme || 'light'; // 'light' for HTML/PDF
+  const lang = options.lang || 'es';
+  const labels = lang === 'en'
+    ? { user: 'User', assistant: 'Assistant', system: 'System', project: 'Project', date: 'Date', messages: 'messages' }
+    : { user: 'Usuario', assistant: 'Asistente', system: 'Sistema', project: 'Proyecto', date: 'Fecha', messages: 'mensajes' };
+
+  let html = `<!DOCTYPE html>
+<html lang="${lang}">
+<head>
+<meta charset="utf-8">
+<title>${escapeHtml(projectName)}</title>
+<style>${EXPORT_CSS}</style>
+</head>
+<body>
+<div class="export-header">
+  <h1>${escapeHtml(projectName)}</h1>
+  <div class="export-meta">
+    <span>${labels.date}: ${new Date().toLocaleString()}</span>
+    <span>${msgs.length} ${labels.messages}</span>
+  </div>
+</div>
+`;
+
+  for (const m of msgs) {
+    const role = m.role || 'system';
+    const roleLabel = labels[role] || role;
+    const cls = 'msg-' + role;
+    const safeContent = renderExportMarkdown(m.content);
+    html += `<div class="msg ${cls}"><div class="role">${escapeHtml(roleLabel)}</div><div>${safeContent}</div></div>\n`;
+  }
+
+  html += `</body></html>`;
+  return html;
+}
+
+async function doExport(format) {
+  closeExportModal();
+  if (!activeChatId) return;
+
+  const msgs = await window.mika5.db.listMessages(activeChatId);
+  if (!Array.isArray(msgs) || !msgs.length) {
+    showToast("No hay mensajes.", "error");
+    return;
+  }
+
+  const projectName = (el("activeTitle") && el("activeTitle").textContent) || "Chat";
+  const md = compileChatAsMarkdown(msgs);
+  const base = `chat-${new Date().toISOString().slice(0, 10)}`;
+  let content, defaultName, filters;
+
+  if (format === 1) {
+    // Markdown
+    content = md;
+    defaultName = base + ".md";
+    filters = [{ name: "Markdown", extensions: ["md"] }];
+  } else if (format === 2) {
+    // Plain text
+    content = md;
+    defaultName = base + ".txt";
+    filters = [{ name: "Texto", extensions: ["txt"] }];
+  } else if (format === 3) {
+    // HTML
+    content = buildExportHTML(msgs, projectName, { lang: _mika5Lang });
+    defaultName = base + ".html";
+    filters = [{ name: "HTML", extensions: ["html"] }];
+  } else if (format === 4) {
+    // Python
+    content = "# Chat exportado\n# " + md.split("\n").join("\n# ");
+    defaultName = base + ".py";
+    filters = [{ name: "Python", extensions: ["py"] }];
+  } else if (format === 5) {
+    // PDF via printToPDF or HTML fallback
+    const pdfHtml = buildExportHTML(msgs, projectName, { lang: _mika5Lang });
+
+    if (window.mika5?.printToPDF) {
+      try {
+        const result = await window.mika5.printToPDF({ html: pdfHtml, defaultName: base + ".pdf" });
+        if (result && result.ok) { showToast(t('toast.exported'), "success"); return; }
+        if (result && result.canceled) return;
+      } catch (e) {
+        console.warn('printToPDF not available:', e);
+      }
+    }
+
+    // Fallback
+    content = pdfHtml;
+    defaultName = base + ".html";
+    filters = [{ name: "HTML", extensions: ["html"] }];
+    showToast(t('toast.pdfFallback'), "info");
+  }
+
+  if (!content) return;
+
+  try {
+    const result = await window.mika5.saveFile({ defaultName, filters, content, encoding: "utf8" });
+    if (result && result.ok) showToast(t('toast.exported'), "success");
+    else if (result && result.canceled) { /* cancelled */ }
+    else showToast(t('toast.errorExport'), "error");
+  } catch (err) {
+    console.error("Export error:", err);
+    showToast(t('toast.errorExport'), "error");
+  }
+}
+
+async function pullModel() {
+  const sel = el("modelSelect");
+  const model = (sel && !sel.disabled && sel.value && sel.value.trim()) ? sel.value.trim() : null;
+  let modelName = model;
+  if (!modelName) {
+    modelName = await mikaPrompt('Descargar modelo', 'Nombre del modelo (ej: llama3.2, qwen2.5:7b)', '');
+    if (!modelName || !modelName.trim()) return;
+    modelName = modelName.trim();
+  }
+
+  const pullBtn = el("btnPullLocal");
+  if (pullBtn) {
+    pullBtn.disabled = true;
+    pullBtn.textContent = "Descargando…";
+  }
+
+  const res = await window.mika5.ollama.pull(modelName);
+
+  if (pullBtn) {
+    pullBtn.disabled = false;
+    pullBtn.textContent = "Pull";
+  }
+
+  if (!res.ok) {
+    showToast("Falló descarga: " + (res.error || "error desconocido"), "error");
+    return;
+  }
+
+  await loadRuntime();
+  el("modelSelect").value = modelName;
+  syncModelDropdown();
+  window.mika5.setAppState("lastModel", modelName).catch(() => {});
+  if (pullBtn) {
+    pullBtn.disabled = false;
+    pullBtn.textContent = "Pull";
+  }
+  showToast("Modelo descargado: " + modelName, "success");
+}
+
+// Carga y renderiza la lista de modelos para el proveedor actual
+async function loadModelsForCurrentProvider() {
+  const provider = (await window.mika5.ai.getCurrentProvider()) || { id: currentProvider, name: currentProvider };
+  const modelOptions = el('modelOptions');
+  const select = el('modelSelect');
+  if (!modelOptions || !select) return;
+
+  modelOptions.innerHTML = '';
+  select.innerHTML = '';
+
+  let res;
+  try {
+    res = await window.mika5.ai.listModels();
+  } catch (e) {
+    console.warn('listModels failed:', e);
+    res = null;
+  }
+
+  let models = [];
+  if (Array.isArray(res)) models = res;
+  else if (res && Array.isArray(res.models)) models = res.models;
+
+  // Normalizar cada modelo a objeto { name, sizeFormatted, capabilities }
+  const mapper = (raw) => {
+    if (!raw) return null;
+    if (typeof raw === 'string') return { name: raw };
+    return {
+      name: raw.name || raw.id || raw.model || String(raw),
+      sizeFormatted: raw.sizeFormatted || raw.size_human || (raw.size ? formatBytesRenderer(Number(raw.size)) : ''),
+      capabilities: raw.capabilities || raw.caps || raw.tags || []
+    };
+  };
+
+  const normalized = models.map(mapper).filter(Boolean);
+
+  if (normalized.length === 0 && provider.id === 'local') {
+    modelOptions.innerHTML = `
+      <div class="model-option empty">
+        <span>No hay modelos locales descargados</span>
+        <button onclick="pullModel('llama3.2')" class="btn-primary btn-sm">Descargar llama3.2</button>
+      </div>
+    `;
+
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'Sin modelos locales';
+    select.appendChild(opt);
+    return;
+  }
+
+  for (const m of normalized) {
+    const div = document.createElement('div');
+    div.className = 'model-option';
+
+    if (provider.id === 'local') {
+      div.innerHTML = `
+        <div class="model-header">
+          <span class="model-name">${escapeHtml(m.name)}</span>
+          <span class="model-size">${escapeHtml(m.sizeFormatted || '')}</span>
+        </div>
+        <div class="model-tags">
+          <span class="tag private">🔒 Privado</span>
+          ${Array.isArray(m.capabilities) ? m.capabilities.map(c => `<span class="tag">${escapeHtml(c)}</span>`).join('') : ''}
+        </div>
+      `;
+    } else {
+      div.innerHTML = `
+        <div class="model-header">
+          <span class="model-name">${escapeHtml(m.name)}</span>
+        </div>
+        <div class="model-tags">
+          <span class="tag cloud">☁️ ${escapeHtml(provider.name || provider.id)}</span>
+        </div>
+      `;
+    }
+
+    div.onclick = () => selectModel(m.name);
+    modelOptions.appendChild(div);
+
+    const opt = document.createElement('option');
+    opt.value = m.name;
+    opt.textContent = m.name;
+    opt.dataset.source = provider.id === 'local' ? 'local' : 'cloud';
+    if (m.sizeFormatted) opt.dataset.sizeFormatted = m.sizeFormatted;
+    if (m.capabilities && Array.isArray(m.capabilities)) opt.dataset.caps = m.capabilities.join(' • ');
+    select.appendChild(opt);
+  }
+
+  syncModelDropdown();
+}
+
+// Asegura que un modelo exista (descarga si es local y falta)
+async function ensureModelExists(modelName) {
+  if (!modelName) return true;
+  let res;
+  try {
+    res = await window.mika5.ai.listModels();
+  } catch (e) {
+    res = null;
+  }
+  let models = [];
+  if (Array.isArray(res)) models = res;
+  else if (res && Array.isArray(res.models)) models = res.models;
+
+  const exists = models.some(m => (typeof m === 'string' ? m === modelName : (m.name === modelName || m.id === modelName)));
+  if (exists) return true;
+
+  showToast(`El modelo ${modelName} no está descargado. Descargando...`, 'info');
+  try {
+    if (currentProvider === 'local') {
+      const r = await window.mika5.ollama.pull(modelName);
+      if (!r || !r.ok) throw new Error(r && r.error ? r.error : 'Pull failed');
+      await loadModelsForCurrentProvider();
+      showToast(`Modelo ${modelName} descargado.`, 'success');
+      return true;
+    } else {
+      showToast('No es posible descargar modelos del proveedor Cloud desde este cliente.', 'warning');
+      return false;
+    }
+  } catch (e) {
+    showToast('Error descargando modelo: ' + (e?.message || e), 'error');
+    return false;
+  }
+}
+
+function selectModel(name) {
+  const sel = el('modelSelect');
+  const optionsContainer = el('modelOptions');
+  const trigger = el('modelTrigger');
+  if (sel) sel.value = name;
+  syncModelDropdown();
+  if (optionsContainer) {
+    optionsContainer.classList.remove('open');
+    if (trigger) trigger.setAttribute('aria-expanded', 'false');
+  }
+  // Persist selected model
+  if (name) {
+    window.mika5.setAppState("lastModel", name).catch(() => {});
+  }
+}
+
+function toggleSidebar() {
+  const sidebar = el("sidebar");
+  if (!sidebar) return;
+  sidebar.classList.toggle("open");
+  const isOpen = sidebar.classList.contains("open");
+  window.mika5.setAppState("sidebar_collapsed", isOpen ? "" : "1").catch(() => {});
+}
+
+function wire() {
+  el("btnCreateProject").onclick = createProject;
+  const projInput = el("projectName");
+  if (projInput) projInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); createProject(); } });
+
+  // Language toggle
+  const langBtn = el("btnLangToggle");
+  if (langBtn) {
+    langBtn.textContent = _mika5Lang === 'en' ? 'EN' : 'ES';
+    langBtn.onclick = () => {
+      const newLang = _mika5Lang === 'en' ? 'es' : 'en';
+      setLanguage(newLang);
+      langBtn.textContent = newLang === 'en' ? 'EN' : 'ES';
+      applyTranslations();
+    };
+  }
+  el("btnNewChat").onclick = newChat;
+  el("btnSaveChatDoc").onclick = saveChatAsDoc;
+  const btnExport = el("btnExportChat");
+  if (btnExport) btnExport.onclick = exportChatToFile;
+  el("btnSend").onclick = send;
+
+  // --- Chat search ---
+  const searchCloseBtn = el("chatSearchClose");
+  if (searchCloseBtn) searchCloseBtn.addEventListener("click", closeChatSearch);
+  const searchPrevBtn = el("chatSearchPrev");
+  if (searchPrevBtn) searchPrevBtn.addEventListener("click", () => navigateSearch(searchCurrentIdx - 1));
+  const searchNextBtn = el("chatSearchNext");
+  if (searchNextBtn) searchNextBtn.addEventListener("click", () => navigateSearch(searchCurrentIdx + 1));
+  const searchInput = el("chatSearchInput");
+  if (searchInput) {
+    let searchDebounce = null;
+    searchInput.addEventListener("input", () => {
+      clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(() => performChatSearch(searchInput.value.trim()), 250);
+    });
+    searchInput.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeChatSearch();
+      if (e.key === "Enter") {
+        e.preventDefault();
+        navigateSearch(e.shiftKey ? searchCurrentIdx - 1 : searchCurrentIdx + 1);
+      }
+    });
+  }
+
+  // Ctrl+F / Cmd+F opens chat search instead of browser find
+  document.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+      e.preventDefault();
+      openChatSearch();
+    }
+  });
+
+  // --- Reply preview close ---
+  const replyCloseBtn = el("replyPreviewClose");
+  if (replyCloseBtn) replyCloseBtn.addEventListener("click", clearReplyTo);
+  const btnPull = el("btnPull");
+  if (btnPull) btnPull.onclick = () => window.mika5.openExternal("https://ollama.com/library");
+  const btnPullLocal = el("btnPullLocal");
+  if (btnPullLocal) btnPullLocal.onclick = pullModel;
+  
+  // Provider panel removed from sidebar (now only in header dropdown)
+
+  const sidebar = el("sidebar");
+  const sidebarToggle = el("sidebarToggle");
+  const mobileSidebarToggle = el("mobileSidebarToggle");
+  if (sidebar) {
+    if (sidebarToggle) sidebarToggle.addEventListener("click", toggleSidebar);
+    if (mobileSidebarToggle) mobileSidebarToggle.addEventListener("click", toggleSidebar);
+    // Restore sidebar state from DB; fallback to responsive default
+    window.mika5.getAppState("sidebar_collapsed").then(val => {
+      if (val === "1") sidebar.classList.remove("open");
+      else if (window.innerWidth > 768) sidebar.classList.add("open");
+      else sidebar.classList.remove("open");
+    }).catch(() => {
+      if (window.innerWidth > 768) sidebar.classList.add("open");
+      else sidebar.classList.remove("open");
+    });
+  }
+
+  const modelTrigger = el("modelTrigger");
+  const modelOptions = el("modelOptions");
+  if (modelTrigger && modelOptions) {
+    modelTrigger.onclick = (e) => {
+      e.stopPropagation();
+      modelOptions.classList.toggle("open");
+      modelTrigger.setAttribute("aria-expanded", modelOptions.classList.contains("open"));
+    };
+    document.addEventListener("click", () => {
+      modelOptions.classList.remove("open");
+      modelTrigger.setAttribute("aria-expanded", "false");
+      // Also close provider dropdown on outside click
+      const provOpts = el("providerOptions");
+      if (provOpts) provOpts.style.display = "none";
+    });
+  }
+
+  const attachBtn = el("attachBtn");
+  const fileInput = el("fileInput");
+  if (attachBtn && fileInput) {
+    attachBtn.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", async (e) => {
+      const files = Array.from(e.target.files || []);
+      e.target.value = "";
+      if (files.length === 0) return;
+
+      if (files.length > 1) showToast(`Procesando ${files.length} archivos…`, "info");
+
+      let attached = 0;
+      for (const file of files) {
+        if (!file.size) continue;
+
+        // Size limit: 10 MB for documents, 5 MB for images
+        const maxSize = isDocumentFile(file) ? 10 * 1024 * 1024 : 5 * 1024 * 1024;
+        if (file.size > maxSize) {
+          showToast(`Archivo muy grande: ${file.name} (máx ${maxSize / 1024 / 1024} MB)`, "error");
+          continue;
+        }
+
+        // Reject truly binary files (executables, archives, media)
+        if (TRUE_BINARY_EXTS.test(file.name)) {
+          showToast(`${file.name}: formato binario no soportado`, "warning");
+          continue;
+        }
+
+        try {
+          if (isImageFile(file)) {
+            const currentModel = el("modelSelect")?.value || '';
+            if (!modelSupportsVision(currentModel)) {
+              showToast(`Advertencia: "${currentModel}" no soporta imágenes. Considera usar un modelo con visión (llava, gemma3, etc.)`, 'warning');
+            }
+            const base64 = await docFileToBase64(file);
+            chatAttachments.push({ name: file.name, type: 'image', base64 });
+            attached++;
+          } else if (isDocumentFile(file)) {
+            try {
+              const text = await extractTextFromDocument(file);
+              if (text && text.trim()) {
+                chatAttachments.push({ name: file.name, type: 'text', text });
+                attached++;
+              } else {
+                showToast(`No se pudo extraer texto de ${file.name}`, "warning");
+              }
+            } catch (docErr) {
+              handleDocExtractionError(docErr, file.name);
+            }
+          } else {
+            // Plain text files (.js, .py, .json, .md, .txt, .html, .css, etc.)
+            const text = await readFileAsText(file);
+            const controlRatio = (text.match(/[\x00-\x08\x0E-\x1F]/g) || []).length / Math.max(text.length, 1);
+            if (controlRatio > 0.1) {
+              showToast(`${file.name}: el archivo parece ser binario`, "warning");
+              continue;
+            }
+            chatAttachments.push({ name: file.name, type: 'text', text });
+            attached++;
+          }
+        } catch (err) {
+          console.warn(`Attachment error for ${file.name}:`, err);
+          showToast(`Error: ${file.name}`, "error");
+        }
+      }
+
+      // Consolidated feedback
+      if (attached > 0 && files.length > 1) {
+        showToast(`${attached} archivo(s) adjuntados`, "success");
+      }
+      renderAttachmentPreview();
+    });
+  }
+
+  el("input").addEventListener("input", () => {
+    updateSendButtonState();
+    // Auto-grow textarea
+    const inp = el("input");
+    if (inp) {
+      inp.style.height = 'auto';
+      inp.style.height = Math.min(inp.scrollHeight, 200) + 'px';
+    }
+  });
+
+  // Clipboard paste: support pasting images
+  el("input").addEventListener("paste", async (e) => {
+    const items = Array.from(e.clipboardData?.items || []);
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (!file) continue;
+        if (file.size > 5 * 1024 * 1024) {
+          showToast(t('toast.fileTooLarge', { name: 'pasted image' }), "error");
+          continue;
+        }
+        try {
+          const currentModel = el("modelSelect")?.value || '';
+          if (!modelSupportsVision(currentModel)) {
+            showToast(`Advertencia: "${currentModel}" no soporta imágenes. Considera usar un modelo con visión.`, 'warning');
+          }
+          const base64 = await docFileToBase64(file);
+          const ext = file.type.split('/')[1] || 'png';
+          chatAttachments.push({ name: `pasted-image.${ext}`, type: 'image', base64 });
+          renderAttachmentPreview();
+        } catch (err) {
+          showToast('Error pasting image', "error");
+        }
+      }
+    }
+  });
+  el("input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (!isGenerating) send();
+    }
+  });
+
+  const btnContextToggle = el("btnContextToggle");
+  const contextPanel = el("contextPanel");
+  const contextPanelClose = el("contextPanelClose");
+  if (btnContextToggle && contextPanel) btnContextToggle.addEventListener("click", toggleContextPanel);
+  if (contextPanelClose && contextPanel) contextPanelClose.addEventListener("click", () => contextPanel.classList.remove("open"));
+
+  const btnSaveContext = el("btnSaveContext");
+  if (btnSaveContext) btnSaveContext.addEventListener("click", saveProjectContext);
+
+  const btnAddKnowledge = el("btnAddKnowledge");
+  const knowledgeFileInput = el("knowledgeFileInput");
+  if (btnAddKnowledge && knowledgeFileInput) {
+    btnAddKnowledge.addEventListener("click", () => knowledgeFileInput.click());
+    knowledgeFileInput.addEventListener("change", async (e) => {
+      const files = Array.from(e.target.files || []);
+      e.target.value = "";
+      if (!activeProjectId) {
+        showToast("Selecciona un proyecto primero", "error");
+        return;
+      }
+      if (files.length === 0) return;
+
+      let added = 0;
+      let failed = 0;
+      const total = files.length;
+
+      // Show progress for multi-file uploads
+      if (total > 1) showToast(`Procesando ${total} archivos…`, "info");
+
+      for (let fi = 0; fi < files.length; fi++) {
+        const file = files[fi];
+        if (file.size > 10 * 1024 * 1024) {
+          showToast(`Archivo muy grande: ${file.name} (máx. 10 MB)`, "error");
+          failed++;
+          continue;
+        }
+
+        // Reject truly binary files
+        if (TRUE_BINARY_EXTS.test(file.name)) {
+          showToast(`${file.name}: formato binario no soportado`, "warning");
+          failed++;
+          continue;
+        }
+
+        try {
+          let text;
+          let mime = file.type || "text/plain";
+
+          if (isImageFile(file)) {
+            // Images: store a description placeholder (images can't be indexed as text)
+            showToast(`${file.name}: las imágenes no se pueden indexar como conocimiento`, "warning");
+            failed++;
+            continue;
+          } else if (isDocumentFile(file)) {
+            try {
+              text = await extractTextFromDocument(file);
+              mime = "text/plain";
+            } catch (docErr) {
+              handleDocExtractionError(docErr, file.name);
+              failed++;
+              continue;
+            }
+          } else {
+            // Plain text files (.js, .py, .json, .md, .txt, .html, .css, etc.)
+            text = await readFileAsText(file);
+            // Reject binary disguised as text
+            const controlRatio = (text.match(/[\x00-\x08\x0E-\x1F]/g) || []).length / Math.max(text.length, 1);
+            if (controlRatio > 0.1) {
+              showToast(`${file.name}: el archivo parece ser binario`, "warning");
+              failed++;
+              continue;
+            }
+          }
+
+          if (!text || !text.trim()) {
+            showToast(`${file.name}: sin contenido de texto`, "warning");
+            failed++;
+            continue;
+          }
+
+          const knowledgePayload = {
+            projectId: activeProjectId,
+            title: file.name,
+            content: text,
+            mimeType: mime
+          };
+          if (activeProjectId === QUICK_CHAT_ID && activeChatId) {
+            knowledgePayload.chatId = activeChatId;
+          }
+          const res = await window.mika5.db.addKnowledgeFromText(knowledgePayload);
+          if (res && res.ok) added++;
+          else { showToast(`Error: ${(res && res.error) || "desconocido"}`, "error"); failed++; }
+        } catch (err) {
+          console.warn(`Knowledge upload error for ${file.name}:`, err);
+          showToast(`No se pudo leer ${file.name}`, "error");
+          failed++;
+        }
+      }
+
+      // Consolidated result toast
+      if (added > 0 && failed === 0) {
+        showToast(added === 1
+          ? `${files[0]?.name || 'Archivo'} añadido al conocimiento`
+          : `${added} archivos añadidos al conocimiento`, "success");
+      } else if (added > 0 && failed > 0) {
+        showToast(`${added} añadidos, ${failed} con errores`, "warning");
+      }
+      await renderKnowledgeList();
+    });
+  }
+}
+
+async function loadLogo() {
+  const img = document.getElementById("brandLogo");
+  if (!img || !window.mika5?.getAssetUrl) return;
+  try {
+    img.src = window.mika5.getAssetUrl("assets/logo.png");
+    img.onerror = () => { img.style.display = "none"; };
+  } catch (_) {
+    img.style.display = "none";
+  }
+}
+
+// --- Privacy Info Modal ---
+function showPrivacyInfo() {
+  const existing = document.getElementById('privacyInfoModal');
+  if (existing) { existing.style.display = 'flex'; return; }
+
+  const modal = document.createElement('div');
+  modal.id = 'privacyInfoModal';
+  modal.className = 'modal';
+  modal.style.display = 'flex';
+  modal.innerHTML = `
+    <div class="modal-content" style="max-width:500px;">
+      <div class="modal-header">
+        <h3>Privacidad en MIKA5</h3>
+        <button class="btn-icon" onclick="document.getElementById('privacyInfoModal').style.display='none'">×</button>
+      </div>
+      <div class="modal-body" style="padding:16px 0;line-height:1.7;color:var(--text-muted);font-size:14px;">
+        <p><strong style="color:var(--text-main);">🔒 Modo Local (Ollama)</strong><br>
+        Todos los datos se procesan en tu equipo. Ningún mensaje sale de tu PC. 100% privado.</p>
+        <br>
+        <p><strong style="color:var(--text-main);">☁️ Modo Cloud</strong><br>
+        Los mensajes se envían a servidores externos del proveedor seleccionado. MIKA5 sanitiza PII básica (emails, teléfonos, IDs) antes de enviar.</p>
+        <br>
+        <p><strong style="color:var(--text-main);">🔑 API Keys</strong><br>
+        Se almacenan cifradas (AES-256-GCM) en la base de datos local. Nunca se transmiten a terceros más allá del proveedor.</p>
+      </div>
+    </div>
+  `;
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; });
+  document.body.appendChild(modal);
+}
+
+// --- API Key Modal ---
+function showApiKeyModal() {
+  const modal = el('apiKeyModal');
+  if (modal) {
+    modal.style.display = 'flex';
+    const provider = (currentProvider !== 'local') ? currentProvider : 'openai';
+    switchTab(provider);
+  }
+}
+
+function closeApiKeyModal() {
+  const modal = el('apiKeyModal');
+  if (modal) modal.style.display = 'none';
+}
+
+function switchTab(provider) {
+  document.querySelectorAll('.tab-content').forEach(t => t.style.display = 'none');
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  const tab = document.getElementById('tab-' + provider);
+  if (tab) tab.style.display = 'block';
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    if (b.textContent.toLowerCase().includes(provider)) b.classList.add('active');
+  });
+}
+
+async function saveApiKey(provider) {
+  const input = el(provider + 'KeyInput');
+  if (!input) { showToast('Error: campo no encontrado', 'error'); return; }
+  const key = input.value.trim();
+  if (!key) { showToast('Ingresa una API Key válida', 'error'); return; }
+  try {
+    const result = await window.mika5.ai.setApiKey(provider, key);
+    if (result) {
+      showToast('API Key guardada para ' + provider, 'success');
+      input.value = '';
+      closeApiKeyModal();
+      if (currentProvider === provider) await loadRuntime();
+    } else {
+      showToast('No se pudo guardar la API Key', 'error');
+    }
+  } catch (e) {
+    showToast('Error: ' + (e?.message || e), 'error');
+  }
+}
+
+// boot con manejo de errores para asegurar que el input quede usable
+(async function boot() {
+  try {
+    wire();
+  } catch (e) {
+    console.error('[boot] wire() failed:', e);
+  }
+
+  // Restore language from DB before applying translations
+  try { await restoreLanguageFromDb(); } catch (_) {}
+  applyTranslations();
+
+  try { await loadLogo(); } catch (_) {}
+
+  try {
+    await loadProvider();
+  } catch (e) {
+    console.warn('[boot] loadProvider failed:', e);
+  }
+
+  try {
+    await loadRuntime();
+  } catch (e) {
+    console.warn('[boot] loadRuntime failed:', e);
+  }
+
+  // Ensure Quick Chat project exists
+  try {
+    await ensureQuickChat();
+  } catch (e) {
+    console.warn('[boot] ensureQuickChat failed:', e);
+  }
+
+  try {
+    await loadProjects();
+  } catch (e) {
+    console.warn('[boot] loadProjects failed:', e);
+  }
+
+  // Restore last session
+  try {
+    const lastProjectId = await window.mika5.getAppState("lastProjectId");
+    if (lastProjectId) {
+      const projects = await Store.listProjects();
+      const p = projects.find((x) => x.id === lastProjectId);
+      if (p) {
+        await selectProject(p.id, p.name);
+      } else {
+        await window.mika5.setAppState("lastProjectId", null);
+      }
+    }
+  } catch (error) {
+    console.error("[boot] Error restoring session:", error);
+  }
+
+  // Ensure app is usable regardless of what happened above
+  const input = el("input");
+  if (input) input.disabled = false;
+
+  if (!activeProjectId) {
+    try {
+      const projects = await Store.listProjects();
+      el("activeTitle").textContent = projects.length === 0
+        ? t('chat.createFirst')
+        : t('chat.selectProject');
+    } catch (_) {
+      el("activeTitle").textContent = t('chat.selectProject');
+    }
+  }
+
+  // Listen for knowledge indexing completion from main process
+  if (window.mika5?.onKnowledgeIndexComplete) {
+    window.mika5.onKnowledgeIndexComplete((data) => {
+      renderKnowledgeList();
+      if (data.ok && data.indexed > 0) {
+        showToast(t('toast.knowledgeIndexed') || `Document indexed (${data.indexed} chunks)`, 'success');
+      } else if (!data.ok && data.error) {
+        const err = data.error || '';
+        if (err.includes('EMBED') || err.includes('INVALID_EMBED') || err.includes('nomic') || err.includes('Connection refused') || err.includes('ECONNREFUSED')) {
+          showToast(t('toast.knowledgeIndexErrorEmbed'), 'error');
+        } else {
+          showToast(`${t('toast.knowledgeIndexError')}: ${err.slice(0, 150)}`, 'error');
+        }
+        console.warn('[Knowledge] Index error:', err);
+      }
+    });
+  }
+
+  console.log('[boot] DONE. activeProjectId:', activeProjectId, 'activeChatId:', activeChatId);
+})();

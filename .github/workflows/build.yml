@@ -1,0 +1,198 @@
+name: Build MIKA5
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish as GitHub Release'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # needed to create GitHub Releases
+
+env:
+  NODE_VERSION: '20'
+
+# ─────────────────────────────────────────────────────────────────
+jobs:
+
+  # ── WINDOWS ──────────────────────────────────────────────────
+  build-windows:
+    name: Windows (NSIS + Portable)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Generate ICO from PNG using Electron's nativeImage
+      - name: Generate icon.ico
+        run: node scripts/gen-ico.js
+
+      - name: Build Windows installers
+        run: npm run build:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Code signing — set these secrets in your repo settings if you have a cert:
+          # CSC_LINK: ${{ secrets.WIN_CSC_LINK }}           # Base64 .p12/.pfx
+          # CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_PASSWORD }}
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mika5-windows
+          path: |
+            dist/*.exe
+          retention-days: 30
+
+  # ── macOS ────────────────────────────────────────────────────
+  build-macos:
+    name: macOS (DMG — x64 + arm64)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Generate icon.icns
+        run: bash scripts/gen-icns.sh
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Rebuild native modules (better-sqlite3) for current Electron/OS
+      - name: Rebuild native modules
+        run: npx electron-builder install-app-deps
+
+      - name: Build macOS app
+        run: npm run build:mac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Code signing — set these secrets for a signed + notarized build:
+          # CSC_LINK: ${{ secrets.MAC_CSC_LINK }}              # Base64 .p12
+          # CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_PASSWORD }}
+          # APPLE_ID: ${{ secrets.APPLE_ID }}
+          # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Without signing, Gatekeeper will show a warning — users can right-click → Open
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mika5-macos
+          path: |
+            dist/*.dmg
+            dist/*.zip
+          retention-days: 30
+
+  # ── LINUX ────────────────────────────────────────────────────
+  build-linux:
+    name: Linux (AppImage + deb + rpm)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          # rpmbuild — required for .rpm target
+          sudo apt-get install -y --no-install-recommends rpm
+          # Native module build tools
+          sudo apt-get install -y --no-install-recommends \
+            python3 make g++ libc6-dev
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Rebuild native modules for Linux
+        run: npx electron-builder install-app-deps
+
+      - name: Build Linux packages
+        run: npm run build:linux
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mika5-linux
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.rpm
+          retention-days: 30
+
+  # ── RELEASE ──────────────────────────────────────────────────
+  # Creates a GitHub Release and attaches all build artifacts.
+  # Runs automatically on version tags (v*.*.*).
+  release:
+    name: Create GitHub Release
+    needs: [build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.publish == 'true'
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: List release assets
+        run: ls -lh release-assets/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: MIKA5 ${{ github.ref_name }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
+          generate_release_notes: true
+          body: |
+            ## MIKA5 ${{ github.ref_name }}
+
+            ### Downloads
+            | Platform | File | Notes |
+            |---|---|---|
+            | Windows 10/11 (x64) | `MIKA5-Setup-*-win-x64.exe` | NSIS installer |
+            | Windows 10/11 (x64) | `MIKA5-*-win-x64-portable.exe` | No install required |
+            | macOS (Apple Silicon) | `MIKA5-*-mac-arm64.dmg` | M1/M2/M3/M4 |
+            | macOS (Intel) | `MIKA5-*-mac-x64.dmg` | Intel x64 |
+            | Linux (x64) | `MIKA5-*-linux-x64.AppImage` | Universal, no install |
+            | Linux (x64) | `MIKA5-*-linux-x64.deb` | Debian / Ubuntu |
+            | Linux (x64) | `MIKA5-*-linux-x64.rpm` | Fedora / RHEL / openSUSE |
+
+            ### Requirements
+            - [Ollama](https://ollama.com) running locally on `http://127.0.0.1:11434`
+            - Embedding model: `ollama pull nomic-embed-text`
+            - At least one chat model: `ollama pull llama3.2` or `ollama pull qwen2.5:7b`
+
+            > **macOS note:** The app is not notarized in this release. On first launch, right-click the app → Open to bypass Gatekeeper.
+          files: release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

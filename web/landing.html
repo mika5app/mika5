@@ -1,0 +1,1197 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MIKA5 | AI on your machine. Under your control.</title>
+    <meta name="description" content="MIKA5 is a free AI desktop app that runs 100% on your computer. Local RAG, projects, per-chat knowledge, vision models. Powered by Ollama. No cloud, no subscriptions, no data collection.">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://mika5.xyz/">
+    <link rel="icon" type="image/png" href="icon.png">
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="MIKA5 — AI on your machine. Under your control.">
+    <meta property="og:description" content="Free AI desktop app. Local RAG, projects, vision models. Powered by Ollama. No cloud, no subscriptions.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://mika5.xyz/">
+    <meta property="og:image" content="https://mika5.xyz/og-image.png">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0B0F14;
+            --surface: #111827;
+            --border: rgba(255,255,255,0.06);
+            --muted: #6B7280;
+            --accent: #7C3AED;
+            --accent-light: #8B5CF6;
+            --green: #34D399;
+        }
+        * { box-sizing: border-box; }
+        body {
+            background-color: var(--bg);
+            color: #F9FAFB;
+            font-family: 'Inter', sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+        h1, h2, h3, h4, .font-heading { font-family: 'Space Grotesk', sans-serif; }
+
+        /* Cards */
+        .glass-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            transition: border-color 0.2s, transform 0.2s;
+        }
+        .glass-card:hover { border-color: rgba(255,255,255,0.14); transform: translateY(-2px); }
+
+        /* Accent gradient */
+        .accent-gradient {
+            background: linear-gradient(90deg, #7C3AED, #6EE7B7);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        /* Download button glow */
+        .btn-download {
+            background: var(--accent);
+            box-shadow: 0 0 32px rgba(124,58,237,0.4);
+            transition: filter 0.2s, box-shadow 0.2s;
+        }
+        .btn-download:hover {
+            filter: brightness(1.15);
+            box-shadow: 0 0 48px rgba(124,58,237,0.6);
+        }
+
+        /* OS pill */
+        .os-pill {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid var(--border);
+            transition: background 0.2s, border-color 0.2s;
+        }
+        .os-pill:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.12); }
+        .os-pill.active { background: rgba(124,58,237,0.12); border-color: rgba(124,58,237,0.5); }
+
+        /* Feature check list */
+        .check-item::before {
+            content: '';
+            display: inline-block;
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--green);
+            margin-right: 10px;
+            flex-shrink: 0;
+        }
+
+        /* Terminal block */
+        .terminal {
+            background: #070A0E;
+            border: 1px solid rgba(255,255,255,0.08);
+            font-family: 'Menlo', 'Monaco', 'Cascadia Code', monospace;
+            font-size: 0.8rem;
+            line-height: 1.7;
+        }
+        .terminal .prompt { color: #7C3AED; }
+        .terminal .comment { color: #4B5563; }
+
+        /* Badge */
+        .badge { font-size: 0.65rem; letter-spacing: 0.1em; }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+
+        /* Animated pulse dot */
+        @keyframes pulse-dot { 0%,100%{opacity:1;} 50%{opacity:0.4;} }
+        .pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
+
+        /* Version tag */
+        .version-tag {
+            background: rgba(52,211,153,0.1);
+            border: 1px solid rgba(52,211,153,0.3);
+            color: #34D399;
+        }
+
+        /* Requirements steps */
+        .step-num {
+            width: 28px; height: 28px;
+            background: rgba(124,58,237,0.2);
+            border: 1px solid rgba(124,58,237,0.4);
+            color: #A78BFA;
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 700;
+            font-size: 0.8rem;
+            flex-shrink: 0;
+        }
+
+        /* Coming soon */
+        .coming-soon { opacity: 0.45; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+
+<!-- ─── NAVIGATION ─────────────────────────────────────────────── -->
+<header class="sticky top-0 z-50 w-full border-b border-white/5 bg-[#0B0F14]/85 backdrop-blur-md">
+    <div class="max-w-[1200px] mx-auto px-6 h-[72px] flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <img src="icon.png" alt="MIKA5" class="w-7 h-7 rounded-lg">
+            <span class="text-xl font-bold tracking-tight font-heading">MIKA5</span>
+            <span class="version-tag badge px-2 py-0.5 rounded-full ml-1">v0.1.0</span>
+        </div>
+        <nav class="hidden md:flex items-center gap-7 text-sm font-medium text-[#9CA3AF]">
+            <a href="#features" class="hover:text-white transition-colors" data-i18n="nav.features">Features</a>
+            <a href="#download" class="hover:text-white transition-colors" data-i18n="nav.download">Download</a>
+            <a href="#quickstart" class="hover:text-white transition-colors" data-i18n="nav.quickstart">Quick Start</a>
+            <a href="models.html" class="hover:text-white transition-colors" data-i18n="nav.modelguide">Model Guide</a>
+            <a href="whitepaper.html" class="hover:text-white transition-colors" data-i18n="nav.whitepaper">White Paper</a>
+            <button id="lang-toggle" onclick="toggleLang()" class="text-xs font-bold px-3 py-1 rounded-full border border-white/10 text-[#9CA3AF] hover:text-white hover:border-white/30 transition-all">EN</button>
+            <a href="https://github.com/mika5app/mika5-desktop" target="_blank" rel="noopener" class="hover:text-white transition-colors flex items-center gap-1.5">
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+                <span data-i18n="nav.github">GitHub</span>
+            </a>
+        </nav>
+        <a href="#download" class="btn-download px-5 py-2.5 rounded-full text-sm font-semibold text-white" data-i18n="nav.downloadbtn">
+            Download Free
+        </a>
+    </div>
+</header>
+
+<!-- ─── HERO ──────────────────────────────────────────────────── -->
+<main class="max-w-[1200px] mx-auto px-6">
+
+    <section class="py-24 md:py-32 flex flex-col lg:flex-row items-center gap-16">
+        <div class="flex-1 space-y-8">
+            <div class="flex items-center gap-2">
+                <span class="pulse-dot w-2 h-2 rounded-full bg-green-400 inline-block"></span>
+                <span class="text-xs uppercase tracking-widest text-green-400 font-bold" data-i18n="hero.badge">v0.1.0 — Windows · macOS · Linux</span>
+            </div>
+            <h1 class="text-5xl md:text-[4.2rem] font-bold leading-[1.08] tracking-tight">
+                <span data-i18n="hero.h1a">AI on your machine.</span><br>
+                <span class="accent-gradient" data-i18n="hero.h1b">Under your control.</span>
+            </h1>
+            <p class="text-xl md:text-2xl text-[#9CA3AF] max-w-xl leading-relaxed" data-i18n="hero.subtitle">
+                The only local AI desktop with built-in RAG, project organization, and multi-provider support — in English and Spanish. No subscriptions. No hidden cloud.
+            </p>
+            <div class="flex flex-wrap gap-4 pt-2">
+                <a href="#download" class="btn-download px-8 py-4 rounded-xl font-semibold text-lg text-white inline-flex items-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                    <span data-i18n="hero.cta">Download MIKA5 — Free</span>
+                </a>
+                <a href="#quickstart" class="bg-[#111827] border border-white/10 px-8 py-4 rounded-xl font-semibold text-lg hover:bg-[#1f2937] transition-all inline-block" data-i18n="hero.ctasecondary">
+                    Quick Start Guide
+                </a>
+            </div>
+            <p class="text-xs text-[#6B7280] uppercase tracking-widest" data-i18n="hero.tagline">
+                Free · Offline-ready · Windows · macOS · Linux
+            </p>
+        </div>
+
+        <!-- App mock card -->
+        <div class="flex-1 w-full lg:w-auto">
+            <div class="glass-card rounded-2xl overflow-hidden">
+                <!-- Window chrome -->
+                <div class="bg-[#0D1117] px-4 py-3 flex items-center gap-2 border-b border-white/5">
+                    <span class="w-3 h-3 rounded-full bg-[#FF5F57]"></span>
+                    <span class="w-3 h-3 rounded-full bg-[#FEBC2E]"></span>
+                    <span class="w-3 h-3 rounded-full bg-[#28C840]"></span>
+                    <span class="text-[11px] text-[#4B5563] ml-2 font-mono">MIKA5 — Proyecto: Investigación</span>
+                </div>
+                <!-- Sidebar + chat layout -->
+                <div class="flex" style="height: 320px;">
+                    <!-- Sidebar -->
+                    <div class="w-44 bg-[#0D1117] border-r border-white/5 p-3 flex flex-col gap-1 text-xs text-[#6B7280] shrink-0">
+                        <div class="text-[9px] uppercase tracking-widest mb-2 text-[#4B5563]">Proyectos</div>
+                        <div class="px-2 py-1.5 rounded-lg bg-[#7C3AED]/15 text-[#A78BFA] font-medium">Investigación</div>
+                        <div class="px-2 py-1.5 rounded-lg hover:bg-white/5">Código Personal</div>
+                        <div class="px-2 py-1.5 rounded-lg hover:bg-white/5">Documentos</div>
+                        <div class="mt-auto text-[9px] uppercase tracking-widest text-[#4B5563]">Chats Rápidos</div>
+                        <div class="px-2 py-1.5 rounded-lg hover:bg-white/5">Sin proyecto</div>
+                    </div>
+                    <!-- Chat area -->
+                    <div class="flex-1 flex flex-col bg-[#0B0F14]">
+                        <div class="flex-1 p-4 space-y-3 overflow-hidden text-sm">
+                            <!-- User msg -->
+                            <div class="flex justify-end">
+                                <div class="bg-[#7C3AED]/20 border border-[#7C3AED]/30 rounded-2xl rounded-tr-sm px-3 py-2 max-w-[70%] text-white text-xs">
+                                    Analiza el documento y extrae los puntos clave
+                                </div>
+                            </div>
+                            <!-- RAG indicator -->
+                            <div class="flex items-center gap-1.5 text-[10px] text-[#7C3AED]">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                                <span>RAG: 3 fragmentos relevantes encontrados</span>
+                            </div>
+                            <!-- Assistant msg -->
+                            <div class="flex gap-2">
+                                <div class="w-5 h-5 rounded-full bg-gradient-to-br from-[#7C3AED] to-[#6EE7B7] shrink-0 mt-0.5"></div>
+                                <div class="bg-[#111827] border border-white/5 rounded-2xl rounded-tl-sm px-3 py-2 max-w-[80%] text-[#D1D5DB] text-xs leading-relaxed">
+                                    Basándome en tu base de conocimiento, los puntos clave son:<br>
+                                    <span class="text-[#34D399]">1.</span> Arquitectura local-first con SQLite<br>
+                                    <span class="text-[#34D399]">2.</span> RAG con embeddings Ollama...
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Input bar -->
+                        <div class="border-t border-white/5 px-3 py-2 flex items-center gap-2">
+                            <div class="flex-1 bg-[#111827] border border-white/8 rounded-xl px-3 py-1.5 text-xs text-[#4B5563]">Escribe tu mensaje...</div>
+                            <div class="w-7 h-7 rounded-lg bg-[#7C3AED] flex items-center justify-center shrink-0">
+                                <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 12h14M12 5l7 7-7 7"/></svg>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Trust badges -->
+    <section class="pb-20 flex flex-wrap justify-center gap-3">
+        <span class="px-4 py-2 rounded-full border border-white/5 bg-white/4 text-xs font-medium text-[#9CA3AF]" data-i18n="badge.offline">Offline-ready</span>
+        <span class="px-4 py-2 rounded-full border border-white/5 bg-white/4 text-xs font-medium text-[#9CA3AF]" data-i18n="badge.telemetry">No telemetry</span>
+        <span class="px-4 py-2 rounded-full border border-white/5 bg-white/4 text-xs font-medium text-[#9CA3AF]" data-i18n="badge.sqlite">SQLite local memory</span>
+        <span class="px-4 py-2 rounded-full border border-white/5 bg-white/4 text-xs font-medium text-[#9CA3AF]" data-i18n="badge.ollama">Ollama compatible</span>
+        <span class="px-4 py-2 rounded-full border border-white/5 bg-white/4 text-xs font-medium text-[#9CA3AF]" data-i18n="badge.vision">Vision models</span>
+        <span class="px-4 py-2 rounded-full border border-white/5 bg-white/4 text-xs font-medium text-[#9CA3AF]" data-i18n="badge.rag">Built-in RAG engine</span>
+        <span class="px-4 py-2 rounded-full border border-white/5 bg-white/4 text-xs font-medium text-[#9CA3AF]" data-i18n="badge.cloud">Cloud optional</span>
+    </section>
+
+    <hr class="border-white/5">
+
+    <!-- ─── FEATURES ──────────────────────────────────────────── -->
+    <section id="features" class="py-24 space-y-16">
+        <div class="text-center space-y-4">
+            <h2 class="text-4xl md:text-5xl font-heading" data-i18n="features.title">Everything in one place.</h2>
+            <p class="text-xl text-[#9CA3AF] max-w-2xl mx-auto" data-i18n="features.subtitle">No extensions. No integrations. No API keys required to get started.</p>
+        </div>
+
+        <div class="grid md:grid-cols-3 gap-5">
+
+            <div class="glass-card p-7 rounded-2xl space-y-4">
+                <div class="w-10 h-10 rounded-xl bg-[#7C3AED]/15 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-[#A78BFA]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                </div>
+                <h3 class="text-lg font-heading" data-i18n="feat.rag.title">Built-in RAG Engine</h3>
+                <p class="text-[#9CA3AF] text-sm leading-relaxed" data-i18n="feat.rag.desc">Upload documents and MIKA5 automatically chunks, embeds, and retrieves the most relevant fragments for every message. Per-project and per-chat knowledge bases.</p>
+            </div>
+
+            <div class="glass-card p-7 rounded-2xl space-y-4">
+                <div class="w-10 h-10 rounded-xl bg-[#059669]/15 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-[#34D399]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+                </div>
+                <h3 class="text-lg font-heading" data-i18n="feat.projects.title">Projects &amp; Chats</h3>
+                <p class="text-[#9CA3AF] text-sm leading-relaxed" data-i18n="feat.projects.desc">Organize work into projects with isolated knowledge, system prompts, and chat history. Quick Chat for ad-hoc conversations without a project.</p>
+            </div>
+
+            <div class="glass-card p-7 rounded-2xl space-y-4">
+                <div class="w-10 h-10 rounded-xl bg-[#DC2626]/15 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-[#F87171]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                </div>
+                <h3 class="text-lg font-heading" data-i18n="feat.vision.title">Vision Models</h3>
+                <p class="text-[#9CA3AF] text-sm leading-relaxed" data-i18n="feat.vision.desc">Attach images to any message. MIKA5 auto-detects vision-capable models (LLaVA, GLM-OCR, Gemma3, Qwen2.5-VL, GPT-4o, Claude) and warns when a model can't process images.</p>
+            </div>
+
+            <div class="glass-card p-7 rounded-2xl space-y-4">
+                <div class="w-10 h-10 rounded-xl bg-[#D97706]/15 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-[#FBBF24]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"/></svg>
+                </div>
+                <h3 class="text-lg font-heading" data-i18n="feat.cloud.title">Cloud AI — Optional</h3>
+                <p class="text-[#9CA3AF] text-sm leading-relaxed" data-i18n="feat.cloud.desc">Connect OpenAI, Anthropic, Groq, or Moonshot when you need them. API keys stored with AES-256-GCM encryption. A privacy indicator shows when cloud is active.</p>
+            </div>
+
+            <div class="glass-card p-7 rounded-2xl space-y-4">
+                <div class="w-10 h-10 rounded-xl bg-[#0EA5E9]/15 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-[#38BDF8]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                </div>
+                <h3 class="text-lg font-heading" data-i18n="feat.tracking.title">Model Tracking</h3>
+                <p class="text-[#9CA3AF] text-sm leading-relaxed" data-i18n="feat.tracking.desc">Every message is tagged with the model that generated it. Model switches within a chat are highlighted inline so you always know which AI answered.</p>
+            </div>
+
+            <div class="glass-card p-7 rounded-2xl space-y-4">
+                <div class="w-10 h-10 rounded-xl bg-[#7C3AED]/15 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-[#A78BFA]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                </div>
+                <h3 class="text-lg font-heading" data-i18n="feat.export.title">Export Anywhere</h3>
+                <p class="text-[#9CA3AF] text-sm leading-relaxed" data-i18n="feat.export.desc">Export individual messages or full conversations to Markdown, plain text, HTML, Python, or PDF. Smart titles generated automatically from content.</p>
+            </div>
+
+        </div>
+
+        <!-- Models row -->
+        <div class="bg-[#0D1117] border border-white/5 rounded-2xl p-8 space-y-6">
+            <div>
+                <p class="text-xs uppercase tracking-widest text-[#6B7280] mb-3" data-i18n="models.popular">Popular & everyday — local via Ollama</p>
+                <div class="flex flex-wrap gap-2">
+                    <span class="bg-white/5 border border-white/8 text-[#D1D5DB] px-3 py-1 rounded-full text-xs font-mono">llama3.2:3b</span>
+                    <span class="bg-white/5 border border-white/8 text-[#D1D5DB] px-3 py-1 rounded-full text-xs font-mono">qwen2.5:7b</span>
+                    <span class="bg-white/5 border border-white/8 text-[#D1D5DB] px-3 py-1 rounded-full text-xs font-mono">qwen2.5-vl:7b</span>
+                    <span class="bg-white/5 border border-white/8 text-[#D1D5DB] px-3 py-1 rounded-full text-xs font-mono">deepseek-r1:7b</span>
+                    <span class="bg-white/5 border border-white/8 text-[#D1D5DB] px-3 py-1 rounded-full text-xs font-mono">mistral:7b</span>
+                    <span class="bg-white/5 border border-white/8 text-[#D1D5DB] px-3 py-1 rounded-full text-xs font-mono">gemma3:9b</span>
+                    <span class="bg-white/5 border border-white/8 text-[#D1D5DB] px-3 py-1 rounded-full text-xs font-mono">phi4:14b</span>
+                    <span class="bg-white/5 border border-white/8 text-[#D1D5DB] px-3 py-1 rounded-full text-xs font-mono">glm-ocr:latest</span>
+                    <span class="bg-white/5 border border-white/8 text-[#D1D5DB] px-3 py-1 rounded-full text-xs font-mono">llava:13b</span>
+                    <span class="bg-white/5 border border-white/8 text-[#D1D5DB] px-3 py-1 rounded-full text-xs font-mono">nomic-embed-text</span>
+                </div>
+            </div>
+            <div>
+                <p class="text-xs uppercase tracking-widest text-[#6B7280] mb-3" data-i18n="models.highend">High-end — require 32–64 GB RAM / GPU 24 GB+</p>
+                <div class="flex flex-wrap gap-2">
+                    <span class="bg-[#7C3AED]/10 border border-[#7C3AED]/30 text-[#A78BFA] px-3 py-1 rounded-full text-xs font-mono">qwen3.5:72b</span>
+                    <span class="bg-[#7C3AED]/10 border border-[#7C3AED]/30 text-[#A78BFA] px-3 py-1 rounded-full text-xs font-mono">glm-5:cloud</span>
+                    <span class="bg-[#7C3AED]/10 border border-[#7C3AED]/30 text-[#A78BFA] px-3 py-1 rounded-full text-xs font-mono">kimi-k2:cloud</span>
+                    <span class="bg-[#7C3AED]/10 border border-[#7C3AED]/30 text-[#A78BFA] px-3 py-1 rounded-full text-xs font-mono">nemotron-3-super:cloud</span>
+                    <span class="bg-[#7C3AED]/10 border border-[#7C3AED]/30 text-[#A78BFA] px-3 py-1 rounded-full text-xs font-mono">deepseek-r1:70b</span>
+                    <span class="bg-[#7C3AED]/10 border border-[#7C3AED]/30 text-[#A78BFA] px-3 py-1 rounded-full text-xs font-mono">llama3.3:70b</span>
+                </div>
+            </div>
+            <p class="text-xs text-[#4B5563]"><span data-i18n="models.note">⚡ High-end models require significant hardware. Performance varies by PC specs. See</span> <a href="models.html" class="text-[#7C3AED] hover:text-[#A78BFA] underline" data-i18n="models.guide">Model Guide</a> <span data-i18n="models.noteend">for detailed hardware requirements.</span></p>
+            <p class="text-xs text-[#6B7280]" data-i18n="models.cloud">Local runtimes: Ollama · llama.cpp — Cloud providers: OpenAI · Anthropic · Groq · Moonshot</p>
+        </div>
+    </section>
+
+    <!-- ─── WHY LOCAL ──────────────────────────────────────────── -->
+    <section class="py-20 grid lg:grid-cols-2 gap-12 items-center">
+        <div class="space-y-8">
+            <h2 class="text-4xl md:text-5xl font-heading" data-i18n="why.title">The cloud isn't neutral.</h2>
+            <div class="space-y-5">
+                <div class="flex gap-4">
+                    <span class="text-red-400 mt-0.5">&#10005;</span>
+                    <div>
+                        <p class="font-medium" data-i18n="why.lockin.title">Subscription lock-in</p>
+                        <p class="text-[#9CA3AF] text-sm mt-1" data-i18n="why.lockin.desc">Pricing and access can change overnight without your consent.</p>
+                    </div>
+                </div>
+                <div class="flex gap-4">
+                    <span class="text-red-400 mt-0.5">&#10005;</span>
+                    <div>
+                        <p class="font-medium" data-i18n="why.billing.title">Token billing</p>
+                        <p class="text-[#9CA3AF] text-sm mt-1" data-i18n="why.billing.desc">You pay per thought. Creativity shouldn't have a meter running.</p>
+                    </div>
+                </div>
+                <div class="flex gap-4">
+                    <span class="text-red-400 mt-0.5">&#10005;</span>
+                    <div>
+                        <p class="font-medium" data-i18n="why.data.title">Data exposure</p>
+                        <p class="text-[#9CA3AF] text-sm mt-1" data-i18n="why.data.desc">Prompts pass through servers you don't own or control.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="terminal rounded-2xl p-8 space-y-6">
+            <div>
+                <p class="text-[#4B5563] uppercase text-[9px] tracking-widest mb-3">Cloud AI flow</p>
+                <p><span class="text-[#F87171]">You</span> → Browser → Vendor Cloud → Policies → Model → Response</p>
+                <p class="text-[#4B5563] text-xs mt-1"># Your prompt stored, processed, potentially used for training</p>
+            </div>
+            <div class="border-t border-white/5 pt-6">
+                <p class="text-[#4B5563] uppercase text-[9px] tracking-widest mb-3">MIKA5 flow</p>
+                <p><span class="text-[#34D399]">You</span> → MIKA5 Desktop → Local Ollama → <span class="text-[#34D399]">Done</span></p>
+                <p class="text-[#4B5563] text-xs mt-1"># Zero network calls. Your hardware. Your data.</p>
+            </div>
+        </div>
+    </section>
+
+    <hr class="border-white/5">
+
+    <!-- ─── DOWNLOAD ──────────────────────────────────────────── -->
+    <section id="download" class="py-24 space-y-12">
+        <div class="text-center space-y-4">
+            <h2 class="text-4xl md:text-5xl font-heading" data-i18n="dl.title">Download MIKA5</h2>
+            <p class="text-xl text-[#9CA3AF]" data-i18n="dl.subtitle">Free. No account. No license key.</p>
+        </div>
+
+        <!-- Platform selector -->
+        <div class="grid md:grid-cols-3 gap-4 max-w-4xl mx-auto">
+
+            <!-- Windows -->
+            <div class="os-pill active p-6 rounded-2xl flex flex-col items-center gap-3 text-center">
+                <svg class="w-10 h-10" viewBox="0 0 24 24" fill="currentColor" style="color:#38BDF8">
+                    <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/>
+                </svg>
+                <div>
+                    <p class="font-heading font-semibold text-white" data-i18n="dl.win.name">Windows</p>
+                    <p class="text-xs text-[#6B7280] mt-1" data-i18n="dl.win.desc">Windows 10 / 11 · x64</p>
+                </div>
+                <span class="version-tag badge px-2 py-0.5 rounded-full">v0.1.0</span>
+                <div class="w-full space-y-2 mt-1">
+                    <a href="https://github.com/mika5app/mika5-desktop/releases/download/v0.1.0/MIKA5-Setup-0.1.0-win-x64.exe"
+                       class="block w-full bg-[#7C3AED] text-white text-xs font-semibold py-2 rounded-xl text-center hover:brightness-110 transition-all" data-i18n="dl.win.installer">
+                        Download Installer (.exe)
+                    </a>
+                    <a href="https://github.com/mika5app/mika5-desktop/releases/download/v0.1.0/MIKA5-0.1.0-win-x64-portable.exe"
+                       class="block w-full bg-white/5 border border-white/10 text-[#9CA3AF] text-xs font-semibold py-2 rounded-xl text-center hover:bg-white/10 transition-all" data-i18n="dl.win.portable">
+                        Portable (.exe)
+                    </a>
+                </div>
+            </div>
+
+            <!-- macOS -->
+            <div class="os-pill active p-6 rounded-2xl flex flex-col items-center gap-3 text-center">
+                <svg class="w-10 h-10" viewBox="0 0 24 24" fill="currentColor" style="color:#9CA3AF">
+                    <path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/>
+                </svg>
+                <div>
+                    <p class="font-heading font-semibold text-white" data-i18n="dl.mac.name">macOS</p>
+                    <p class="text-xs text-[#6B7280] mt-1" data-i18n="dl.mac.desc">Apple Silicon · Intel x64</p>
+                </div>
+                <span class="version-tag badge px-2 py-0.5 rounded-full">v0.1.0</span>
+                <div class="w-full space-y-2 mt-1">
+                    <a href="https://github.com/mika5app/mika5-desktop/releases/download/v0.1.0/MIKA5-0.1.0-mac-arm64.dmg"
+                       class="block w-full bg-[#7C3AED] text-white text-xs font-semibold py-2 rounded-xl text-center hover:brightness-110 transition-all" data-i18n="dl.mac.arm">
+                        Apple Silicon (.dmg)
+                    </a>
+                    <a href="https://github.com/mika5app/mika5-desktop/releases/download/v0.1.0/MIKA5-0.1.0-mac-x64.dmg"
+                       class="block w-full bg-white/5 border border-white/10 text-[#9CA3AF] text-xs font-semibold py-2 rounded-xl text-center hover:bg-white/10 transition-all" data-i18n="dl.mac.intel">
+                        Intel x64 (.dmg)
+                    </a>
+                </div>
+            </div>
+
+            <!-- Linux -->
+            <div class="os-pill active p-6 rounded-2xl flex flex-col items-center gap-3 text-center">
+                <svg class="w-10 h-10" viewBox="0 0 24 24" fill="currentColor" style="color:#9CA3AF">
+                    <path d="M12.504 0c-.155 0-.315.008-.48.021C7.576.336 3.24 3.664 1.02 8.375c-.892 1.898-1.015 3.473-.988 4.58.04 1.655.333 3.408.944 5.048a.59.59 0 0 0 .027.073c.084.172.177.34.28.503.17.271.368.53.6.765.45.453 1.013.793 1.733.793.47 0 .994-.138 1.587-.448l.63-.333c.527-.278 1.09-.543 1.615-.694.455-.129.95-.19 1.42-.078l2.045.49c.502.12.97.368 1.37.71.61.524.895 1.19.826 1.893-.034.355-.152.654-.26.894-.068.15-.133.287-.196.42l-.04.079c-.15.3-.277.588-.277.893 0 .59.367 1.063.86 1.326.497.264 1.098.344 1.715.344.39 0 .786-.043 1.16-.12a8.46 8.46 0 0 0 1.105-.32l.127-.047a8.53 8.53 0 0 0 1.165-.538c.716-.404 1.343-.963 1.726-1.703.19-.367.296-.77.296-1.19 0-.538-.17-1.057-.474-1.47-.264-.354-.63-.6-1.035-.69l-.23-.05c-.53-.12-1.028-.298-1.43-.612-.428-.33-.654-.776-.617-1.265.034-.47.27-.885.617-1.145.362-.27.813-.385 1.273-.43.51-.05 1.044-.018 1.567.06l.287.043c.425.063.882.14 1.32.14.483 0 .942-.09 1.32-.356.345-.24.573-.605.654-1.025.04-.207.048-.43.024-.665a3.9 3.9 0 0 0-.084-.477l-.013-.056a5.22 5.22 0 0 0-.294-.862c-.368-.886-.969-1.75-1.76-2.414-1.374-1.15-3.115-1.695-4.873-1.695zm-.01 1.066c1.53 0 3.056.455 4.263 1.47.668.56 1.185 1.313 1.522 2.086.14.328.24.667.298.984.03.16.04.31.026.443-.05.267-.175.482-.375.618-.202.14-.487.218-.85.218-.35 0-.75-.066-1.197-.133-.477-.07-1.03-.104-1.617-.047-.64.063-1.268.232-1.78.617-.564.42-.895 1.044-.946 1.74-.056.748.295 1.439.862 1.876.504.388 1.113.597 1.726.737l.214.047c.22.048.43.168.58.368.197.268.305.627.305 1.008 0 .27-.065.535-.195.784-.286.553-.783 1.004-1.38 1.345a7.47 7.47 0 0 1-1.024.474l-.12.044a7.39 7.39 0 0 1-.973.281c-.32.066-.662.1-1.004.1-.453 0-.907-.07-1.246-.247-.265-.14-.413-.34-.413-.612 0-.168.086-.372.217-.634l.043-.086c.07-.147.143-.3.215-.47.14-.32.29-.706.336-1.166.096-.98-.28-1.914-1.05-2.573-.504-.432-1.094-.73-1.724-.881l-2.044-.49c-.657-.157-1.298-.077-1.878.093-.586.165-1.2.454-1.74.74l-.628.332c-.5.263-.925.373-1.278.373-.477 0-.864-.228-1.178-.556a3.74 3.74 0 0 1-.49-.648 4.96 4.96 0 0 1-.234-.422c-.573-1.547-.85-3.208-.888-4.745-.024-.946.09-2.35.888-4.047 2.05-4.354 6.08-7.457 9.992-7.741.147-.01.29-.016.43-.016z"/>
+                </svg>
+                <div>
+                    <p class="font-heading font-semibold text-white" data-i18n="dl.linux.name">Linux</p>
+                    <p class="text-xs text-[#6B7280] mt-1" data-i18n="dl.linux.desc">x64 · AppImage · deb · rpm</p>
+                </div>
+                <span class="version-tag badge px-2 py-0.5 rounded-full">v0.1.0</span>
+                <div class="w-full space-y-2 mt-1">
+                    <a href="https://github.com/mika5app/mika5-desktop/releases/download/v0.1.0/MIKA5-0.1.0-linux-x64.AppImage"
+                       class="block w-full bg-[#7C3AED] text-white text-xs font-semibold py-2 rounded-xl text-center hover:brightness-110 transition-all" data-i18n="dl.linux.appimage">
+                        AppImage (universal)
+                    </a>
+                    <div class="flex gap-2">
+                        <a href="https://github.com/mika5app/mika5-desktop/releases/download/v0.1.0/MIKA5-0.1.0-linux-x64.deb"
+                           class="flex-1 bg-white/5 border border-white/10 text-[#9CA3AF] text-xs font-semibold py-2 rounded-xl text-center hover:bg-white/10 transition-all">
+                            .deb
+                        </a>
+                        <a href="https://github.com/mika5app/mika5-desktop/releases/download/v0.1.0/MIKA5-0.1.0-linux-x64.rpm"
+                           class="flex-1 bg-white/5 border border-white/10 text-[#9CA3AF] text-xs font-semibold py-2 rounded-xl text-center hover:bg-white/10 transition-all">
+                            .rpm
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- macOS note -->
+        <div class="max-w-4xl mx-auto">
+            <p class="text-center text-xs text-[#6B7280]">
+                <span class="text-[#FBBF24]">&#9888;</span> <span data-i18n="dl.mac.note">macOS: The app is not notarized. On first launch, right-click the .dmg → Open to bypass Gatekeeper.</span>
+            </p>
+        </div>
+
+        <!-- Checksum / verify -->
+        <div class="max-w-4xl mx-auto">
+            <div class="terminal rounded-xl p-5 text-xs space-y-2">
+                <p class="text-[#4B5563]" data-i18n="dl.verify.comment1"># Verify download integrity</p>
+                <p><span class="prompt">PS&gt;</span> <span class="text-white">Get-FileHash "MIKA5-Setup-0.1.0-win-x64.exe" -Algorithm SHA256</span> <span class="comment"># Windows</span></p>
+                <p><span class="prompt">$</span> <span class="text-white">shasum -a 256 MIKA5-0.1.0-mac-arm64.dmg</span> <span class="comment"># macOS</span></p>
+                <p><span class="prompt">$</span> <span class="text-white">sha256sum MIKA5-0.1.0-linux-x64.AppImage</span> <span class="comment"># Linux</span></p>
+                <p class="text-[#6B7280]" data-i18n="dl.verify.comment2"># Compare with the SHA256 published in the GitHub release notes</p>
+            </div>
+        </div>
+
+        <!-- Older releases -->
+        <p class="text-center text-sm text-[#6B7280]">
+            <span data-i18n="dl.allreleases">All releases →</span>
+            <a href="https://github.com/mika5app/mika5-desktop/releases" target="_blank" rel="noopener" class="text-[#A78BFA] hover:text-white underline underline-offset-2 transition-colors">github.com/mika5app/mika5-desktop/releases</a>
+        </p>
+    </section>
+
+    <hr class="border-white/5">
+
+    <!-- ─── QUICK START ───────────────────────────────────────── -->
+    <section id="quickstart" class="py-24 space-y-12">
+        <div class="text-center space-y-4">
+            <h2 class="text-4xl font-heading" data-i18n="qs.title">Up and running in 3 minutes.</h2>
+            <p class="text-[#9CA3AF]"><span data-i18n="qs.subtitle">MIKA5 requires Ollama running locally. Install Ollama first, then follow these steps.</span></p>
+        </div>
+
+        <!-- Platform tabs -->
+        <div class="max-w-4xl mx-auto space-y-6">
+            <div class="flex gap-2 bg-[#0D1117] border border-white/5 p-1 rounded-xl w-fit mx-auto">
+                <button onclick="showTab('win')" id="tab-win"
+                    class="px-5 py-2 rounded-lg text-sm font-semibold transition-all bg-[#7C3AED] text-white" data-i18n="qs.tab.win">
+                    Windows
+                </button>
+                <button onclick="showTab('mac')" id="tab-mac"
+                    class="px-5 py-2 rounded-lg text-sm font-semibold transition-all text-[#9CA3AF] hover:text-white" data-i18n="qs.tab.mac">
+                    macOS
+                </button>
+                <button onclick="showTab('linux')" id="tab-linux"
+                    class="px-5 py-2 rounded-lg text-sm font-semibold transition-all text-[#9CA3AF] hover:text-white" data-i18n="qs.tab.linux">
+                    Linux
+                </button>
+            </div>
+
+            <!-- Windows tab -->
+            <div id="qs-win" class="grid lg:grid-cols-2 gap-12 items-start">
+                <div class="space-y-5">
+                    <div class="flex gap-4">
+                        <div class="step-num rounded-full flex items-center justify-center shrink-0">1</div>
+                        <div class="space-y-2">
+                            <p class="font-medium" data-i18n="qs.win.s1.title">Install Ollama</p>
+                            <p class="text-sm text-[#9CA3AF]"><span data-i18n="qs.win.s1.desc">Download from ollama.com and install it. It runs a local server at 127.0.0.1:11434.</span></p>
+                        </div>
+                    </div>
+                    <div class="flex gap-4">
+                        <div class="step-num rounded-full flex items-center justify-center shrink-0">2</div>
+                        <div class="space-y-2">
+                            <p class="font-medium" data-i18n="qs.win.s2.title">Pull a model + the embedding model</p>
+                            <div class="terminal rounded-xl p-4 text-xs space-y-1">
+                                <p><span class="prompt">$</span> ollama pull llama3.2</p>
+                                <p><span class="prompt">$</span> ollama pull nomic-embed-text</p>
+                                <p class="comment"># nomic-embed-text powers the RAG engine</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex gap-4">
+                        <div class="step-num rounded-full flex items-center justify-center shrink-0">3</div>
+                        <div class="space-y-2">
+                            <p class="font-medium" data-i18n="qs.win.s3.title">Install and launch MIKA5</p>
+                            <p class="text-sm text-[#9CA3AF]" data-i18n="qs.win.s3.desc">Run the MIKA5-Setup-0.1.0-win-x64.exe installer, then open MIKA5 from the Start Menu or Desktop shortcut.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="space-y-5">
+                    <div class="glass-card rounded-2xl p-7 space-y-4">
+                        <h3 class="font-heading text-base" data-i18n="qs.win.req.title">System Requirements</h3>
+                        <ul class="space-y-2 text-sm text-[#9CA3AF]">
+                            <li class="flex items-center gap-2 check-item" data-i18n="qs.win.req.1">Windows 10 or 11 (64-bit)</li>
+                            <li class="flex items-center gap-2 check-item" data-i18n="qs.win.req.2">8 GB RAM minimum (16 GB recommended)</li>
+                            <li class="flex items-center gap-2 check-item" data-i18n="qs.win.req.3">4 GB free disk (+ model files)</li>
+                            <li class="flex items-center gap-2 check-item" data-i18n="qs.win.req.4">Ollama installed and running</li>
+                            <li class="flex items-center gap-2 check-item" data-i18n="qs.win.req.5">GPU optional — CPU inference supported</li>
+                        </ul>
+                    </div>
+                    <div class="glass-card rounded-2xl p-7 space-y-4">
+                        <h3 class="font-heading text-base" data-i18n="qs.win.models.title">Recommended starter models</h3>
+                        <div class="space-y-2 text-sm font-mono">
+                            <div class="flex justify-between items-center"><span class="text-[#D1D5DB]">llama3.2:3b</span><span class="text-xs text-[#6B7280]">fast · 2 GB</span></div>
+                            <div class="flex justify-between items-center"><span class="text-[#D1D5DB]">qwen2.5:7b</span><span class="text-xs text-[#6B7280]">balanced · 4.7 GB</span></div>
+                            <div class="flex justify-between items-center"><span class="text-[#D1D5DB]">qwen2.5-vl:7b</span><span class="text-xs text-[#6B7280]">vision · 5.5 GB</span></div>
+                            <div class="flex justify-between items-center"><span class="text-[#D1D5DB]">nomic-embed-text</span><span class="text-xs text-[#34D399]">required for RAG</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- macOS tab -->
+            <div id="qs-mac" class="grid lg:grid-cols-2 gap-12 items-start hidden">
+                <div class="space-y-5">
+                    <div class="flex gap-4">
+                        <div class="step-num rounded-full flex items-center justify-center shrink-0">1</div>
+                        <div class="space-y-2">
+                            <p class="font-medium" data-i18n="qs.mac.s1.title">Install Ollama for macOS</p>
+                            <p class="text-sm text-[#9CA3AF]" data-i18n="qs.mac.s1.desc">Download from ollama.com. It runs as a menu bar app and starts the local server automatically.</p>
+                        </div>
+                    </div>
+                    <div class="flex gap-4">
+                        <div class="step-num rounded-full flex items-center justify-center shrink-0">2</div>
+                        <div class="space-y-2">
+                            <p class="font-medium" data-i18n="qs.mac.s2.title">Pull models</p>
+                            <div class="terminal rounded-xl p-4 text-xs space-y-1">
+                                <p><span class="prompt">$</span> ollama pull llama3.2</p>
+                                <p><span class="prompt">$</span> ollama pull nomic-embed-text</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex gap-4">
+                        <div class="step-num rounded-full flex items-center justify-center shrink-0">3</div>
+                        <div class="space-y-2">
+                            <p class="font-medium" data-i18n="qs.mac.s3.title">Open the MIKA5 DMG</p>
+                            <p class="text-sm text-[#9CA3AF]" data-i18n="qs.mac.s3.desc">Mount the .dmg, drag MIKA5 to Applications. On first launch right-click → Open to bypass Gatekeeper (app is unsigned).</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="space-y-5">
+                    <div class="glass-card rounded-2xl p-7 space-y-4">
+                        <h3 class="font-heading text-base" data-i18n="qs.mac.req.title">System Requirements</h3>
+                        <ul class="space-y-2 text-sm text-[#9CA3AF]">
+                            <li class="flex items-center gap-2 check-item" data-i18n="qs.mac.req.1">macOS 12 Monterey or later</li>
+                            <li class="flex items-center gap-2 check-item" data-i18n="qs.mac.req.2">Apple Silicon (M1/M2/M3/M4) or Intel x64</li>
+                            <li class="flex items-center gap-2 check-item" data-i18n="qs.mac.req.3">8 GB RAM minimum (16 GB recommended)</li>
+                            <li class="flex items-center gap-2 check-item" data-i18n="qs.mac.req.4">4 GB free disk (+ model files)</li>
+                            <li class="flex items-center gap-2 check-item" data-i18n="qs.mac.req.5">Ollama installed and running</li>
+                        </ul>
+                    </div>
+                    <div class="bg-[#FBBF24]/8 border border-[#FBBF24]/20 rounded-2xl p-5 text-sm text-[#FCD34D] space-y-1">
+                        <p class="font-semibold" data-i18n="qs.mac.gk.title">Gatekeeper warning</p>
+                        <p class="text-[#9CA3AF] text-xs" data-i18n="qs.mac.gk.desc">MIKA5 is not notarized with Apple. After mounting the DMG: right-click the app → Open → Open. You only need to do this once.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Linux tab -->
+            <div id="qs-linux" class="grid lg:grid-cols-2 gap-12 items-start hidden">
+                <div class="space-y-5">
+                    <div class="flex gap-4">
+                        <div class="step-num rounded-full flex items-center justify-center shrink-0">1</div>
+                        <div class="space-y-2">
+                            <p class="font-medium" data-i18n="qs.linux.s1.title">Install Ollama</p>
+                            <div class="terminal rounded-xl p-4 text-xs space-y-1">
+                                <p><span class="prompt">$</span> curl -fsSL https://ollama.com/install.sh | sh</p>
+                                <p><span class="prompt">$</span> ollama serve <span class="comment">&amp; # runs on :11434</span></p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex gap-4">
+                        <div class="step-num rounded-full flex items-center justify-center shrink-0">2</div>
+                        <div class="space-y-2">
+                            <p class="font-medium" data-i18n="qs.linux.s2.title">Pull models</p>
+                            <div class="terminal rounded-xl p-4 text-xs space-y-1">
+                                <p><span class="prompt">$</span> ollama pull llama3.2</p>
+                                <p><span class="prompt">$</span> ollama pull nomic-embed-text</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex gap-4">
+                        <div class="step-num rounded-full flex items-center justify-center shrink-0">3</div>
+                        <div class="space-y-2">
+                            <p class="font-medium" data-i18n="qs.linux.s3.title">Install MIKA5</p>
+                            <div class="terminal rounded-xl p-4 text-xs space-y-1">
+                                <p class="comment"># AppImage (no install needed):</p>
+                                <p><span class="prompt">$</span> chmod +x MIKA5-0.1.0-linux-x64.AppImage</p>
+                                <p><span class="prompt">$</span> ./MIKA5-0.1.0-linux-x64.AppImage</p>
+                                <p class="comment"># Or Debian/Ubuntu:</p>
+                                <p><span class="prompt">$</span> sudo dpkg -i MIKA5-0.1.0-linux-x64.deb</p>
+                                <p class="comment"># Or Fedora/RHEL:</p>
+                                <p><span class="prompt">$</span> sudo rpm -i MIKA5-0.1.0-linux-x64.rpm</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="space-y-5">
+                    <div class="glass-card rounded-2xl p-7 space-y-4">
+                        <h3 class="font-heading text-base" data-i18n="qs.linux.req.title">System Requirements</h3>
+                        <ul class="space-y-2 text-sm text-[#9CA3AF]">
+                            <li class="flex items-center gap-2 check-item" data-i18n="qs.linux.req.1">Ubuntu 20.04+, Debian 11+, Fedora 36+, or compatible</li>
+                            <li class="flex items-center gap-2 check-item" data-i18n="qs.linux.req.2">x86_64 (amd64) architecture</li>
+                            <li class="flex items-center gap-2 check-item" data-i18n="qs.linux.req.3">8 GB RAM minimum (16 GB recommended)</li>
+                            <li class="flex items-center gap-2 check-item" data-i18n="qs.linux.req.4">4 GB free disk (+ model files)</li>
+                            <li class="flex items-center gap-2 check-item" data-i18n="qs.linux.req.5">Ollama running on localhost:11434</li>
+                        </ul>
+                    </div>
+                    <div class="glass-card rounded-2xl p-7 space-y-4">
+                        <h3 class="font-heading text-base" data-i18n="qs.linux.tip.title">AppImage tip</h3>
+                        <p class="text-sm text-[#9CA3AF]" data-i18n="qs.linux.tip.desc">AppImage is the recommended format — it runs on any Linux distribution without installation and doesn't require root. Just chmod +x and run.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <script>
+    function showTab(os) {
+        ['win','mac','linux'].forEach(t => {
+            document.getElementById('qs-' + t).classList.add('hidden');
+            const btn = document.getElementById('tab-' + t);
+            btn.classList.remove('bg-[#7C3AED]', 'text-white');
+            btn.classList.add('text-[#9CA3AF]', 'hover:text-white');
+        });
+        document.getElementById('qs-' + os).classList.remove('hidden');
+        const active = document.getElementById('tab-' + os);
+        active.classList.add('bg-[#7C3AED]', 'text-white');
+        active.classList.remove('text-[#9CA3AF]', 'hover:text-white');
+    }
+    </script>
+
+    <!-- ─── PRIVACY STATEMENT ─────────────────────────────────── -->
+    <section class="py-20">
+        <div class="bg-[#111827] border border-white/5 rounded-3xl p-12 md:p-20 text-center space-y-8">
+            <h2 class="text-4xl md:text-5xl font-heading" data-i18n="privacy.title">Your data never leaves your machine.</h2>
+            <p class="text-xl text-[#9CA3AF] max-w-2xl mx-auto" data-i18n="privacy.desc">
+                No telemetry. No background sync. No account creation. No hidden calls home.
+                All conversations and knowledge are stored in a local SQLite database on your computer.
+            </p>
+            <div class="flex flex-wrap justify-center gap-6 text-sm text-[#6B7280]">
+                <span class="flex items-center gap-2"><span class="text-green-400">&#10003;</span> <span data-i18n="privacy.f1">Zero telemetry by default</span></span>
+                <span class="flex items-center gap-2"><span class="text-green-400">&#10003;</span> <span data-i18n="privacy.f2">No analytics or crash reporting</span></span>
+                <span class="flex items-center gap-2"><span class="text-green-400">&#10003;</span> <span data-i18n="privacy.f3">Cloud providers optional and user-configured</span></span>
+                <span class="flex items-center gap-2"><span class="text-green-400">&#10003;</span> <span data-i18n="privacy.f4">API keys encrypted with AES-256-GCM</span></span>
+            </div>
+        </div>
+    </section>
+
+    <!-- ─── FINAL CTA ─────────────────────────────────────────── -->
+    <section class="py-28 text-center space-y-10">
+        <h2 class="text-5xl md:text-6xl font-heading tracking-tight">
+            <span data-i18n="cta.title1">Run AI on</span> <span class="accent-gradient" data-i18n="cta.title2">your terms.</span>
+        </h2>
+        <div class="flex flex-wrap justify-center gap-5">
+            <a href="#download"
+               class="btn-download px-10 py-4 rounded-xl font-bold text-lg text-white inline-flex items-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                <span data-i18n="cta.download">Download MIKA5 — Free</span>
+            </a>
+            <a href="https://github.com/mika5app/mika5-desktop" target="_blank" rel="noopener"
+               class="border border-white/10 px-10 py-4 rounded-xl font-bold text-lg hover:bg-white/5 transition-all inline-flex items-center gap-2">
+                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+                <span data-i18n="cta.github">View on GitHub</span>
+            </a>
+        </div>
+        <p class="text-sm text-[#6B7280]" data-i18n="cta.tagline">v0.1.0 · Windows · macOS · Linux · Free &amp; Open Source</p>
+    </section>
+
+    <!-- ─── NOTIFY PRO ────────────────────────────────────────── -->
+    <section class="py-16 text-center">
+        <div class="max-w-lg mx-auto p-8 rounded-2xl border border-white/10 bg-[#111827]/60 backdrop-blur space-y-4">
+            <h3 class="text-2xl font-heading" data-i18n="notify.title">MIKA5 Pro is coming</h3>
+            <p class="text-sm text-[#9CA3AF]" data-i18n="notify.desc">Team collaboration, cloud sync, advanced RAG, and more. Get notified when it launches.</p>
+            <form id="notifyForm" class="flex gap-2 max-w-md mx-auto" novalidate>
+                <input type="email" id="notifyEmail" name="email" required placeholder="you@example.com"
+                       class="flex-1 px-4 py-3 rounded-lg bg-[#0B0F14] border border-white/10 text-white placeholder-[#6B7280] focus:border-[#7C3AED] focus:outline-none text-sm">
+                <button type="submit" id="notifyBtn"
+                        class="btn-download px-6 py-3 rounded-lg font-semibold text-sm text-white whitespace-nowrap" data-i18n="notify.btn">Notify me</button>
+            </form>
+            <p id="notifyMsg" class="text-xs text-[#4B5563] min-h-[1.25rem]" data-i18n="notify.privacy">No spam. Unsubscribe anytime.</p>
+            <script>
+              (function() {
+                // Buttondown API — set your API key from buttondown.email/settings
+                var BUTTONDOWN_API_KEY = 'YOUR_BUTTONDOWN_API_KEY';
+                var form = document.getElementById('notifyForm');
+                var btn  = document.getElementById('notifyBtn');
+                var msg  = document.getElementById('notifyMsg');
+
+                form.addEventListener('submit', function(e) {
+                  e.preventDefault();
+                  var email = document.getElementById('notifyEmail').value.trim();
+                  if (!email) return;
+
+                  btn.disabled = true;
+                  btn.textContent = '…';
+                  msg.textContent = '';
+
+                  fetch('https://api.buttondown.email/v1/subscribers', {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': 'Token ' + BUTTONDOWN_API_KEY,
+                      'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ email: email, tags: ['mika5-pro-waitlist'] })
+                  })
+                  .then(function(res) {
+                    if (res.ok || res.status === 201) {
+                      form.innerHTML = '<p class="text-[#A78BFA] font-semibold">✓ You\'re on the list!</p>';
+                      msg.textContent = 'We\'ll reach out when MIKA5 Pro launches.';
+                    } else {
+                      return res.json().then(function(data) {
+                        var errMsg = (data && data.detail) ? data.detail : 'Something went wrong. Try again.';
+                        msg.style.color = '#F87171';
+                        msg.textContent = errMsg;
+                        btn.disabled = false;
+                        btn.setAttribute('data-i18n', 'notify.btn');
+                        btn.textContent = document.documentElement.lang === 'es' ? 'Notificarme' : 'Notify me';
+                      });
+                    }
+                  })
+                  .catch(function() {
+                    msg.style.color = '#F87171';
+                    msg.textContent = 'Network error. Please try again.';
+                    btn.disabled = false;
+                    btn.setAttribute('data-i18n', 'notify.btn');
+                    btn.textContent = document.documentElement.lang === 'es' ? 'Notificarme' : 'Notify me';
+                  });
+                });
+              })();
+            </script>
+        </div>
+    </section>
+
+</main>
+
+<!-- ─── FOOTER ────────────────────────────────────────────────── -->
+<footer class="border-t border-white/5 py-14 text-[#6B7280] text-sm">
+    <div class="max-w-[1200px] mx-auto px-6 flex flex-col md:flex-row justify-between gap-8">
+        <div class="space-y-2">
+            <div class="font-heading text-white font-bold text-lg flex items-center gap-2">
+                <img src="icon.png" alt="MIKA5" class="w-5 h-5 rounded">
+                MIKA5
+            </div>
+            <p class="text-xs" data-i18n="footer.tagline">AI on your machine. Under your control.</p>
+            <p class="text-xs text-[#4B5563]" data-i18n="footer.copyright">v0.1.0 · © 2026 MIKA5 · AGPL-3.0</p>
+        </div>
+        <div class="flex flex-col md:flex-row gap-8 text-sm">
+            <div class="space-y-2">
+                <p class="text-[#4B5563] text-xs uppercase tracking-widest" data-i18n="footer.product">Product</p>
+                <div class="space-y-1.5">
+                    <a href="#features" class="block hover:text-white transition-colors" data-i18n="footer.features">Features</a>
+                    <a href="#download" class="block hover:text-white transition-colors" data-i18n="footer.download">Download</a>
+                    <a href="#quickstart" class="block hover:text-white transition-colors" data-i18n="footer.quickstart">Quick Start</a>
+                    <a href="models.html" class="block hover:text-white transition-colors" data-i18n="footer.modelguide">Model Guide</a>
+                    <a href="whitepaper.html" class="block hover:text-white transition-colors" data-i18n="footer.whitepaper">White Paper</a>
+                </div>
+            </div>
+            <div class="space-y-2">
+                <p class="text-[#4B5563] text-xs uppercase tracking-widest" data-i18n="footer.community">Community</p>
+                <div class="space-y-1.5">
+                    <a href="https://github.com/mika5app/mika5-desktop" target="_blank" rel="noopener" class="block hover:text-white transition-colors">GitHub</a>
+                    <a href="https://github.com/mika5app/mika5-desktop/releases" target="_blank" rel="noopener" class="block hover:text-white transition-colors" data-i18n="footer.releases">Releases</a>
+                    <a href="https://github.com/mika5app/mika5-desktop/issues" target="_blank" rel="noopener" class="block hover:text-white transition-colors" data-i18n="footer.issues">Issues</a>
+                </div>
+            </div>
+            <div class="space-y-2">
+                <p class="text-[#4B5563] text-xs uppercase tracking-widest" data-i18n="footer.legal">Legal</p>
+                <div class="space-y-1.5">
+                    <a href="#" class="block hover:text-white transition-colors" data-i18n="footer.privacy">Privacy</a>
+                    <a href="https://github.com/mika5app/mika5-desktop/blob/main/LICENSE" target="_blank" rel="noopener" class="block hover:text-white transition-colors" data-i18n="footer.license">License (AGPL-3.0)</a>
+                    <a href="https://github.com/mika5app/mika5-desktop/blob/main/TRADEMARK.md" target="_blank" rel="noopener" class="block hover:text-white transition-colors" data-i18n="footer.trademark">Trademark</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</footer>
+
+<!-- ─── I18N SYSTEM ────────────────────────────────────────────── -->
+<script>
+const STRINGS = {
+  en: {
+    // Nav
+    'nav.features': 'Features',
+    'nav.download': 'Download',
+    'nav.quickstart': 'Quick Start',
+    'nav.modelguide': 'Model Guide',
+    'nav.whitepaper': 'White Paper',
+    'nav.github': 'GitHub',
+    'nav.downloadbtn': 'Download Free',
+
+    // Hero
+    'hero.badge': 'v0.1.0 — Windows · macOS · Linux',
+    'hero.h1a': 'AI on your machine.',
+    'hero.h1b': 'Under your control.',
+    'hero.subtitle': 'The only local AI desktop with built-in RAG, project organization, and multi-provider support — in English and Spanish. No subscriptions. No hidden cloud.',
+    'hero.cta': 'Download MIKA5 — Free',
+    'hero.ctasecondary': 'Quick Start Guide',
+    'hero.tagline': 'Free · Offline-ready · Windows · macOS · Linux',
+
+    // Trust badges
+    'badge.offline': 'Offline-ready',
+    'badge.telemetry': 'No telemetry',
+    'badge.sqlite': 'SQLite local memory',
+    'badge.ollama': 'Ollama compatible',
+    'badge.vision': 'Vision models',
+    'badge.rag': 'Built-in RAG engine',
+    'badge.cloud': 'Cloud optional',
+
+    // Features
+    'features.title': 'Everything in one place.',
+    'features.subtitle': 'No extensions. No integrations. No API keys required to get started.',
+    'feat.rag.title': 'Built-in RAG Engine',
+    'feat.rag.desc': 'Upload documents and MIKA5 automatically chunks, embeds, and retrieves the most relevant fragments for every message. Per-project and per-chat knowledge bases.',
+    'feat.projects.title': 'Projects & Chats',
+    'feat.projects.desc': 'Organize work into projects with isolated knowledge, system prompts, and chat history. Quick Chat for ad-hoc conversations without a project.',
+    'feat.vision.title': 'Vision Models',
+    'feat.vision.desc': 'Attach images to any message. MIKA5 auto-detects vision-capable models (LLaVA, GLM-OCR, Gemma3, Qwen2.5-VL, GPT-4o, Claude) and warns when a model can\'t process images.',
+    'feat.cloud.title': 'Cloud AI — Optional',
+    'feat.cloud.desc': 'Connect OpenAI, Anthropic, Groq, or Moonshot when you need them. API keys stored with AES-256-GCM encryption. A privacy indicator shows when cloud is active.',
+    'feat.tracking.title': 'Model Tracking',
+    'feat.tracking.desc': 'Every message is tagged with the model that generated it. Model switches within a chat are highlighted inline so you always know which AI answered.',
+    'feat.export.title': 'Export Anywhere',
+    'feat.export.desc': 'Export individual messages or full conversations to Markdown, plain text, HTML, Python, or PDF. Smart titles generated automatically from content.',
+
+    // Models row
+    'models.popular': 'Popular & everyday — local via Ollama',
+    'models.highend': 'High-end — require 32–64 GB RAM / GPU 24 GB+',
+    'models.note': '⚡ High-end models require significant hardware. Performance varies by PC specs. See',
+    'models.guide': 'Model Guide',
+    'models.noteend': 'for detailed hardware requirements.',
+    'models.cloud': 'Local runtimes: Ollama · llama.cpp — Cloud providers: OpenAI · Anthropic · Groq · Moonshot',
+
+    // Why local
+    'why.title': 'The cloud isn\'t neutral.',
+    'why.lockin.title': 'Subscription lock-in',
+    'why.lockin.desc': 'Pricing and access can change overnight without your consent.',
+    'why.billing.title': 'Token billing',
+    'why.billing.desc': 'You pay per thought. Creativity shouldn\'t have a meter running.',
+    'why.data.title': 'Data exposure',
+    'why.data.desc': 'Prompts pass through servers you don\'t own or control.',
+
+    // Download
+    'dl.title': 'Download MIKA5',
+    'dl.subtitle': 'Free. No account. No license key.',
+    'dl.win.name': 'Windows',
+    'dl.win.desc': 'Windows 10 / 11 · x64',
+    'dl.win.installer': 'Download Installer (.exe)',
+    'dl.win.portable': 'Portable (.exe)',
+    'dl.mac.name': 'macOS',
+    'dl.mac.desc': 'Apple Silicon · Intel x64',
+    'dl.mac.arm': 'Apple Silicon (.dmg)',
+    'dl.mac.intel': 'Intel x64 (.dmg)',
+    'dl.linux.name': 'Linux',
+    'dl.linux.desc': 'x64 · AppImage · deb · rpm',
+    'dl.linux.appimage': 'AppImage (universal)',
+    'dl.mac.note': 'macOS: The app is not notarized. On first launch, right-click the .dmg → Open to bypass Gatekeeper.',
+    'dl.verify.comment1': '# Verify download integrity',
+    'dl.verify.comment2': '# Compare with the SHA256 published in the GitHub release notes',
+    'dl.allreleases': 'All releases →',
+
+    // Quick Start
+    'qs.title': 'Up and running in 3 minutes.',
+    'qs.subtitle': 'MIKA5 requires Ollama running locally. Install Ollama first, then follow these steps.',
+    'qs.tab.win': 'Windows',
+    'qs.tab.mac': 'macOS',
+    'qs.tab.linux': 'Linux',
+    'qs.win.s1.title': 'Install Ollama',
+    'qs.win.s1.desc': 'Download from ollama.com and install it. It runs a local server at 127.0.0.1:11434.',
+    'qs.win.s2.title': 'Pull a model + the embedding model',
+    'qs.win.s3.title': 'Install and launch MIKA5',
+    'qs.win.s3.desc': 'Run the MIKA5-Setup-0.1.0-win-x64.exe installer, then open MIKA5 from the Start Menu or Desktop shortcut.',
+    'qs.win.req.title': 'System Requirements',
+    'qs.win.req.1': 'Windows 10 or 11 (64-bit)',
+    'qs.win.req.2': '8 GB RAM minimum (16 GB recommended)',
+    'qs.win.req.3': '4 GB free disk (+ model files)',
+    'qs.win.req.4': 'Ollama installed and running',
+    'qs.win.req.5': 'GPU optional — CPU inference supported',
+    'qs.win.models.title': 'Recommended starter models',
+    'qs.mac.s1.title': 'Install Ollama for macOS',
+    'qs.mac.s1.desc': 'Download from ollama.com. It runs as a menu bar app and starts the local server automatically.',
+    'qs.mac.s2.title': 'Pull models',
+    'qs.mac.s3.title': 'Open the MIKA5 DMG',
+    'qs.mac.s3.desc': 'Mount the .dmg, drag MIKA5 to Applications. On first launch right-click → Open to bypass Gatekeeper (app is unsigned).',
+    'qs.mac.req.title': 'System Requirements',
+    'qs.mac.req.1': 'macOS 12 Monterey or later',
+    'qs.mac.req.2': 'Apple Silicon (M1/M2/M3/M4) or Intel x64',
+    'qs.mac.req.3': '8 GB RAM minimum (16 GB recommended)',
+    'qs.mac.req.4': '4 GB free disk (+ model files)',
+    'qs.mac.req.5': 'Ollama installed and running',
+    'qs.mac.gk.title': 'Gatekeeper warning',
+    'qs.mac.gk.desc': 'MIKA5 is not notarized with Apple. After mounting the DMG: right-click the app → Open → Open. You only need to do this once.',
+    'qs.linux.s1.title': 'Install Ollama',
+    'qs.linux.s2.title': 'Pull models',
+    'qs.linux.s3.title': 'Install MIKA5',
+    'qs.linux.req.title': 'System Requirements',
+    'qs.linux.req.1': 'Ubuntu 20.04+, Debian 11+, Fedora 36+, or compatible',
+    'qs.linux.req.2': 'x86_64 (amd64) architecture',
+    'qs.linux.req.3': '8 GB RAM minimum (16 GB recommended)',
+    'qs.linux.req.4': '4 GB free disk (+ model files)',
+    'qs.linux.req.5': 'Ollama running on localhost:11434',
+    'qs.linux.tip.title': 'AppImage tip',
+    'qs.linux.tip.desc': 'AppImage is the recommended format — it runs on any Linux distribution without installation and doesn\'t require root. Just chmod +x and run.',
+
+    // Privacy
+    'privacy.title': 'Your data never leaves your machine.',
+    'privacy.desc': 'No telemetry. No background sync. No account creation. No hidden calls home. All conversations and knowledge are stored in a local SQLite database on your computer.',
+    'privacy.f1': 'Zero telemetry by default',
+    'privacy.f2': 'No analytics or crash reporting',
+    'privacy.f3': 'Cloud providers optional and user-configured',
+    'privacy.f4': 'API keys encrypted with AES-256-GCM',
+
+    // Final CTA
+    'cta.title1': 'Run AI on',
+    'cta.title2': 'your terms.',
+    'cta.download': 'Download MIKA5 — Free',
+    'cta.github': 'View on GitHub',
+    'cta.tagline': 'v0.1.0 · Windows · macOS · Linux · Free &amp; Open Source',
+
+    // Footer
+    'notify.title': 'MIKA5 Pro is coming',
+    'notify.desc': 'Team collaboration, cloud sync, advanced RAG, and more. Get notified when it launches.',
+    'notify.btn': 'Notify me',
+    'notify.privacy': 'No spam. Unsubscribe anytime.',
+    'footer.tagline': 'AI on your machine. Under your control.',
+    'footer.product': 'Product',
+    'footer.community': 'Community',
+    'footer.legal': 'Legal',
+    'footer.features': 'Features',
+    'footer.download': 'Download',
+    'footer.quickstart': 'Quick Start',
+    'footer.modelguide': 'Model Guide',
+    'footer.whitepaper': 'White Paper',
+    'footer.releases': 'Releases',
+    'footer.issues': 'Issues',
+    'footer.copyright': 'v0.1.0 · © 2026 MIKA5 · AGPL-3.0',
+    'footer.privacy': 'Privacy',
+    'footer.license': 'License (AGPL-3.0)',
+    'footer.trademark': 'Trademark'
+  },
+  es: {
+    // Nav
+    'nav.features': 'Funcionalidades',
+    'nav.download': 'Descargar',
+    'nav.quickstart': 'Inicio Rápido',
+    'nav.modelguide': 'Guía de Modelos',
+    'nav.whitepaper': 'White Paper',
+    'nav.github': 'GitHub',
+    'nav.downloadbtn': 'Descargar Gratis',
+
+    // Hero
+    'hero.badge': 'v0.1.0 — Windows · macOS · Linux',
+    'hero.h1a': 'IA en tu máquina.',
+    'hero.h1b': 'Bajo tu control.',
+    'hero.subtitle': 'La única app de IA local con RAG integrado, organización por proyectos y soporte multi-proveedor — en español e inglés. Sin suscripciones. Sin nube oculta.',
+    'hero.cta': 'Descargar MIKA5 — Gratis',
+    'hero.ctasecondary': 'Guía de Inicio Rápido',
+    'hero.tagline': 'Gratis · Sin conexión · Windows · macOS · Linux',
+
+    // Trust badges
+    'badge.offline': 'Sin conexión',
+    'badge.telemetry': 'Sin telemetría',
+    'badge.sqlite': 'Memoria local SQLite',
+    'badge.ollama': 'Compatible con Ollama',
+    'badge.vision': 'Modelos de visión',
+    'badge.rag': 'Motor RAG integrado',
+    'badge.cloud': 'Nube opcional',
+
+    // Features
+    'features.title': 'Todo en un solo lugar.',
+    'features.subtitle': 'Sin extensiones. Sin integraciones. No necesitas API keys para empezar.',
+    'feat.rag.title': 'Motor RAG Integrado',
+    'feat.rag.desc': 'Sube documentos y MIKA5 fragmenta, embede y recupera los fragmentos más relevantes para cada mensaje automáticamente. Bases de conocimiento por proyecto y por chat.',
+    'feat.projects.title': 'Proyectos y Chats',
+    'feat.projects.desc': 'Organiza el trabajo en proyectos con conocimiento aislado, prompts del sistema e historial de chat. Chat Rápido para conversaciones ad-hoc sin proyecto.',
+    'feat.vision.title': 'Modelos de Visión',
+    'feat.vision.desc': 'Adjunta imágenes a cualquier mensaje. MIKA5 detecta automáticamente modelos con capacidad de visión (LLaVA, GLM-OCR, Gemma3, Qwen2.5-VL, GPT-4o, Claude) y avisa cuando un modelo no puede procesar imágenes.',
+    'feat.cloud.title': 'IA en la Nube — Opcional',
+    'feat.cloud.desc': 'Conecta OpenAI, Anthropic, Groq o Moonshot cuando los necesites. API keys guardadas con cifrado AES-256-GCM. Un indicador de privacidad muestra cuando la nube está activa.',
+    'feat.tracking.title': 'Seguimiento de Modelos',
+    'feat.tracking.desc': 'Cada mensaje está etiquetado con el modelo que lo generó. Los cambios de modelo dentro de un chat se resaltan en línea para que siempre sepas qué IA respondió.',
+    'feat.export.title': 'Exportar a Cualquier Lugar',
+    'feat.export.desc': 'Exporta mensajes individuales o conversaciones completas a Markdown, texto plano, HTML, Python o PDF. Títulos inteligentes generados automáticamente del contenido.',
+
+    // Models row
+    'models.popular': 'Populares y cotidianos — local via Ollama',
+    'models.highend': 'Alta gama — requieren 32–64 GB RAM / GPU 24 GB+',
+    'models.note': '⚡ Los modelos de alta gama requieren hardware significativo. El rendimiento varía según las especificaciones del PC. Ver',
+    'models.guide': 'Guía de Modelos',
+    'models.noteend': 'para requisitos detallados de hardware.',
+    'models.cloud': 'Runtimes locales: Ollama · llama.cpp — Proveedores cloud: OpenAI · Anthropic · Groq · Moonshot',
+
+    // Why local
+    'why.title': 'La nube no es neutral.',
+    'why.lockin.title': 'Dependencia de suscripción',
+    'why.lockin.desc': 'Los precios y el acceso pueden cambiar de la noche a la mañana sin tu consentimiento.',
+    'why.billing.title': 'Facturación por token',
+    'why.billing.desc': 'Pagas por pensamiento. La creatividad no debería tener un contador corriendo.',
+    'why.data.title': 'Exposición de datos',
+    'why.data.desc': 'Los prompts pasan por servidores que no posees ni controlas.',
+
+    // Download
+    'dl.title': 'Descargar MIKA5',
+    'dl.subtitle': 'Gratis. Sin cuenta. Sin clave de licencia.',
+    'dl.win.name': 'Windows',
+    'dl.win.desc': 'Windows 10 / 11 · x64',
+    'dl.win.installer': 'Descargar Instalador (.exe)',
+    'dl.win.portable': 'Portátil (.exe)',
+    'dl.mac.name': 'macOS',
+    'dl.mac.desc': 'Apple Silicon · Intel x64',
+    'dl.mac.arm': 'Apple Silicon (.dmg)',
+    'dl.mac.intel': 'Intel x64 (.dmg)',
+    'dl.linux.name': 'Linux',
+    'dl.linux.desc': 'x64 · AppImage · deb · rpm',
+    'dl.linux.appimage': 'AppImage (universal)',
+    'dl.mac.note': 'macOS: La app no está notarizada. En el primer lanzamiento, clic derecho en el .dmg → Abrir para evitar Gatekeeper.',
+    'dl.verify.comment1': '# Verificar integridad de la descarga',
+    'dl.verify.comment2': '# Comparar con el SHA256 publicado en las notas de la versión de GitHub',
+    'dl.allreleases': 'Todas las versiones →',
+
+    // Quick Start
+    'qs.title': 'En marcha en 3 minutos.',
+    'qs.subtitle': 'MIKA5 requiere Ollama corriendo localmente. Instala Ollama primero, luego sigue estos pasos.',
+    'qs.tab.win': 'Windows',
+    'qs.tab.mac': 'macOS',
+    'qs.tab.linux': 'Linux',
+    'qs.win.s1.title': 'Instalar Ollama',
+    'qs.win.s1.desc': 'Descarga desde ollama.com e instálalo. Ejecuta un servidor local en 127.0.0.1:11434.',
+    'qs.win.s2.title': 'Descargar un modelo + el modelo de embeddings',
+    'qs.win.s3.title': 'Instalar e iniciar MIKA5',
+    'qs.win.s3.desc': 'Ejecuta el instalador MIKA5-Setup-0.1.0-win-x64.exe, luego abre MIKA5 desde el Menú de Inicio o el acceso directo del escritorio.',
+    'qs.win.req.title': 'Requisitos del sistema',
+    'qs.win.req.1': 'Windows 10 u 11 (64-bit)',
+    'qs.win.req.2': '8 GB RAM mínimo (16 GB recomendado)',
+    'qs.win.req.3': '4 GB de disco libre (+ archivos de modelos)',
+    'qs.win.req.4': 'Ollama instalado y en ejecución',
+    'qs.win.req.5': 'GPU opcional — inferencia en CPU soportada',
+    'qs.win.models.title': 'Modelos recomendados para empezar',
+    'qs.mac.s1.title': 'Instalar Ollama para macOS',
+    'qs.mac.s1.desc': 'Descarga desde ollama.com. Ejecuta como app de barra de menú e inicia el servidor local automáticamente.',
+    'qs.mac.s2.title': 'Descargar modelos',
+    'qs.mac.s3.title': 'Abrir el DMG de MIKA5',
+    'qs.mac.s3.desc': 'Monta el .dmg, arrastra MIKA5 a Aplicaciones. En el primer lanzamiento clic derecho → Abrir para evitar Gatekeeper (la app no está firmada).',
+    'qs.mac.req.title': 'Requisitos del sistema',
+    'qs.mac.req.1': 'macOS 12 Monterey o posterior',
+    'qs.mac.req.2': 'Apple Silicon (M1/M2/M3/M4) o Intel x64',
+    'qs.mac.req.3': '8 GB RAM mínimo (16 GB recomendado)',
+    'qs.mac.req.4': '4 GB de disco libre (+ archivos de modelos)',
+    'qs.mac.req.5': 'Ollama instalado y en ejecución',
+    'qs.mac.gk.title': 'Aviso de Gatekeeper',
+    'qs.mac.gk.desc': 'MIKA5 no está notarizada con Apple. Después de montar el DMG: clic derecho en la app → Abrir → Abrir. Solo necesitas hacerlo una vez.',
+    'qs.linux.s1.title': 'Instalar Ollama',
+    'qs.linux.s2.title': 'Descargar modelos',
+    'qs.linux.s3.title': 'Instalar MIKA5',
+    'qs.linux.req.title': 'Requisitos del sistema',
+    'qs.linux.req.1': 'Ubuntu 20.04+, Debian 11+, Fedora 36+, o compatible',
+    'qs.linux.req.2': 'Arquitectura x86_64 (amd64)',
+    'qs.linux.req.3': '8 GB RAM mínimo (16 GB recomendado)',
+    'qs.linux.req.4': '4 GB de disco libre (+ archivos de modelos)',
+    'qs.linux.req.5': 'Ollama en ejecución en localhost:11434',
+    'qs.linux.tip.title': 'Consejo sobre AppImage',
+    'qs.linux.tip.desc': 'AppImage es el formato recomendado — funciona en cualquier distribución Linux sin instalación y no requiere root. Solo chmod +x y ejecuta.',
+
+    // Privacy
+    'privacy.title': 'Tus datos nunca salen de tu máquina.',
+    'privacy.desc': 'Sin telemetría. Sin sincronización en segundo plano. Sin creación de cuenta. Sin llamadas ocultas. Todas las conversaciones y conocimiento se almacenan en una base de datos SQLite local en tu computadora.',
+    'privacy.f1': 'Cero telemetría por defecto',
+    'privacy.f2': 'Sin analíticas ni reportes de errores',
+    'privacy.f3': 'Proveedores cloud opcionales y configurados por el usuario',
+    'privacy.f4': 'API keys cifradas con AES-256-GCM',
+
+    // Final CTA
+    'cta.title1': 'Ejecuta IA en',
+    'cta.title2': 'tus términos.',
+    'cta.download': 'Descargar MIKA5 — Gratis',
+    'cta.github': 'Ver en GitHub',
+    'cta.tagline': 'v0.1.0 · Windows · macOS · Linux · Gratis y Open Source',
+
+    // Footer
+    'notify.title': 'MIKA5 Pro viene en camino',
+    'notify.desc': 'Colaboración en equipo, sync en la nube, RAG avanzado y más. Recibe una notificación cuando se lance.',
+    'notify.btn': 'Notificarme',
+    'notify.privacy': 'Sin spam. Cancela cuando quieras.',
+    'footer.tagline': 'IA en tu máquina. Bajo tu control.',
+    'footer.product': 'Producto',
+    'footer.community': 'Comunidad',
+    'footer.legal': 'Legal',
+    'footer.features': 'Funcionalidades',
+    'footer.download': 'Descargar',
+    'footer.quickstart': 'Inicio Rápido',
+    'footer.modelguide': 'Guía de Modelos',
+    'footer.whitepaper': 'White Paper',
+    'footer.releases': 'Versiones',
+    'footer.issues': 'Problemas',
+    'footer.copyright': 'v0.1.0 · © 2026 MIKA5 · AGPL-3.0',
+    'footer.privacy': 'Privacidad',
+    'footer.license': 'Licencia (AGPL-3.0)',
+    'footer.trademark': 'Marca Registrada'
+  }
+};
+
+let currentLang = (navigator.language || navigator.userLanguage || 'en').startsWith('es') ? 'es' : 'en';
+
+function applyLang(lang) {
+  currentLang = lang;
+  document.querySelectorAll('[data-i18n]').forEach(function(el) {
+    var key = el.getAttribute('data-i18n');
+    if (STRINGS[lang][key] !== undefined) {
+      el.textContent = STRINGS[lang][key];
+    }
+  });
+  var btn = document.getElementById('lang-toggle');
+  if (btn) btn.textContent = lang === 'es' ? 'EN' : 'ES';
+  document.documentElement.lang = lang;
+}
+
+function toggleLang() {
+  applyLang(currentLang === 'es' ? 'en' : 'es');
+}
+
+document.addEventListener('DOMContentLoaded', function() { applyLang(currentLang); });
+</script>
+
+</body>
+</html>
