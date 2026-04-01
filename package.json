@@ -2,7 +2,10 @@
   "name": "mika5-desktop",
   "version": "0.1.0",
   "description": "MIKA5 — local AI desktop with projects, chats, knowledge and RAG",
-  "author": "MIKA5 Team",
+  "author": {
+    "name": "MIKA5",
+    "email": "noreply@mika5.xyz"
+  },
   "license": "AGPL-3.0",
   "main": "src/main/main.js",
   "private": true,
