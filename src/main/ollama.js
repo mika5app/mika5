@@ -162,9 +162,6 @@ const ollamaApi = {
     const minCtx = estimatedTokens + OUTPUT_TOKEN_RESERVE;
     const numCtx = Math.min(MAX_CTX, Math.max(MIN_CTX, Math.ceil(minCtx / CTX_ALIGN) * CTX_ALIGN));
 
-    // Disable extended thinking for qwen3.x models to prevent extremely slow responses
-    const isThinkingModel = /qwen3/i.test(m);
-
     try {
       return await fetchJson(`${BASE}/api/chat`, {
         method: "POST",
@@ -173,7 +170,7 @@ const ollamaApi = {
           model: m,
           messages,
           stream: false,
-          ...(isThinkingModel ? { think: false } : {}),
+          think: false,
           options: {
             num_ctx: numCtx,
             num_predict: 4096
