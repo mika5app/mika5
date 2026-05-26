@@ -6,6 +6,15 @@ on:
       - 'v*.*.*'
   workflow_dispatch:
     inputs:
+      platform:
+        description: 'Platform to build (manual runs only — tag pushes always build all)'
+        type: choice
+        options:
+          - windows
+          - macos
+          - linux
+          - all
+        default: windows
       publish:
         description: 'Publish as GitHub Release'
         type: boolean
@@ -24,6 +33,7 @@ jobs:
   build-windows:
     name: Windows (NSIS + Portable)
     runs-on: windows-latest
+    if: github.event_name == 'push' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'windows'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -55,6 +65,7 @@ jobs:
   build-macos:
     name: macOS (DMG)
     runs-on: macos-15-intel
+    if: github.event_name == 'push' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'macos'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -95,6 +106,7 @@ jobs:
   build-linux:
     name: Linux (AppImage + deb + rpm)
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'linux'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
