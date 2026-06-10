@@ -5,31 +5,27 @@ const http = require("http");
 const BASE = "http://127.0.0.1:11434";
 const FETCH_TIMEOUT = 600000; // 10 minutos para modelos muy grandes
 
-// Dynamic context window sizing
-const CHARS_PER_TOKEN = 3.5;
-const OUTPUT_TOKEN_RESERVE = 1024;
-const MIN_CTX = 4096;
-const MAX_CTX = 32768;
-const CTX_ALIGN = 2048;
+// Cambia esto según el contexto
+const MODELS = {
+  simple: 'phi3-mini',        // Respuestas rápidas <1 min
+  standard: 'qwen3-coder:14b',    // Desarrollo regular
+  complex: process.env.VPS_MODEL_URL ? 'deepseek-coder:v2' : 'qwen3.5:35b', // Análisis profundo
+};
+
+async function getSmartModel(taskType = 'standard') {
+  return MODELS[taskType] || MODELS.standard;
+}
 
 // Función fetch con control total de timeouts usando http nativo
 function fetchWithTimeout(url, options = {}) {
   return new Promise((resolve, reject) => {
     const parsedUrl = new URL(url);
     const controller = new AbortController();
-    let settled = false;
-
-    function finish(fn) {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeoutId);
-      fn();
-    }
-
+    
     // Timeout de seguridad total
     const timeoutId = setTimeout(() => {
       controller.abort();
-      finish(() => reject(new Error('Timeout: La operación excedió 10 minutos')));
+      reject(new Error('Timeout: La operación excedió 10 minutos'));
     }, FETCH_TIMEOUT);
 
     const req = http.request(
@@ -42,16 +38,17 @@ function fetchWithTimeout(url, options = {}) {
           'Content-Type': 'application/json',
           ...(options.headers || {})
         },
-        timeout: 0,
+        timeout: 0, // Sin timeout de socket — el FETCH_TIMEOUT global (10 min) protege
         signal: controller.signal
       },
       (res) => {
         let data = '';
-
-        // Timeout entre chunks de datos (5 min para evitar stalls)
+        
+        // Timeout entre chunks de datos (para evitar stalls)
         res.setTimeout(300000, () => {
           req.destroy();
-          finish(() => reject(new Error('Timeout: Ollama dejó de enviar datos (¿el modelo está cargando?)')));
+          clearTimeout(timeoutId);
+          reject(new Error('Timeout: Ollama dejó de enviar datos (¿el modelo está cargando?)'));
         });
 
         res.on('data', (chunk) => {
@@ -59,46 +56,46 @@ function fetchWithTimeout(url, options = {}) {
         });
 
         res.on('end', () => {
-          finish(() => {
-            try {
-              if (res.statusCode >= 200 && res.statusCode < 300) {
-                resolve({
-                  ok: true,
-                  status: res.statusCode,
-                  json: () => Promise.resolve(JSON.parse(data)),
-                  text: () => Promise.resolve(data)
-                });
-              } else {
-                resolve({
-                  ok: false,
-                  status: res.statusCode,
-                  text: () => Promise.resolve(data)
-                });
-              }
-            } catch (e) {
-              reject(new Error(`Error parseando respuesta: ${e.message}`));
+          clearTimeout(timeoutId);
+          try {
+            if (res.statusCode >= 200 && res.statusCode < 300) {
+              resolve({
+                ok: true,
+                status: res.statusCode,
+                json: () => Promise.resolve(JSON.parse(data)),
+                text: () => Promise.resolve(data)
+              });
+            } else {
+              resolve({
+                ok: false,
+                status: res.statusCode,
+                text: () => Promise.resolve(data)
+              });
             }
-          });
+          } catch (e) {
+            reject(new Error(`Error parseando respuesta: ${e.message}`));
+          }
         });
       }
     );
 
     req.on('error', (error) => {
-      finish(() => {
-        if (error.code === 'ECONNREFUSED') {
-          reject(new Error('Ollama no está ejecutándose. Inicia: ollama serve'));
-        } else if (error.name === 'AbortError') {
-          reject(new Error('Timeout: Ollama no respondió a tiempo'));
-        } else {
-          reject(error);
-        }
-      });
+      clearTimeout(timeoutId);
+      if (error.code === 'ECONNREFUSED') {
+        reject(new Error('Ollama no está ejecutándose. Inicia: ollama serve'));
+      } else if (error.name === 'AbortError') {
+        reject(new Error('Timeout: Ollama no respondió a tiempo'));
+      } else {
+        reject(error);
+      }
     });
+
+    // No socket timeout handler — FETCH_TIMEOUT (10 min) handles safety
 
     if (options.body) {
       req.write(options.body);
     }
-
+    
     req.end();
   });
 }
@@ -157,13 +154,7 @@ const ollamaApi = {
 
     if (!Array.isArray(messages)) throw new Error("INVALID_MESSAGES");
 
-    const totalChars = messages.reduce((sum, msg) => sum + (msg.content || '').length, 0);
-    const estimatedTokens = Math.ceil(totalChars / CHARS_PER_TOKEN);
-    const minCtx = estimatedTokens + OUTPUT_TOKEN_RESERVE;
-    const numCtx = Math.min(MAX_CTX, Math.max(MIN_CTX, Math.ceil(minCtx / CTX_ALIGN) * CTX_ALIGN));
-
-    // Disable extended thinking for qwen3.x models to prevent extremely slow responses
-    const isThinkingModel = /qwen3/i.test(m);
+    console.log('Enviando a Ollama local:', { model: m, messagesCount: messages.length });
 
     try {
       return await fetchJson(`${BASE}/api/chat`, {
@@ -173,22 +164,14 @@ const ollamaApi = {
           model: m,
           messages,
           stream: false,
-          ...(isThinkingModel ? { think: false } : {}),
+          think: false,
           options: {
-            num_ctx: numCtx,
-            num_predict: 4096
+            num_ctx: 4096
           }
         })
       });
     } catch (error) {
       console.error('Error en chat Ollama:', error.message);
-
-      // Modelos :cloud son proxied por Ollama a servidores remotos (NVIDIA, etc.)
-      // No confundir respuestas con "ollama.com" o "443" como errores de redirección
-      if (error.message === 'MODEL_NOT_FOUND') {
-        throw new Error(`El modelo "${m}" no fue encontrado. Ejecuta: ollama pull ${m}`);
-      }
-
       throw error;
     }
   },
@@ -207,16 +190,6 @@ const ollamaApi = {
     });
   },
 
-  async show(model) {
-    const m = (model || "").trim();
-    if (!m) throw new Error("INVALID_MODEL");
-    return fetchJson(`${BASE}/api/show`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: m })
-    });
-  },
-
   pull(model) {
     return new Promise((resolve) => {
       const m = (model || "").trim();
@@ -225,7 +198,7 @@ const ollamaApi = {
       const modelRe = /^[a-zA-Z0-9._-]+(:[a-zA-Z0-9._-]+)?$/;
       if (!modelRe.test(m)) return resolve({ ok: false, error: "INVALID_MODEL" });
 
-      const p = spawn("ollama", ["pull", m]);
+      const p = spawn("ollama", ["pull", m], { shell: true });
 
       let out = "";
       let err = "";
