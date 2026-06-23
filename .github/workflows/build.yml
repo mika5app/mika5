@@ -1,71 +1,251 @@
-name: Build MIKA5
+name: Build and Publish MIKA5 Community
 
 on:
   push:
+    branches:
+      - main
+      - 'release/**'
     tags:
       - 'v*.*.*'
-  workflow_dispatch:
-    inputs:
-      publish:
-        description: 'Publish as GitHub Release'
-        type: boolean
-        default: false
+  pull_request:
+    branches:
+      - main
 
 permissions:
-  contents: write   # needed to create GitHub Releases
+  contents: read
 
 env:
   NODE_VERSION: '20'
 
-# ─────────────────────────────────────────────────────────────────
-jobs:
+concurrency:
+  group: mika5-community-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
-  # ── WINDOWS ──────────────────────────────────────────────────
-  build-windows:
-    name: Windows (NSIS + Portable)
-    runs-on: windows-latest
+jobs:
+  validate:
+    name: Validate Community source
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          cache: npm
+
+      - name: Validate release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="$(node -p "require('./package.json').version")"
+
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid package version: $VERSION"
+            exit 1
+          fi
+
+          test -s LICENSE
+          test -s BUILDING.md
+          test -s COMMUNITY.md
+          test -s TRADEMARK.md
+          test -s SECURITY.md
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            TAG="${GITHUB_REF_NAME}"
+
+            if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "Invalid release tag: $TAG"
+              exit 1
+            fi
+
+            if [[ "${TAG#v}" != "$VERSION" ]]; then
+              echo "Tag $TAG does not match package version $VERSION"
+              exit 1
+            fi
+          fi
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Build Windows installers
-        run: npm run build:win -- --publish never
-        # Code signing — uncomment and set secrets in repo settings if you have a cert:
-        # env:
-        #   CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-        #   CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_PASSWORD }}
+      - name: Run core tests
+        run: npm test
 
-      - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: mika5-windows
-          path: dist/*.exe
-          retention-days: 30
+      - name: Run database tests
+        run: npm run test:db
 
-  # ── macOS (Intel runner → builds x64 + arm64) ───────────────
-  build-macos:
-    name: macOS (DMG)
-    runs-on: macos-15-intel
+  prepare-release:
+    name: Prepare public draft release
+    needs: validate
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+      RELEASES_REPO: ${{ vars.RELEASES_REPO }}
+      TAG: ${{ github.ref_name }}
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Validate release destination
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -n "$GH_TOKEN"
+          test -n "$RELEASES_REPO"
+
+          PRIVATE="$(gh api "repos/$RELEASES_REPO" --jq '.private')"
+
+          if [[ "$PRIVATE" != "false" ]]; then
+            echo "Release repository must be public: $RELEASES_REPO"
+            exit 1
+          fi
+
+      - name: Create or reset draft release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat > release-notes.md <<EOF
+          # MIKA5 Community ${TAG}
+
+          Free and open-source local AI desktop edition licensed under AGPL-3.0.
+
+          ## Downloads
+
+          - Windows installer and portable executable
+          - macOS packages for Intel and Apple Silicon
+          - Linux AppImage, DEB, and RPM packages
+          - Corresponding source archive
+          - License, build instructions, build metadata, and SHA-256 checksums
+
+          ## Runtime requirements
+
+          - Ollama running locally at http://127.0.0.1:11434
+          - Embedding model: nomic-embed-text
+          - At least one compatible chat model
+
+          ## macOS notice
+
+          These builds are not notarized. macOS may show a security warning on first launch.
+
+          Source commit: ${GITHUB_SHA}
+          EOF
+
+          if gh release view "$TAG" --repo "$RELEASES_REPO" >/dev/null 2>&1; then
+            DRAFT="$(gh api "repos/$RELEASES_REPO/releases/tags/$TAG" --jq '.draft')"
+
+            if [[ "$DRAFT" != "true" ]]; then
+              echo "A published release already exists for $TAG"
+              exit 1
+            fi
+
+            RELEASE_ID="$(gh api "repos/$RELEASES_REPO/releases/tags/$TAG" --jq '.id')"
+
+            while read -r ASSET_ID; do
+              [[ -z "$ASSET_ID" ]] && continue
+              gh api --method DELETE "repos/$RELEASES_REPO/releases/assets/$ASSET_ID"
+            done < <(gh api "repos/$RELEASES_REPO/releases/$RELEASE_ID/assets" --paginate --jq '.[].id')
+
+            gh release edit "$TAG" \
+              --repo "$RELEASES_REPO" \
+              --title "MIKA5 Community $TAG" \
+              --notes-file release-notes.md
+          else
+            gh release create "$TAG" \
+              --repo "$RELEASES_REPO" \
+              --target main \
+              --draft \
+              --title "MIKA5 Community $TAG" \
+              --notes-file release-notes.md
+          fi
+
+  build-windows:
+    name: Windows x64
+    needs: prepare-release
+    if: github.ref_type == 'tag'
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+      RELEASES_REPO: ${{ vars.RELEASES_REPO }}
+      TAG: ${{ github.ref_name }}
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          cache: npm
 
-      - name: Generate icon.icns
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows packages
+        run: npm run build:win -- --publish never
+
+      - name: Verify and upload Windows packages
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = node -p "require('./package.json').version"
+
+          $files = @(
+            "dist/MIKA5-Setup-$version-win-x64.exe",
+            "dist/MIKA5-Portable-$version-win-x64.exe"
+          )
+
+          foreach ($file in $files) {
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+              throw "Missing expected package: $file"
+            }
+
+            if ((Get-Item -LiteralPath $file).Length -le 0) {
+              throw "Empty package: $file"
+            }
+          }
+
+          gh release upload $env:TAG @files `
+            --repo $env:RELEASES_REPO `
+            --clobber
+
+  build-macos:
+    name: macOS Intel and Apple Silicon
+    needs: prepare-release
+    if: github.ref_type == 'tag'
+    runs-on: macos-15-intel
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+      RELEASES_REPO: ${{ vars.RELEASES_REPO }}
+      TAG: ${{ github.ref_name }}
+      CSC_IDENTITY_AUTO_DISCOVERY: false
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Generate macOS icon
         run: bash scripts/gen-icns.sh
 
       - name: Install dependencies
@@ -74,107 +254,227 @@ jobs:
       - name: Rebuild native modules
         run: npx electron-builder install-app-deps
 
-      - name: Build macOS
+      - name: Build macOS packages
         run: npm run build:mac -- --publish never
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-          # Code signing — uncomment and set secrets if you have a cert:
-          # CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
-          # CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_PASSWORD }}
 
-      - name: Upload macOS artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: mika5-macos
-          path: |
-            dist/*.dmg
-            dist/*.zip
-          retention-days: 30
+      - name: Verify and upload macOS packages
+        shell: bash
+        run: |
+          set -euo pipefail
 
-  # ── LINUX ────────────────────────────────────────────────────
+          VERSION="$(node -p "require('./package.json').version")"
+
+          FILES=(
+            "dist/MIKA5-${VERSION}-mac-x64.dmg"
+            "dist/MIKA5-${VERSION}-mac-arm64.dmg"
+            "dist/MIKA5-${VERSION}-mac-x64.zip"
+            "dist/MIKA5-${VERSION}-mac-arm64.zip"
+          )
+
+          for FILE in "${FILES[@]}"; do
+            test -s "$FILE"
+          done
+
+          gh release upload "$TAG" "${FILES[@]}" \
+            --repo "$RELEASES_REPO" \
+            --clobber
+
   build-linux:
-    name: Linux (AppImage + deb + rpm)
+    name: Linux x64
+    needs: prepare-release
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+      RELEASES_REPO: ${{ vars.RELEASES_REPO }}
+      TAG: ${{ github.ref_name }}
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          cache: npm
 
-      - name: Install system dependencies
+      - name: Install Linux packaging dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends rpm
           sudo apt-get install -y --no-install-recommends \
-            python3 make g++ libc6-dev
+            rpm python3 make g++ libc6-dev
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Rebuild native modules for Linux
+      - name: Rebuild native modules
         run: npx electron-builder install-app-deps
 
       - name: Build Linux packages
         run: npm run build:linux -- --publish never
 
-      - name: Upload Linux artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: mika5-linux
-          path: |
-            dist/*.AppImage
-            dist/*.deb
-            dist/*.rpm
-          retention-days: 30
+      - name: Verify and upload Linux packages
+        shell: bash
+        run: |
+          set -euo pipefail
 
-  # ── RELEASE ──────────────────────────────────────────────────
-  release:
-    name: Create GitHub Release
-    needs: [build-windows, build-macos, build-linux]
+          VERSION="$(node -p "require('./package.json').version")"
+
+          FILES=(
+            "dist/MIKA5-${VERSION}-linux-x86_64.AppImage"
+            "dist/MIKA5-${VERSION}-linux-amd64.deb"
+            "dist/MIKA5-${VERSION}-linux-x86_64.rpm"
+          )
+
+          for FILE in "${FILES[@]}"; do
+            test -s "$FILE"
+          done
+
+          gh release upload "$TAG" "${FILES[@]}" \
+            --repo "$RELEASES_REPO" \
+            --clobber
+
+  finalize-release:
+    name: Verify and publish Community release
+    needs:
+      - build-windows
+      - build-macos
+      - build-linux
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.publish == 'true'
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+      RELEASES_REPO: ${{ vars.RELEASES_REPO }}
+      TAG: ${{ github.ref_name }}
+
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - name: Checkout exact source
+        uses: actions/checkout@v6
         with:
-          path: release-assets
-          merge-multiple: true
+          fetch-depth: 0
+          persist-credentials: false
 
-      - name: List release assets
-        run: ls -lh release-assets/
+      - name: Create corresponding source archive
+        shell: bash
+        run: |
+          set -euo pipefail
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: MIKA5 ${{ github.ref_name }}
-          draft: false
-          prerelease: ${{ contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
-          generate_release_notes: true
-          body: |
-            ## MIKA5 ${{ github.ref_name }}
+          VERSION="${TAG#v}"
+          mkdir -p release-assets
 
-            ### Downloads
-            | Platform | File | Notes |
-            |---|---|---|
-            | Windows 10/11 (x64) | `MIKA5-Setup-*-win-x64.exe` | NSIS installer |
-            | Windows 10/11 (x64) | `MIKA5-*-win-x64-portable.exe` | No install required |
-            | macOS (Apple Silicon) | `MIKA5-*-mac-arm64.dmg` | M1/M2/M3/M4 |
-            | macOS (Intel) | `MIKA5-*-mac-x64.dmg` | Intel x64 |
-            | Linux (x64) | `MIKA5-*-linux-x64.AppImage` | Universal, no install |
-            | Linux (x64) | `MIKA5-*-linux-x64.deb` | Debian / Ubuntu |
-            | Linux (x64) | `MIKA5-*-linux-x64.rpm` | Fedora / RHEL / openSUSE |
+          git archive \
+            --format=tar.gz \
+            --prefix="MIKA5-${VERSION}-source/" \
+            --output="release-assets/MIKA5-${VERSION}-source.tar.gz" \
+            "$GITHUB_SHA"
 
-            ### Requirements
-            - [Ollama](https://ollama.com) running locally on `http://127.0.0.1:11434`
-            - Embedding model: `ollama pull nomic-embed-text`
-            - At least one chat model: `ollama pull llama3.2` or `ollama pull qwen2.5:7b`
+      - name: Create build metadata
+        shell: bash
+        run: |
+          set -euo pipefail
 
-            > **macOS note:** The app is not notarized in this release. On first launch, right-click the app → Open to bypass Gatekeeper.
-          files: release-assets/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION="${TAG#v}"
+
+          cat > release-assets/BUILD-METADATA.json <<EOF
+          {
+            "product": "MIKA5 Community",
+            "version": "${VERSION}",
+            "tag": "${TAG}",
+            "license": "AGPL-3.0",
+            "source_commit": "${GITHUB_SHA}",
+            "source_repository": "https://github.com/${GITHUB_REPOSITORY}",
+            "release_repository": "https://github.com/${RELEASES_REPO}",
+            "node_version": "${NODE_VERSION}",
+            "workflow_run": "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          }
+          EOF
+
+      - name: Upload source and legal files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${TAG#v}"
+
+          gh release upload "$TAG" \
+            "release-assets/MIKA5-${VERSION}-source.tar.gz" \
+            release-assets/BUILD-METADATA.json \
+            LICENSE \
+            BUILDING.md \
+            COMMUNITY.md \
+            --repo "$RELEASES_REPO" \
+            --clobber
+
+      - name: Download and verify every release asset
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${TAG#v}"
+          mkdir -p verify-assets
+
+          gh release download "$TAG" \
+            --repo "$RELEASES_REPO" \
+            --dir verify-assets
+
+          EXPECTED=(
+            "MIKA5-Setup-${VERSION}-win-x64.exe"
+            "MIKA5-Portable-${VERSION}-win-x64.exe"
+            "MIKA5-${VERSION}-mac-x64.dmg"
+            "MIKA5-${VERSION}-mac-arm64.dmg"
+            "MIKA5-${VERSION}-mac-x64.zip"
+            "MIKA5-${VERSION}-mac-arm64.zip"
+            "MIKA5-${VERSION}-linux-x86_64.AppImage"
+            "MIKA5-${VERSION}-linux-amd64.deb"
+            "MIKA5-${VERSION}-linux-x86_64.rpm"
+            "MIKA5-${VERSION}-source.tar.gz"
+            "LICENSE"
+            "BUILDING.md"
+            "COMMUNITY.md"
+            "BUILD-METADATA.json"
+          )
+
+          for FILE in "${EXPECTED[@]}"; do
+            if [[ ! -s "verify-assets/$FILE" ]]; then
+              echo "Missing or empty release asset: $FILE"
+              exit 1
+            fi
+          done
+
+          (
+            cd verify-assets
+            sha256sum "${EXPECTED[@]}" > ../SHA256SUMS.txt
+          )
+
+          test -s SHA256SUMS.txt
+
+      - name: Upload checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh release upload "$TAG" SHA256SUMS.txt \
+            --repo "$RELEASES_REPO" \
+            --clobber
+
+      - name: Publish verified release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RELEASE_ID="$(gh api "repos/$RELEASES_REPO/releases/tags/$TAG" --jq '.id')"
+
+          gh api \
+            --method PATCH \
+            "repos/$RELEASES_REPO/releases/$RELEASE_ID" \
+            -F draft=false \
+            -F prerelease=false \
+            -f make_latest=true
+
+      - name: Show public release
+        run: gh release view "$TAG" --repo "$RELEASES_REPO"
