@@ -38,8 +38,7 @@
       { "target": "nsis",     "arch": ["x64"] },
       { "target": "portable", "arch": ["x64"] }
     ],
-    "icon": "build/icon.ico",
-    "artifactName": "MIKA5-Setup-${version}-win-${arch}.${ext}"
+    "icon": "build/icon.ico"
   },
   "nsis": {
     "oneClick": false,
@@ -48,7 +47,11 @@
     "createStartMenuShortcut": true,
     "shortcutName": "MIKA5",
     "installerIcon": "build/icon.ico",
-    "uninstallerIcon": "build/icon.ico"
+    "uninstallerIcon": "build/icon.ico",
+    "artifactName": "MIKA5-Setup-${version}-win-${arch}.${ext}"
+  },
+  "portable": {
+    "artifactName": "MIKA5-Portable-${version}-win-${arch}.${ext}"
   },
 
   "mac": {
