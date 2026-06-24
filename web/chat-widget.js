@@ -179,8 +179,8 @@
       keywords: { en: ['download', 'get', 'install', 'mika5', 'where', 'link'], es: ['descargar', 'obtener', 'instalar', 'mika5', 'donde', 'enlace', 'link'] },
       question: { en: 'Where can I download MIKA5?', es: 'Donde puedo descargar MIKA5?' },
       answer: {
-        en: 'Download MIKA5 from GitHub Releases:\nhttps://github.com/mika5app/mika5/releases\n\nAvailable for Windows (.exe installer + portable), macOS (DMG for Intel and Apple Silicon), and Linux (AppImage, .deb, .rpm).',
-        es: 'Descarga MIKA5 desde GitHub Releases:\nhttps://github.com/mika5app/mika5/releases\n\nDisponible para Windows (.exe instalador + portable), macOS (DMG para Intel y Apple Silicon), y Linux (AppImage, .deb, .rpm).'
+        en: 'Download MIKA5 from GitHub Releases:\nhttps://github.com/mika5app/mika5-releases/releases\n\nAvailable for Windows (.exe installer + portable), macOS (DMG for Intel and Apple Silicon), and Linux (AppImage, .deb, .rpm).',
+        es: 'Descarga MIKA5 desde GitHub Releases:\nhttps://github.com/mika5app/mika5-releases/releases\n\nDisponible para Windows (.exe instalador + portable), macOS (DMG para Intel y Apple Silicon), y Linux (AppImage, .deb, .rpm).'
       }
     },
     {
