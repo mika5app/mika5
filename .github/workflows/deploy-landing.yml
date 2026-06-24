@@ -1,6 +1,7 @@
 name: Deploy Landing
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths: ['web/**']
@@ -17,6 +18,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          passphrase: ${{ secrets.SSH_PASSPHRASE }}
           source: "web/*"
           target: "/var/www/html/"
           strip_components: 1
@@ -27,5 +29,6 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          passphrase: ${{ secrets.SSH_PASSPHRASE }}
           script: |
             cp /var/www/html/landing.html /var/www/html/index.html
