@@ -884,63 +884,30 @@
         <div class="max-w-lg mx-auto p-8 rounded-2xl border border-white/10 bg-[#111827]/60 backdrop-blur space-y-4">
             <h3 class="text-2xl font-heading" data-i18n="notify.title">MIKA5 Pro is coming</h3>
             <p class="text-sm text-[#9CA3AF]" data-i18n="notify.desc">Team collaboration, cloud sync, advanced RAG, and more. Get notified when it launches.</p>
-            <form id="notifyForm" class="flex gap-2 max-w-md mx-auto" novalidate>
-                <input type="email" id="notifyEmail" name="email" required placeholder="you@example.com"
-                       class="flex-1 px-4 py-3 rounded-lg bg-[#0B0F14] border border-white/10 text-white placeholder-[#6B7280] focus:border-[#7C3AED] focus:outline-none text-sm">
-                <button type="submit" id="notifyBtn"
-                        class="btn-download px-6 py-3 rounded-lg font-semibold text-sm text-white whitespace-nowrap" data-i18n="notify.btn">Notify me</button>
-            </form>
-            <p id="notifyMsg" class="text-xs text-[#4B5563] min-h-[1.25rem]" data-i18n="notify.privacy">No spam. Unsubscribe anytime.</p>
-            <script>
-              (function() {
-                // Buttondown API — set your API key from buttondown.email/settings
-                var BUTTONDOWN_API_KEY = '26882ade-dd77-4998-be6f-4e2e73d79242';
-                var form = document.getElementById('notifyForm');
-                var btn  = document.getElementById('notifyBtn');
-                var msg  = document.getElementById('notifyMsg');
+            <form id="notifyForm"
+      action="https://buttondown.com/api/emails/embed-subscribe/mika5"
+      method="post"
+      target="_blank"
+      class="flex gap-2 max-w-md mx-auto">
+    <input type="email"
+           id="notifyEmail"
+           name="email"
+           required
+           placeholder="you@example.com"
+           class="flex-1 px-4 py-3 rounded-lg bg-[#0B0F14] border border-white/10 text-white placeholder-[#6B7280] focus:border-[#7C3AED] focus:outline-none text-sm">
 
-                form.addEventListener('submit', function(e) {
-                  e.preventDefault();
-                  var email = document.getElementById('notifyEmail').value.trim();
-                  if (!email) return;
+    <input type="hidden" name="embed" value="1">
+    <input type="hidden" name="tag" value="mika5-pro-waitlist">
 
-                  btn.disabled = true;
-                  btn.textContent = '…';
-                  msg.textContent = '';
+    <button type="submit"
+            id="notifyBtn"
+            class="btn-download px-6 py-3 rounded-lg font-semibold text-sm text-white whitespace-nowrap"
+            data-i18n="notify.btn">Notify me</button>
+</form>
 
-                  fetch('https://api.buttondown.email/v1/subscribers', {
-                    method: 'POST',
-                    headers: {
-                      'Authorization': 'Token ' + BUTTONDOWN_API_KEY,
-                      'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ email: email, tags: ['mika5-pro-waitlist'] })
-                  })
-                  .then(function(res) {
-                    if (res.ok || res.status === 201) {
-                      form.innerHTML = '<p class="text-[#A78BFA] font-semibold">✓ You\'re on the list!</p>';
-                      msg.textContent = 'We\'ll reach out when MIKA5 Pro launches.';
-                    } else {
-                      return res.json().then(function(data) {
-                        var errMsg = (data && data.detail) ? data.detail : 'Something went wrong. Try again.';
-                        msg.style.color = '#F87171';
-                        msg.textContent = errMsg;
-                        btn.disabled = false;
-                        btn.setAttribute('data-i18n', 'notify.btn');
-                        btn.textContent = document.documentElement.lang === 'es' ? 'Notificarme' : 'Notify me';
-                      });
-                    }
-                  })
-                  .catch(function() {
-                    msg.style.color = '#F87171';
-                    msg.textContent = 'Network error. Please try again.';
-                    btn.disabled = false;
-                    btn.setAttribute('data-i18n', 'notify.btn');
-                    btn.textContent = document.documentElement.lang === 'es' ? 'Notificarme' : 'Notify me';
-                  });
-                });
-              })();
-            </script>
+<p id="notifyMsg"
+   class="text-xs text-[#4B5563] min-h-[1.25rem]"
+   data-i18n="notify.privacy">No spam. Unsubscribe anytime.</p>
         </div>
     </section>
 
