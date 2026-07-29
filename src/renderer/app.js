@@ -4,15 +4,83 @@ let isGenerating = false;
 let chatAttachments = [];
 let replyToMessage = null; // { role, content, msgId } for WhatsApp-style reply
 const chatDrafts = new Map(); // chatId -> { attachments: [], inputText: '', replyTo: null }
+const AUTOMATIC_MODEL_ID = '__automatic__';
+const visualContextMemory = {
+  entries: [],
+  lastUserImage: null,
+  lastUploadedImage: null,
+  lastGeneratedImage: null,
+  lastAnalyzedImage: null,
+  lastVisualAnalysis: null
+};
+let pendingVisualAction = null;
+
+function registerVisualEvent({ chatId, role, origin, images = [], sourceVisualEntryId = null }) {
+  const createdAt = Date.now();
+  const entry = {
+    id: `visual-${createdAt}-${visualContextMemory.entries.length + 1}`,
+    chatId,
+    role,
+    origin,
+    createdAt,
+    ...(images.length ? { images } : {}),
+    ...(sourceVisualEntryId ? { sourceVisualEntryId } : {})
+  };
+  visualContextMemory.entries.push(entry);
+  return entry;
+}
+
+function registerVisualImage({ chatId, role, origin, image, sourceVisualEntryId = null }) {
+  const entry = registerVisualEvent({ chatId, role, origin, images: [image], sourceVisualEntryId });
+  const imageRef = {
+    ...image,
+    id: image.id || `${entry.id}-image-1`,
+    visualEntryId: entry.id,
+    chatId,
+    role,
+    origin,
+    createdAt: entry.createdAt,
+    updatedAt: entry.createdAt
+  };
+  entry.images = [imageRef];
+  if (origin === 'user-upload') {
+    visualContextMemory.lastUploadedImage = imageRef;
+    visualContextMemory.lastUserImage = imageRef;
+  } else if (origin === 'image-generation' || origin === 'image-edit' || origin === 'image-variation') {
+    visualContextMemory.lastGeneratedImage = imageRef;
+  }
+  return imageRef;
+}
+
+function terminalImageAnswer(images) {
+  if (!Array.isArray(images) || images.length === 0) {
+    throw new Error('Alibaba no devolvió ninguna imagen');
+  }
+  return images.map(url => `![Imagen generada](${url})`).join('\n\n');
+}
+
+function registerLastVisualAnalysis({ chatId, sourceImageRef, analysisText }) {
+  const controlledText = String(analysisText || '').replace(/\s+/g, ' ').trim().slice(0, 2000);
+  visualContextMemory.lastVisualAnalysis = {
+    chatId,
+    sourceImageRef,
+    analysisText: controlledText,
+    suggestions: [],
+    updatedAt: Date.now()
+  };
+  return visualContextMemory.lastVisualAnalysis;
+}
 // ============================================
 // Detectar si el modelo soporta visión
 // ============================================
 function modelSupportsVision(modelName) {
   if (!modelName) return false;
+  if (modelName === AUTOMATIC_MODEL_ID) return false;
   // Check the select option's data-vision attribute (set from server probe)
   const sel = el("modelSelect");
   if (sel) {
     const opt = Array.from(sel.options).find(o => o.value === modelName);
+    if (opt?.dataset.provider === 'alibaba') return opt.dataset.vision === '1';
     if (opt && opt.dataset.vision === '1') return true;
   }
   // Fallback: name-based detection for models not yet probed
@@ -27,6 +95,13 @@ function modelSupportsVision(modelName) {
     'kimi', 'glm',
   ];
   return patterns.some(p => name.includes(p));
+}
+
+function shouldWarnImageCapability(modelName) {
+  // Automatic is a router alias. Its real model/capability is resolved in send().
+  return Boolean(modelName)
+    && modelName !== AUTOMATIC_MODEL_ID
+    && !modelSupportsVision(modelName);
 }
 
 (function addImageStyles() {
@@ -409,8 +484,12 @@ function syncModelDropdown() {
       const caps = document.createElement('span'); caps.className = 'caps'; caps.textContent = opt.dataset.caps || '';
       meta.appendChild(badge); meta.appendChild(size); meta.appendChild(caps);
     } else {
-      const badge = document.createElement('span'); badge.className = 'badge cloud'; badge.textContent = '☁️ Cloud';
-      const speed = document.createElement('span'); speed.className = 'speed'; speed.textContent = opt.dataset.speed || 'Disponible';
+      const badge = document.createElement('span');
+      badge.className = 'badge cloud';
+      badge.textContent = opt.dataset.billingMode === 'token-plan' ? '☁️ Cloud / Token Plan' : '☁️ Cloud';
+      const speed = document.createElement('span');
+      speed.className = 'speed';
+      speed.textContent = opt.dataset.providerName || opt.dataset.speed || 'Disponible';
       meta.appendChild(badge); meta.appendChild(speed);
     }
 
@@ -426,7 +505,7 @@ function syncModelDropdown() {
         status.textContent = 'No descargado';
       }
     } else {
-      status.textContent = opt.dataset.speed ? opt.dataset.speed : 'Disponible';
+      status.textContent = opt.dataset.providerName || opt.dataset.speed || 'Disponible';
     }
 
     div.appendChild(info);
@@ -538,6 +617,13 @@ function readFileAsBase64(file) {
 function isImageFile(file) {
   if (file.type && file.type.startsWith('image/')) return true;
   return /\.(png|jpg|jpeg|gif|bmp|webp)$/i.test(file.name);
+}
+
+function supportedVisionMediaType(file) {
+  const type = String(file.type || '').toLowerCase();
+  if (['image/png', 'image/jpeg', 'image/webp'].includes(type)) return type;
+  const ext = String(file.name || '').split('.').pop().toLowerCase();
+  return ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' })[ext] || '';
 }
 
 // ----------------------------------------------
@@ -1551,7 +1637,7 @@ async function loadRuntime() {
   }
 
   const statusEl = el("rtStatus");
-  if (st.ok) {
+  if (st.ok || currentProvider === 'alibaba') {
     statusEl.textContent = t('status.connected');
     statusEl.className = "status-pill status-ok";
   } else {
@@ -1579,7 +1665,16 @@ async function loadRuntime() {
       const capabilities = raw.capabilities || raw.caps || raw.tags || [];
       const speed = raw.speed || raw.latency || raw.quality || '';
       const description = raw.description || raw.info || '';
-      return { name, size, sizeFormatted, capabilities, speed, description };
+      return {
+        name,
+        size,
+        sizeFormatted,
+        capabilities,
+        speed,
+        description,
+        taskType: raw.taskType || 'chat',
+        supportsVision: raw.supportsVision === true
+      };
     };
 
     if (Array.isArray(modelsRes)) models = modelsRes.map(mapper).filter(Boolean);
@@ -1589,6 +1684,7 @@ async function loadRuntime() {
     // Filter out embedding-only models that don't support chat
     // Keep :cloud models (kimi-k2.5:cloud, glm-5:cloud, etc.)
     models = models.filter(m => {
+      if (currentProvider === 'alibaba' && !['chat', 'vision'].includes(m.taskType)) return false;
       const n = (m.name || '').toLowerCase();
       if (n.includes(':cloud')) return true; // always keep cloud models
       return !/^(nomic-embed|bge-|e5-|gte-|mxbai-embed|snowflake-arctic-embed|all-minilm)/i.test(n) 
@@ -1601,6 +1697,16 @@ async function loadRuntime() {
       opt.textContent = "Sin modelos (descarga uno o configura Cloud)";
       el("modelSelect").appendChild(opt);
     } else {
+      if (currentProvider === 'alibaba') {
+        const automatic = document.createElement('option');
+        automatic.value = AUTOMATIC_MODEL_ID;
+        automatic.textContent = 'Automático';
+        automatic.dataset.source = 'cloud';
+        automatic.dataset.providerName = 'Alibaba Cloud Model Studio / Router de capacidades';
+        automatic.dataset.billingMode = 'token-plan';
+        automatic.dataset.taskType = 'automatic';
+        el("modelSelect").appendChild(automatic);
+      }
       for (const m of models) {
         const opt = document.createElement("option");
         opt.value = m.name;
@@ -1612,6 +1718,11 @@ async function loadRuntime() {
         if (m.speed) opt.dataset.speed = m.speed;
         if (m.description) opt.dataset.description = m.description;
         if (m.supportsVision) opt.dataset.vision = '1';
+        opt.dataset.taskType = m.taskType;
+        if (currentProvider === 'alibaba') {
+          opt.dataset.providerName = 'Alibaba Cloud Model Studio';
+          opt.dataset.billingMode = 'token-plan';
+        }
         el("modelSelect").appendChild(opt);
       }
     }
@@ -1632,7 +1743,7 @@ async function loadRuntime() {
   // Restore last used model
   try {
     const lastModel = await window.mika5.getAppState("lastModel");
-    if (lastModel) {
+    if (lastModel && lastModel !== AUTOMATIC_MODEL_ID) {
       const sel = el("modelSelect");
       const available = Array.from(sel.options).map(o => o.value);
       if (available.includes(lastModel)) {
@@ -1642,7 +1753,12 @@ async function loadRuntime() {
   } catch (_) {}
 
   const pullLocal = el("btnPullLocal");
-  if (pullLocal) pullLocal.disabled = (currentProvider !== 'local');
+  const pullLibrary = el("btnPull");
+  if (pullLocal) {
+    pullLocal.disabled = (currentProvider !== 'local');
+    pullLocal.style.display = currentProvider === 'alibaba' ? 'none' : '';
+  }
+  if (pullLibrary) pullLibrary.style.display = currentProvider === 'alibaba' ? 'none' : '';
   syncModelDropdown();
 }
 
@@ -1670,6 +1786,7 @@ function updatePrivacyUI() {
   const footerEl = el('footerStatus');
   
   const providerLabel = currentProvider === 'local' ? t('provider.local') 
+    : currentProvider === 'alibaba' ? 'Alibaba Cloud Model Studio'
     : currentProvider.charAt(0).toUpperCase() + currentProvider.slice(1);
   
   if (providerPrivacy === 'private') {
@@ -2946,21 +3063,188 @@ function navigateSearch(idx) {
   if (countEl) countEl.textContent = `${searchCurrentIdx + 1}/${searchMatches.length}`;
 }
 
+async function appendControlledIntentResponse(userText, assistantText, model, imageAttachments = []) {
+  if (!activeProjectId) {
+    showToast(assistantText, 'warning');
+    return;
+  }
+  if (!activeChatId) {
+    const created = await withTimeout(Store.createChat(activeProjectId, "Chat"), 8000, 'crear chat inicial');
+    if (!created?.ok) {
+      showToast("No se pudo crear el chat.", "error");
+      return;
+    }
+    await openChat(created.id);
+  }
+  const attachmentNames = imageAttachments.map(attachment => attachment.name).filter(Boolean);
+  const storedUserText = attachmentNames.length
+    ? `${userText}\n\n[Adjuntos: ${attachmentNames.join(', ')}]`
+    : userText;
+  appendMsg({ role: 'user', content: userText || '[Imagen adjunta]' });
+  await Store.addMessage(activeChatId, 'user', storedUserText || '[Imagen adjunta]', null, model);
+  appendMsg({ role: 'assistant', content: assistantText, model });
+  await Store.addMessage(activeChatId, 'assistant', assistantText, null, model);
+  el("input").value = "";
+  el("input").style.height = 'auto';
+  chatAttachments = [];
+  renderAttachmentPreview();
+  updateSendButtonState();
+}
+
+function safeAssistantContent(output) {
+  const content = String(output || '');
+  const inspectableContent = content.replace(/\\/g, '');
+  if (/["']type["']\s*:\s*["']tool_use["']|["']name["']\s*:\s*["']generate_image["']/i.test(inspectableContent)) {
+    return 'No se pudo generar la imagen: el modelo devolvió una llamada de herramienta sin un plan visual seguro.';
+  }
+  return content;
+}
+
+function buildImageGenerationPromptFromVisualPlan(plan) {
+  const lines = ['Genera una imagen nueva basada en el plan visual confirmado.'];
+  if (plan?.operations?.length) lines.push(`Cambios: ${plan.operations.join(', ')}.`);
+  if (plan?.preserve?.length) lines.push(`Preservar: ${plan.preserve.join(', ')}.`);
+  else lines.push('Preservar los elementos principales y el contenido esencial.');
+  if (plan?.qualityGoals?.length) lines.push(`Calidad: ${plan.qualityGoals.join(', ')}.`);
+  if (plan?.styleGoals?.length) lines.push(`Estilo: ${plan.styleGoals.join(', ')}.`);
+  if (plan?.constraints?.length) lines.push(`Restricciones: ${plan.constraints.join(', ')}.`);
+  lines.push('No alterar elementos principales salvo lo solicitado. Mantener alta legibilidad.');
+  return lines.join('\n');
+}
+
+async function handlePendingVisualActionReply(text) {
+  if (!pendingVisualAction) return false;
+  const normalized = String(text || '').toLowerCase().normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '').replace(/[^\p{L}\p{N}\s]/gu, ' ').trim();
+  const analyze = /^(1|opcion 1|analizar|analiza)$/.test(normalized);
+  const generate = /^(2|opcion 2|generar|genera)$/.test(normalized);
+  if (!analyze && !generate) {
+    const clarification = /\b(color|fondo|logo|texto|contenido|moderno|grande|pequeno|azul|rojo|verde|gris|blanco|negro)\b/.test(normalized);
+    if (clarification) {
+      pendingVisualAction.plan.constraints = [
+        ...(pendingVisualAction.plan.constraints || []),
+        `additional-instruction: ${normalized}`
+      ];
+      pendingVisualAction.generationPrompt = null;
+      await appendControlledIntentResponse(
+        text,
+        'Aclaración guardada. Responde 1 para analizar la referencia o 2 para generar una nueva imagen con el plan actualizado.',
+        AUTOMATIC_MODEL_ID
+      );
+      return true;
+    }
+    pendingVisualAction = null;
+    return false;
+  }
+
+  const pending = pendingVisualAction;
+  pendingVisualAction = null;
+  if (!activeProjectId) {
+    pendingVisualAction = pending;
+    showToast('Selecciona un proyecto para ejecutar la acción visual.', 'warning');
+    return true;
+  }
+  if (!activeChatId) {
+    const created = await withTimeout(Store.createChat(activeProjectId, "Chat"), 8000, 'crear chat inicial');
+    if (!created?.ok) {
+      pendingVisualAction = pending;
+      showToast('No se pudo crear el chat.', 'error');
+      return true;
+    }
+    await openChat(created.id);
+  }
+  appendMsg({ role: 'user', content: text });
+  await Store.addMessage(activeChatId, 'user', text, null, AUTOMATIC_MODEL_ID);
+  el("input").value = "";
+  el("input").style.height = 'auto';
+  isGenerating = true;
+  appendGeneratingPlaceholder();
+  try {
+    if (generate) {
+      const prompt = pending.generationPrompt || buildImageGenerationPromptFromVisualPlan(pending.plan);
+      const generated = await window.mika5.ai.generateImage({ model: 'wan2.7-image', prompt });
+      const answer = terminalImageAnswer(generated.images);
+      registerVisualImage({
+        chatId: activeChatId,
+        role: 'assistant',
+        origin: pending.plan?.mode === 'image-edit' ? 'image-edit' : 'image-generation',
+        sourceVisualEntryId: pending.visualContext?.imageRef?.visualEntryId || null,
+        image: {
+          type: 'image',
+          url: generated.images[0],
+          name: 'Imagen generada'
+        }
+      });
+      removeGeneratingPlaceholder();
+      appendMsg({ role: 'assistant', content: answer, model: 'wan2.7-image' });
+      await Store.addMessage(activeChatId, 'assistant', answer, null, 'wan2.7-image');
+    } else {
+      const imageRef = pending.visualContext?.imageRef;
+      if (!imageRef) throw new Error('No hay una imagen de referencia disponible para analizar');
+      const out = await window.mika5.ai.chat({
+        model: 'qwen3.7-plus',
+        messages: [{
+          role: 'user',
+          content: 'Analiza la imagen de referencia. Describe su contenido y los elementos relevantes para la edición solicitada, sin afirmar que puedes editarla.'
+        }],
+        images: [{ base64: imageRef.base64, mediaType: imageRef.mediaType, url: imageRef.url }]
+      });
+      const answer = safeAssistantContent(out?.message?.content || '');
+      if (!answer) throw new Error('Respuesta vacía');
+      registerVisualEvent({
+        chatId: activeChatId,
+        role: 'assistant',
+        origin: 'vision-analysis',
+        sourceVisualEntryId: imageRef.visualEntryId || null
+      });
+      visualContextMemory.lastAnalyzedImage = imageRef;
+      registerLastVisualAnalysis({
+        chatId: activeChatId,
+        sourceImageRef: imageRef,
+        analysisText: answer
+      });
+      removeGeneratingPlaceholder();
+      appendMsg({ role: 'assistant', content: answer, model: 'qwen3.7-plus' });
+      await Store.addMessage(activeChatId, 'assistant', answer, null, 'qwen3.7-plus');
+    }
+  } catch (error) {
+    removeGeneratingPlaceholder();
+    showToast('No se pudo ejecutar la acción visual: ' + (error?.message || error), 'error');
+  } finally {
+    isGenerating = false;
+    updateSendButtonState();
+  }
+  return true;
+}
+
 async function send() {
-  const model = el("modelSelect").value;
+  let model = el("modelSelect").value;
   if (!model) {
     showToast("Selecciona un modelo.", "error");
     return;
   }
-  // Persist model on each send
-  window.mika5.setAppState("lastModel", model).catch(() => {});
-
   const text = el("input").value.trim();
   const hasAttachments = chatAttachments.length > 0;
   if (!text && !hasAttachments) return;
+  if (currentProvider === 'alibaba' && pendingVisualAction) {
+    const handled = await handlePendingVisualActionReply(text);
+    if (handled) return;
+  }
+  if (currentProvider === 'alibaba') {
+    const selectedOption = Array.from(el('modelSelect').options).find(option => option.value === model);
+    if (selectedOption?.dataset.taskType === 'image-generation') {
+      showToast('Este modelo se usa desde Crear imagen, no desde chat.', 'warning');
+      return;
+    }
+    if (selectedOption?.dataset.taskType === 'video-generation') {
+      showToast('Este modelo genera video y no puede usarse en chat.', 'warning');
+      return;
+    }
+  }
 
   // Separate image attachments from text attachments
   const imageAttachments = chatAttachments.filter(a => a.type === 'image');
+  let routedImages = imageAttachments;
   const textAttachments = chatAttachments.filter(a => a.type === 'text');
   
   let contentToSend = text;
@@ -2970,6 +3254,137 @@ async function send() {
   }
   if (imageAttachments.length && !contentToSend) {
     contentToSend = "Describe this image.";
+  }
+  let routedIntent = 'normal-chat';
+  let resolvedVisualContext = null;
+  let activeVisualRoute = null;
+  if (currentProvider === 'alibaba') {
+    try {
+      const route = await window.mika5.ai.routeIntent({
+        text,
+        chatId: activeChatId,
+        attachments: imageAttachments.map(attachment => ({
+          type: 'image',
+          mediaType: attachment.mediaType,
+          base64: attachment.base64,
+          name: attachment.name,
+          chatId: activeChatId
+        })),
+        lastUserImage: visualContextMemory.lastUserImage,
+        lastUploadedImage: visualContextMemory.lastUploadedImage,
+        lastGeneratedImage: visualContextMemory.lastGeneratedImage,
+        lastAnalyzedImage: visualContextMemory.lastAnalyzedImage,
+        lastVisualAnalysis: visualContextMemory.lastVisualAnalysis,
+        currentModel: model === AUTOMATIC_MODEL_ID ? '' : model
+      });
+      routedIntent = route.intent;
+      resolvedVisualContext = route.visualContext;
+      activeVisualRoute = route;
+      if (route.action === 'error') {
+        await appendControlledIntentResponse(text, route.message, model, imageAttachments);
+        return;
+      }
+      if (route.action === 'unsupported') {
+        if (route.options && route.plan && route.validation?.shouldOfferFallback) {
+          pendingVisualAction = {
+            type: route.intent,
+            plan: route.plan,
+            visualContext: route.visualContext,
+            options: route.options,
+            generationPrompt: route.generationPrompt
+          };
+        }
+        await appendControlledIntentResponse(text, route.message, model, imageAttachments);
+        return;
+      }
+      if (route.action === 'generate-image') {
+        if (!activeProjectId) {
+          showToast("Selecciona un proyecto primero.", "error");
+          return;
+        }
+        if (!activeChatId) {
+          const created = await withTimeout(Store.createChat(activeProjectId, "Chat"), 8000, 'crear chat inicial');
+          if (!created?.ok) {
+            showToast("No se pudo crear el chat.", "error");
+            return;
+          }
+          await openChat(created.id);
+        }
+        const userPrompt = text || 'Crea una imagen';
+        appendMsg({ role: 'user', content: userPrompt });
+        await Store.addMessage(activeChatId, 'user', userPrompt, null, route.model);
+        el("input").value = "";
+        el("input").style.height = 'auto';
+        chatAttachments = [];
+        renderAttachmentPreview();
+        isGenerating = true;
+        appendGeneratingPlaceholder();
+        try {
+          const visualExecution = route.visualExecution;
+          if (['image-edit', 'image-variation'].includes(routedIntent)
+            && visualExecution?.validation?.valid !== true) {
+            throw new Error('No existe un plan visual seguro para generar la nueva imagen');
+          }
+          const generated = await window.mika5.ai.generateImage({
+            model: route.model,
+            prompt: visualExecution?.generationPrompt || route.modelPrompt || userPrompt
+          });
+          const answer = terminalImageAnswer(generated.images);
+          const sourceVisualEntryId = route.visualContext?.imageRef?.visualEntryId || null;
+          registerVisualImage({
+            chatId: activeChatId,
+            role: 'assistant',
+            origin: routedIntent === 'image-edit'
+              ? 'image-edit'
+              : routedIntent === 'image-variation' ? 'image-variation' : 'image-generation',
+            sourceVisualEntryId,
+            image: {
+              type: 'image',
+              url: generated.images[0],
+              name: 'Imagen generada'
+            }
+          });
+          removeGeneratingPlaceholder();
+          appendMsg({ role: 'assistant', content: answer, model: route.model });
+          await Store.addMessage(activeChatId, 'assistant', answer, null, route.model);
+        } catch (error) {
+          removeGeneratingPlaceholder();
+          const safeReason = String(error?.message || error).replace(/\bsk-[A-Za-z0-9_-]+\b/g, '[API_KEY]');
+          showToast(
+            routedIntent === 'image-variation'
+              ? 'No se pudo generar la nueva imagen: ' + safeReason
+              : 'No se pudo crear la imagen: ' + safeReason,
+            'error'
+          );
+        } finally {
+          isGenerating = false;
+          updateSendButtonState();
+        }
+        return;
+      }
+      model = route.model || model;
+      if (routedIntent === 'vision-analysis') {
+        if (!routedImages.length && route.visualContext?.imageRef) {
+          routedImages = [route.visualContext.imageRef];
+        }
+        contentToSend = route.modelPrompt || contentToSend;
+        showToast('Usando qwen3.7-plus para analizar imágenes.', 'info');
+      }
+    } catch (error) {
+      showToast('No se pudo determinar la capacidad: ' + (error?.message || error), 'error');
+      return;
+    }
+  }
+  window.mika5.setAppState("lastModel", el("modelSelect").value).catch(() => {});
+  if (currentProvider === 'alibaba' && routedImages.length && !modelSupportsVision(model)) {
+    const suggested = 'qwen3.7-plus';
+    const suggestedOption = Array.from(el('modelSelect').options).find(option => option.value === suggested);
+    if (suggestedOption) {
+      el('modelSelect').value = suggested;
+      syncModelDropdown();
+    }
+    showToast('Este modelo no analiza imágenes. Cambia a qwen3.7-plus, qwen3.8-max-preview o qwen3.6-flash.', 'warning');
+    return;
   }
 
   // Display content for user message — show summary for large text attachments
@@ -2988,7 +3403,7 @@ async function send() {
     const MAX_PREVIEWS = 5;
     const previewsToShow = imageAttachments.slice(0, MAX_PREVIEWS);
     const imagePreviews = previewsToShow.map(att => {
-      const mimeType = att.name.endsWith('.png') ? 'image/png' : 'image/jpeg';
+      const mimeType = att.mediaType || 'image/jpeg';
       return `<span class="image-preview-clickable" style="display:inline-block;margin:2px;">`
         + `<img src="data:${mimeType};base64,${att.base64}" `
         + `class="embedded-image-preview" `
@@ -3198,9 +3613,14 @@ async function send() {
 
     // Add images to the last user message if present (Ollama vision format)
     const payload = { model, messages: finalMessages };
-    if (imageAttachments.length > 0) {
+    if (activeVisualRoute?.visualExecution) {
+      payload.visualExecution = activeVisualRoute.visualExecution;
+    }
+    if (routedImages.length > 0) {
       if (modelSupportsVision(model)) {
-        payload.images = imageAttachments.map(a => a.base64);
+        payload.images = currentProvider === 'alibaba'
+          ? routedImages.map(a => ({ base64: a.base64, mediaType: a.mediaType, url: a.url }))
+          : routedImages.map(a => a.base64);
       } else {
         // Model doesn't support vision — warn user, send text-only with image names
         const imgNames = imageAttachments.map(a => a.name).join(', ');
@@ -3218,9 +3638,39 @@ async function send() {
       const out = await window.mika5.ai.chat(payload);
       if (wasCanceled) throw new Error('Canceled');
       if (!out || !out.message) throw new Error('Respuesta vacía');
-      const answer = out.message.content;
-      appendMsg({ role: "assistant", content: answer, model });
-      await Store.addMessage(activeChatId, "assistant", answer, null, model);
+      let answer = safeAssistantContent(out.message.content);
+      let answerModel = model;
+      if (out.terminalType === 'image') {
+        answer = terminalImageAnswer(out.images);
+        answerModel = activeVisualRoute?.visualExecution?.model || 'wan2.7-image';
+        registerVisualImage({
+          chatId: activeChatId,
+          role: 'assistant',
+          origin: activeVisualRoute?.visualExecution?.plan?.mode === 'image-edit'
+            ? 'image-edit'
+            : activeVisualRoute?.visualExecution?.plan?.mode === 'image-variation'
+              ? 'image-variation'
+              : 'image-generation',
+          sourceVisualEntryId: activeVisualRoute?.visualExecution?.visualContext?.imageRef?.visualEntryId || null,
+          image: { type: 'image', url: out.images[0], name: 'Imagen generada' }
+        });
+      }
+      if (routedIntent === 'vision-analysis' && resolvedVisualContext?.imageRef) {
+        registerVisualEvent({
+          chatId: activeChatId,
+          role: 'assistant',
+          origin: 'vision-analysis',
+          sourceVisualEntryId: resolvedVisualContext.imageRef.visualEntryId || null
+        });
+        visualContextMemory.lastAnalyzedImage = resolvedVisualContext.imageRef;
+        registerLastVisualAnalysis({
+          chatId: activeChatId,
+          sourceImageRef: resolvedVisualContext.imageRef,
+          analysisText: answer
+        });
+      }
+      appendMsg({ role: "assistant", content: answer, model: answerModel });
+      await Store.addMessage(activeChatId, "assistant", answer, null, answerModel);
 
       // Auto-rename chat based on user's first message
       try {
@@ -3652,10 +4102,14 @@ async function loadModelsForCurrentProvider() {
       name: raw.name || raw.id || raw.model || String(raw),
       sizeFormatted: raw.sizeFormatted || raw.size_human || (raw.size ? formatBytesRenderer(Number(raw.size)) : ''),
       capabilities: raw.capabilities || raw.caps || raw.tags || []
+      ,
+      supportsVision: raw.supportsVision === true,
+      taskType: raw.taskType || 'chat'
     };
   };
 
-  const normalized = models.map(mapper).filter(Boolean);
+  const normalized = models.map(mapper).filter(Boolean)
+    .filter(model => provider.id !== 'alibaba' || ['chat', 'vision'].includes(model.taskType));
 
   if (normalized.length === 0 && provider.id === 'local') {
     modelOptions.innerHTML = `
@@ -3670,6 +4124,18 @@ async function loadModelsForCurrentProvider() {
     opt.textContent = 'Sin modelos locales';
     select.appendChild(opt);
     return;
+  }
+
+  if (provider.id === 'alibaba') {
+    const automatic = document.createElement('option');
+    automatic.value = AUTOMATIC_MODEL_ID;
+    automatic.textContent = 'Automático';
+    automatic.dataset.source = 'cloud';
+    automatic.dataset.provider = 'alibaba';
+    automatic.dataset.billingMode = 'token-plan';
+    automatic.dataset.providerName = 'Alibaba Cloud Model Studio / Router de capacidades';
+    automatic.dataset.taskType = 'automatic';
+    select.appendChild(automatic);
   }
 
   for (const m of normalized) {
@@ -3694,6 +4160,7 @@ async function loadModelsForCurrentProvider() {
         </div>
         <div class="model-tags">
           <span class="tag cloud">☁️ ${escapeHtml(provider.name || provider.id)}</span>
+          ${provider.id === 'alibaba' ? `<span class="tag">${m.supportsVision ? 'Vision' : 'Text'}</span>` : ''}
         </div>
       `;
     }
@@ -3705,6 +4172,15 @@ async function loadModelsForCurrentProvider() {
     opt.value = m.name;
     opt.textContent = m.name;
     opt.dataset.source = provider.id === 'local' ? 'local' : 'cloud';
+    opt.dataset.provider = provider.id;
+    opt.dataset.taskType = m.taskType;
+    opt.dataset.vision = m.supportsVision ? '1' : '0';
+    if (provider.id === 'alibaba') {
+      opt.dataset.billingMode = 'token-plan';
+      opt.dataset.providerName = m.supportsVision
+        ? 'Alibaba Cloud Model Studio / Vision'
+        : 'Alibaba Cloud Model Studio / Text';
+    }
     if (m.sizeFormatted) opt.dataset.sizeFormatted = m.sizeFormatted;
     if (m.capabilities && Array.isArray(m.capabilities)) opt.dataset.caps = m.capabilities.join(' • ');
     select.appendChild(opt);
@@ -3898,12 +4374,23 @@ function wire() {
 
         try {
           if (isImageFile(file)) {
+            const mediaType = supportedVisionMediaType(file);
+            if (!mediaType) {
+              showToast(`${file.name}: formato de imagen no compatible. Usa PNG, JPEG o WebP.`, 'warning');
+              continue;
+            }
             const currentModel = el("modelSelect")?.value || '';
-            if (!modelSupportsVision(currentModel)) {
+            if (shouldWarnImageCapability(currentModel)) {
               showToast(`Advertencia: "${currentModel}" no soporta imágenes. Considera usar un modelo con visión (llava, gemma3, etc.)`, 'warning');
             }
             const base64 = await docFileToBase64(file);
-            chatAttachments.push({ name: file.name, type: 'image', base64 });
+            const attachment = registerVisualImage({
+              chatId: activeChatId,
+              role: 'user',
+              origin: 'user-upload',
+              image: { name: file.name, type: 'image', base64, mediaType }
+            });
+            chatAttachments.push(attachment);
             attached++;
           } else if (isDocumentFile(file)) {
             try {
@@ -3965,13 +4452,24 @@ function wire() {
           continue;
         }
         try {
+          const mediaType = supportedVisionMediaType(file);
+          if (!mediaType) {
+            showToast('Formato de imagen no compatible. Usa PNG, JPEG o WebP.', 'warning');
+            continue;
+          }
           const currentModel = el("modelSelect")?.value || '';
-          if (!modelSupportsVision(currentModel)) {
+          if (shouldWarnImageCapability(currentModel)) {
             showToast(`Advertencia: "${currentModel}" no soporta imágenes. Considera usar un modelo con visión.`, 'warning');
           }
           const base64 = await docFileToBase64(file);
           const ext = file.type.split('/')[1] || 'png';
-          chatAttachments.push({ name: `pasted-image.${ext}`, type: 'image', base64 });
+          const attachment = registerVisualImage({
+            chatId: activeChatId,
+            role: 'user',
+            origin: 'user-upload',
+            image: { name: `pasted-image.${ext}`, type: 'image', base64, mediaType }
+          });
+          chatAttachments.push(attachment);
           renderAttachmentPreview();
         } catch (err) {
           showToast('Error pasting image', "error");
@@ -4163,6 +4661,293 @@ function switchTab(provider) {
   document.querySelectorAll('.tab-btn').forEach(b => {
     if (b.textContent.toLowerCase().includes(provider)) b.classList.add('active');
   });
+  if (provider === 'alibaba') loadAlibabaConfig().catch(error => {
+    showToast('Error al cargar Alibaba: ' + (error?.message || error), 'error');
+  });
+}
+
+let alibabaConfig = null;
+
+async function loadAlibabaConfig() {
+  alibabaConfig = await window.mika5.ai.getProviderConfig('alibaba');
+  const endpointInput = el('alibabaEndpointInput');
+  endpointInput.value = alibabaConfig.endpoint || '';
+  el('alibabaProtocolInput').value = alibabaConfig.protocol || 'anthropic-compatible';
+  el('alibabaRegionInput').value = alibabaConfig.region || '';
+  el('alibabaWorkspaceInput').value = alibabaConfig.workspace || '';
+  el('alibabaBillingInput').value = alibabaConfig.billingMode || 'token-plan';
+  const isTemplate = /<workspace-id>|\{WorkspaceId\}/i.test(endpointInput.value);
+  const usesConfiguredWorkspace = alibabaConfig.workspace
+    && endpointInput.value.startsWith(`https://${alibabaConfig.workspace}.`);
+  endpointInput.dataset.autoGenerated = isTemplate || usesConfiguredWorkspace ? 'true' : 'false';
+  if (!endpointInput.dataset.listenersBound) {
+    el('alibabaWorkspaceInput').addEventListener('input', () => generateAlibabaEndpoint());
+    el('alibabaRegionInput').addEventListener('input', () => generateAlibabaEndpoint());
+    endpointInput.addEventListener('input', () => {
+      endpointInput.dataset.autoGenerated = 'false';
+    });
+    endpointInput.dataset.listenersBound = 'true';
+  }
+  generateAlibabaEndpoint();
+  const simpleModelSelect = el('alibabaModelSelect');
+  simpleModelSelect.innerHTML = '';
+  for (const model of alibabaConfig.models || []) {
+    if (!['chat', 'vision'].includes(model.taskType || 'chat')) continue;
+    const option = document.createElement('option');
+    option.value = model.id;
+    option.textContent = model.displayName || model.id;
+    simpleModelSelect.appendChild(option);
+  }
+  try {
+    const lastModel = await window.mika5.getAppState('lastModel');
+    if (lastModel && Array.from(simpleModelSelect.options).some(option => option.value === lastModel)) {
+      simpleModelSelect.value = lastModel;
+    }
+  } catch (_) {}
+  renderAlibabaModels();
+  populateAlibabaGenerationModels();
+}
+
+function generateAlibabaEndpoint(force = false) {
+  const endpointInput = el('alibabaEndpointInput');
+  const workspace = el('alibabaWorkspaceInput').value.trim();
+  const region = el('alibabaRegionInput').value.trim();
+  if (!endpointInput || !workspace || !region) return;
+  if (!/^[A-Za-z0-9][A-Za-z0-9-]*$/.test(workspace) || !/^[A-Za-z0-9][A-Za-z0-9-]*$/.test(region)) return;
+  if (force || endpointInput.dataset.autoGenerated === 'true') {
+    endpointInput.value = `https://${workspace}.${region}.maas.aliyuncs.com/apps/anthropic`;
+    endpointInput.dataset.autoGenerated = 'true';
+  }
+}
+
+function capabilitySummary(capabilities) {
+  const labels = {
+    tools: 'tools',
+    vision: 'visión',
+    reasoning: 'reasoning',
+    streaming: 'streaming',
+    structuredJson: 'JSON'
+  };
+  const known = Object.entries(capabilities || {})
+    .filter(([, value]) => value === true || value === false)
+    .map(([key, value]) => `${labels[key] || key}: ${value ? 'sí' : 'no'}`);
+  return known.length ? known.join(' · ') : 'Capacidades no declaradas';
+}
+
+function renderAlibabaModels() {
+  const list = el('alibabaModelsList');
+  if (!list) return;
+  list.innerHTML = '';
+  const groups = [
+    ['chat', 'Chat'],
+    ['vision', 'Vision'],
+    ['image-generation', 'Imagen'],
+    ['video-generation', 'Video']
+  ];
+  for (const [taskType, label] of groups) {
+    const models = (alibabaConfig?.models || []).filter(model => (model.taskType || 'chat') === taskType);
+    if (!models.length) continue;
+    const heading = document.createElement('strong');
+    heading.textContent = label;
+    heading.style.marginTop = '8px';
+    list.appendChild(heading);
+    for (const model of models) {
+    const row = document.createElement('div');
+    row.style.cssText = 'border:1px solid var(--border-subtle);border-radius:8px;padding:9px;';
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;justify-content:space-between;gap:8px;align-items:center;';
+    const title = document.createElement('strong');
+    title.textContent = model.displayName || model.id;
+    const actions = document.createElement('span');
+    const editButton = document.createElement('button');
+    editButton.className = 'btn-icon';
+    editButton.textContent = '✎';
+    editButton.title = 'Editar modelo';
+    editButton.onclick = () => editAlibabaModel(model.id);
+    const deleteButton = document.createElement('button');
+    deleteButton.className = 'btn-icon';
+    deleteButton.textContent = '×';
+    deleteButton.title = 'Eliminar modelo';
+    deleteButton.onclick = () => deleteAlibabaModel(model.id);
+    actions.append(editButton, deleteButton);
+    header.append(title, actions);
+    const details = document.createElement('div');
+    details.className = 'hint';
+    details.textContent = `${model.id} · ${capabilitySummary(model.capabilities)} · Parámetros: ${Object.keys(model.parameters || {}).join(', ') || 'ninguno'}`;
+    row.append(header, details);
+    list.appendChild(row);
+    }
+  }
+  if (!(alibabaConfig?.models || []).length) {
+    const empty = document.createElement('p');
+    empty.className = 'hint';
+    empty.textContent = 'No hay modelos configurados. Agrega uno autorizado en tu workspace.';
+    list.appendChild(empty);
+  }
+}
+
+async function saveAlibabaConfig({ quiet = false } = {}) {
+  if (!alibabaConfig) await loadAlibabaConfig();
+  generateAlibabaEndpoint();
+  const next = {
+    ...alibabaConfig,
+    endpoint: el('alibabaEndpointInput').value.trim(),
+    protocol: el('alibabaProtocolInput').value.trim(),
+    region: el('alibabaRegionInput').value.trim(),
+    workspace: el('alibabaWorkspaceInput').value.trim(),
+    billingMode: el('alibabaBillingInput').value.trim() || 'token-plan'
+  };
+  alibabaConfig = await window.mika5.ai.saveProviderConfig('alibaba', next);
+  if (!quiet) showToast('Configuración de Alibaba guardada', 'success');
+  if (currentProvider === 'alibaba') await loadRuntime();
+  return alibabaConfig;
+}
+
+async function saveAlibabaSimpleConfig(quiet = false) {
+  try {
+    if (!alibabaConfig) await loadAlibabaConfig();
+    const keyInput = el('alibabaKeyInput');
+    const key = keyInput.value.trim();
+    await window.mika5.ai.setProvider('alibaba');
+    currentProvider = 'alibaba';
+    providerPrivacy = 'cloud';
+    let keyResult = null;
+    if (key) {
+      keyResult = await window.mika5.ai.setApiKey('alibaba', key);
+      keyInput.value = '';
+    } else {
+      const status = await window.mika5.ai.status();
+      if (!status?.ok) {
+        showToast('Pega tu API Key de Alibaba Token Plan', 'error');
+        return false;
+      }
+    }
+    await saveAlibabaConfig({ quiet: true });
+    const selectedModel = el('alibabaModelSelect').value || 'qwen3.7-max';
+    await window.mika5.setAppState('lastModel', selectedModel);
+    updatePrivacyUI();
+    await loadRuntime();
+    el('modelSelect').value = selectedModel;
+    syncModelDropdown();
+    if (keyResult?.warning) showToast(keyResult.warning, 'warning');
+    else if (!quiet) showToast('Alibaba Token Plan guardado', 'success');
+    return true;
+  } catch (error) {
+    showToast('No se pudo guardar Alibaba: ' + (error?.message || error), 'error');
+    return false;
+  }
+}
+
+async function testAlibabaConnection() {
+  const saved = await saveAlibabaSimpleConfig(true);
+  if (!saved) return;
+  const model = el('alibabaModelSelect').value || 'qwen3.7-max';
+  try {
+    const result = await window.mika5.ai.chat({
+      model,
+      messages: [{ role: 'user', content: 'Responde únicamente: OK' }]
+    });
+    if (result?.message?.content) showToast('Conexión con Alibaba correcta', 'success');
+    else showToast('Alibaba respondió sin contenido', 'warning');
+  } catch (error) {
+    showToast('Falló la conexión con Alibaba: ' + (error?.message || error), 'error');
+  }
+}
+
+async function editAlibabaModel(existingId) {
+  if (!alibabaConfig) await loadAlibabaConfig();
+  const existing = (alibabaConfig.models || []).find(model => model.id === existingId);
+  const id = await mikaPrompt('Modelo Alibaba', 'Identificador exacto autorizado en tu workspace:', existing?.id || '');
+  if (!id) return;
+  const displayName = await mikaPrompt('Nombre visible', 'Nombre visible del modelo:', existing?.displayName || id);
+  if (displayName == null) return;
+  const taskType = await mikaPrompt(
+    'Tipo de modelo',
+    'Usa chat, vision, image-generation o video-generation:',
+    existing?.taskType || 'chat'
+  );
+  if (!taskType) return;
+  try {
+    const model = {
+      id: id.trim(),
+      displayName: displayName.trim() || id.trim(),
+      taskType: taskType.trim(),
+      capabilities: { vision: taskType.trim() === 'vision' ? true : null },
+      parameters: ['chat', 'vision'].includes(taskType.trim()) ? { max_tokens: 1024 } : {}
+    };
+    alibabaConfig = existing
+      ? await window.mika5.ai.updateProviderModel('alibaba', existing.id, model)
+      : await window.mika5.ai.addProviderModel('alibaba', model);
+    renderAlibabaModels();
+    if (currentProvider === 'alibaba') await loadRuntime();
+  } catch (error) {
+    showToast('Modelo no guardado: ' + (error?.message || error), 'error');
+  }
+}
+
+function populateAlibabaGenerationModels() {
+  const imageSelect = el('alibabaImageModelSelect');
+  const videoList = el('alibabaVideoModels');
+  if (imageSelect) {
+    imageSelect.innerHTML = '';
+    for (const model of (alibabaConfig?.models || []).filter(item => item.taskType === 'image-generation')) {
+      const option = document.createElement('option');
+      option.value = model.id;
+      option.textContent = model.displayName || model.id;
+      imageSelect.appendChild(option);
+    }
+  }
+  if (videoList) {
+    videoList.textContent = (alibabaConfig?.models || [])
+      .filter(item => item.taskType === 'video-generation')
+      .map(item => item.displayName || item.id)
+      .join(' · ');
+  }
+}
+
+async function generateAlibabaImage() {
+  const prompt = el('alibabaImagePrompt')?.value.trim();
+  const model = el('alibabaImageModelSelect')?.value;
+  if (!prompt || !model) {
+    showToast('Escribe una descripción y selecciona un modelo de imagen', 'warning');
+    return;
+  }
+  const saved = await saveAlibabaSimpleConfig(true);
+  if (!saved) return;
+  const button = el('alibabaGenerateImageButton');
+  const results = el('alibabaImageResults');
+  if (button) button.disabled = true;
+  if (results) results.textContent = 'Generando imagen…';
+  try {
+    const response = await window.mika5.ai.generateImage({ model, prompt });
+    if (results) {
+      results.innerHTML = '';
+      for (const url of response.images || []) {
+        const img = document.createElement('img');
+        img.src = url;
+        img.alt = prompt;
+        img.style.cssText = 'max-width:100%;border-radius:10px;margin-top:10px;';
+        results.appendChild(img);
+      }
+    }
+  } catch (error) {
+    if (results) results.textContent = '';
+    showToast('No se pudo crear la imagen: ' + (error?.message || error), 'error');
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function deleteAlibabaModel(modelId) {
+  const confirmed = await mikaConfirm('Eliminar modelo', `¿Eliminar ${modelId} del catálogo local?`, 'Eliminar');
+  if (!confirmed) return;
+  try {
+    alibabaConfig = await window.mika5.ai.deleteProviderModel('alibaba', modelId);
+    renderAlibabaModels();
+    if (currentProvider === 'alibaba') await loadRuntime();
+  } catch (error) {
+    showToast('Modelo no eliminado: ' + (error?.message || error), 'error');
+  }
 }
 
 async function saveApiKey(provider) {

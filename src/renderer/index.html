@@ -1809,6 +1809,13 @@
                                 </div>
                                 <div class="provider-desc">Contexto 256k tokens.</div>
                             </div>
+                            <div class="provider-option" onclick="switchProvider('alibaba')">
+                                <div class="provider-option-header">
+                                    <span class="provider-name">☁️ Alibaba Cloud Model Studio</span>
+                                    <span class="privacy-tag cloud">Cloud</span>
+                                </div>
+                                <div class="provider-desc">Endpoint y catálogo de modelos configurables.</div>
+                            </div>
                             <div class="provider-divider"></div>
                             <div class="provider-option" onclick="switchProvider('llamacpp')">
                                 <div class="provider-option-header">
@@ -2011,6 +2018,7 @@
                     <button class="tab-btn" onclick="switchTab('anthropic')">Anthropic</button>
                     <button class="tab-btn" onclick="switchTab('groq')">Groq</button>
                     <button class="tab-btn" onclick="switchTab('moonshot')">Moonshot</button>
+                    <button class="tab-btn" onclick="switchTab('alibaba')">Alibaba</button>
                 </div>
       
                 <div id="tab-openai" class="tab-content">
@@ -2039,6 +2047,58 @@
                     <input type="password" id="moonshotKeyInput" placeholder="sk-..." />
                     <p class="hint">Obtén tu clave en platform.moonshot.cn</p>
                     <button class="btn-primary" onclick="saveApiKey('moonshot')">Guardar</button>
+                </div>
+
+                <div id="tab-alibaba" class="tab-content" style="display: none;">
+                    <label>Alibaba Cloud Model Studio API Key:</label>
+                    <input type="password" id="alibabaKeyInput" placeholder="sk-sp-..." autocomplete="off" />
+                    <p class="hint">Plan: <strong>Token Plan</strong></p>
+                    <label>Modelo:</label>
+                    <select id="alibabaModelSelect" style="width:100%;"></select>
+                    <div style="display:flex;gap:8px;margin-top:14px;">
+                        <button class="btn-primary" onclick="saveAlibabaSimpleConfig()">Guardar</button>
+                        <button class="btn-icon" type="button" onclick="testAlibabaConnection()">Probar conexión</button>
+                    </div>
+
+                    <section style="margin-top:22px;padding-top:16px;border-top:1px solid var(--border-subtle);">
+                        <h4>Crear imagen</h4>
+                        <label>Modelo de imagen:</label>
+                        <select id="alibabaImageModelSelect" style="width:100%;"></select>
+                        <label for="alibabaImagePrompt">Descripción:</label>
+                        <textarea id="alibabaImagePrompt" rows="3" placeholder="Describe la imagen que quieres crear"></textarea>
+                        <button id="alibabaGenerateImageButton" class="btn-primary" type="button" onclick="generateAlibabaImage()">Generar imagen</button>
+                        <div id="alibabaImageResults" aria-live="polite"></div>
+                    </section>
+
+                    <section style="margin-top:18px;padding:12px;border:1px solid var(--border-subtle);border-radius:8px;">
+                        <strong>Video disponible próximamente</strong>
+                        <p class="hint">Los modelos de video se mantienen separados del chat y todavía no realizan llamadas.</p>
+                        <p id="alibabaVideoModels" class="hint"></p>
+                    </section>
+
+                    <details style="margin-top:18px;">
+                        <summary style="cursor:pointer;font-weight:600;">Configuración avanzada</summary>
+                        <div style="margin-top:12px;">
+                            <label>Endpoint base Anthropic-compatible:</label>
+                            <input type="url" id="alibabaEndpointInput" placeholder="https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic" />
+                            <p class="hint">No incluyas /v1/messages. MIKA5 lo agrega automáticamente.</p>
+                            <label>Protocolo:</label>
+                            <input type="text" id="alibabaProtocolInput" value="anthropic-compatible" readonly />
+                            <label>Región:</label>
+                            <input type="text" id="alibabaRegionInput" placeholder="ap-southeast-1" />
+                            <label>Workspace (solo endpoints por workspace):</label>
+                            <input type="text" id="alibabaWorkspaceInput" placeholder="Opcional en Token Plan" />
+                            <button class="btn-icon" type="button" onclick="generateAlibabaEndpoint(true)">Generar endpoint con Workspace y región</button>
+                            <label>Modalidad de facturación:</label>
+                            <input type="text" id="alibabaBillingInput" placeholder="token-plan" />
+                            <button class="btn-primary" onclick="saveAlibabaConfig()">Guardar configuración avanzada</button>
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:18px;">
+                                <strong>Catálogo por tipo</strong>
+                                <button class="btn-icon" onclick="editAlibabaModel()" title="Agregar modelo">＋</button>
+                            </div>
+                            <div id="alibabaModelsList" style="display:flex;flex-direction:column;gap:8px;margin-top:10px;"></div>
+                        </div>
+                    </details>
                 </div>
             </div>
         </div>

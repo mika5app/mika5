@@ -359,11 +359,18 @@ ipcMain.handle('ai:get-providers', () => aiManager.getAllProviders());
 ipcMain.handle('ai:get-current-provider', () => aiManager.getProvider());
 ipcMain.handle('ai:set-provider', (_e, id) => aiManager.setProvider(id));
 ipcMain.handle('ai:set-api-key', (_e, provider, key) => aiManager.setApiKey(provider, key));
+ipcMain.handle('ai:get-provider-config', (_e, provider) => aiManager.getProviderConfig(provider));
+ipcMain.handle('ai:save-provider-config', (_e, provider, config) => aiManager.saveProviderConfig(provider, config));
+ipcMain.handle('ai:add-provider-model', (_e, provider, model) => aiManager.addProviderModel(provider, model));
+ipcMain.handle('ai:update-provider-model', (_e, provider, modelId, model) => aiManager.updateProviderModel(provider, modelId, model));
+ipcMain.handle('ai:delete-provider-model', (_e, provider, modelId) => aiManager.deleteProviderModel(provider, modelId));
 ipcMain.handle('ai:chat', (_e, params) => {
   currentAbortController = new AbortController();
   params._signal = currentAbortController.signal;
   return aiManager.chat(params).finally(() => { currentAbortController = null; });
 });
+ipcMain.handle('ai:generate-image', (_e, params) => aiManager.generateImage(params));
+ipcMain.handle('ai:route-intent', (_e, params) => aiManager.routeIntent(params));
 ipcMain.handle('ai:list-models', () => aiManager.listModels());
 ipcMain.handle('ai:status', () => aiManager.status());
 
