@@ -5,6 +5,11 @@ const {
   PROVIDERS,
   ALIBABA_DEFAULT_CONFIG,
   ALIBABA_DEFAULT_MODEL_ID,
+  ALIBABA_DEFAULT_MAX_TOKENS,
+  ALIBABA_LEGACY_MAX_TOKENS,
+  createAlibabaPresetModel,
+  migrateAlibabaOfficialMaxTokens,
+  extractAlibabaUsage,
   ALIBABA_TOKEN_PLAN_ENDPOINT,
   ALIBABA_TOKEN_PLAN_IMAGE_ENDPOINT,
   normalizeAlibabaConfig,
@@ -16,11 +21,19 @@ const {
   routeIntent,
   buildImageEditPlan,
   buildImageVariationPlan,
+  buildVisionAnalysisPlan,
   validateVisualTaskPlan,
   buildModelPromptFromPlan,
   buildImageGenerationPromptFromVisualPlan,
   normalizeAlibabaAssistantOutput,
-  executeGenerateImageToolUse
+  executeGenerateImageToolUse,
+  providerSupportsImageGeneration,
+  providerSupportsImageEdit,
+  providerSupportsImageVariation,
+  getDefaultImageModelForProvider,
+  getDefaultVisionModelForProvider,
+  providerSupportsVisionRouting,
+  getProviderVisualCapabilities
 } = require('../src/main/ai-providers');
 
 function createDb() {
@@ -78,6 +91,30 @@ function createDb() {
   assert.equal(detectUserIntent({ text: 'reemplaza el fondo', attachments: imageAttachment }), 'image-edit');
   assert.equal(detectUserIntent({ text: '¿qué hago con esto?', attachments: imageAttachment }), 'ambiguous-visual');
   assert.equal(detectUserIntent({ text: 'analiza el color de la vasija', attachments: imageAttachment }), 'vision-analysis');
+  for (const text of [
+    'explícame este código',
+    'qué hace este código',
+    'qué significa este código',
+    'ayúdame a entender este código',
+    'interpreta este código',
+    'revisa este código'
+  ]) {
+    const detailedExplanation = detectUserIntentDetailed({ text, attachments: imageAttachment });
+    assert.equal(detailedExplanation.intent, 'vision-analysis');
+    assert(!['image-generation', 'image-edit', 'image-variation'].includes(detailedExplanation.intent));
+    const explanationRoute = routeIntent(detailedExplanation.intent, {
+      currentProvider: 'alibaba',
+      currentModel: 'qwen3.7-max'
+    });
+    assert.equal(explanationRoute.action, 'chat');
+    assert.equal(explanationRoute.model, 'qwen3.7-plus');
+    assert.notEqual(explanationRoute.action, 'generate-image');
+    const explanationPlan = buildVisionAnalysisPlan({
+      text,
+      visualContext: detailedExplanation.visualContext
+    });
+    assert.equal(validateVisualTaskPlan(explanationPlan, { vision: true }).valid, true);
+  }
   assert.equal(detectUserIntent({ text: 'crea un video' }), 'video-generation');
   assert.equal(detectUserIntent({ text: 'Explícame este concepto' }), 'normal-chat');
   assert(Array.isArray(detectUserIntentDetailed({ text: 'Explícame este concepto' }).variationSignals));
@@ -93,6 +130,34 @@ function createDb() {
   const imageEditRoute = routeIntent('image-edit', { currentProvider: 'alibaba' });
   assert.equal(imageEditRoute.action, 'generate-image');
   assert.equal(imageEditRoute.model, 'wan2.7-image');
+  assert.equal(providerSupportsImageGeneration('alibaba'), true);
+  assert.equal(providerSupportsImageEdit('alibaba'), true);
+  assert.equal(providerSupportsImageVariation('alibaba'), true);
+  assert.equal(providerSupportsVisionRouting('alibaba'), true);
+  assert.deepEqual(getProviderVisualCapabilities('alibaba'), {
+    vision: true,
+    imageGeneration: true,
+    imageEdit: true,
+    imageVariation: true,
+    sourceImages: true,
+    defaultVisionModel: 'qwen3.7-plus',
+    defaultImageModel: 'wan2.7-image'
+  });
+  assert.equal(getDefaultImageModelForProvider('alibaba'), 'wan2.7-image');
+  assert.equal(getDefaultVisionModelForProvider('alibaba'), 'qwen3.7-plus');
+  for (const providerId of ['local', 'openai', 'anthropic', 'groq', 'moonshot', 'llamacpp']) {
+    assert.equal(providerSupportsImageGeneration(providerId), false);
+    assert.equal(providerSupportsImageEdit(providerId), false);
+    assert.equal(providerSupportsImageVariation(providerId), false);
+    assert.notEqual(routeIntent('image-generation', { currentProvider: providerId }).action, 'generate-image');
+  }
+  assert.equal(providerSupportsVisionRouting('local'), true);
+  assert.equal(providerSupportsVisionRouting('openai'), false);
+  assert.equal(
+    routeIntent('image-generation', { currentProvider: 'openai' }).message,
+    'El proveedor actual no soporta generación de imágenes. Cambia a un proveedor con modelos de imagen.'
+  );
+  assert.equal(routeIntent('image-edit', { currentProvider: 'openai' }).action, 'unsupported');
   const ambiguousRoute = routeIntent('ambiguous-visual', { currentProvider: 'alibaba' });
   assert.equal(ambiguousRoute.action, 'unsupported');
   assert.equal(ambiguousRoute.message, '¿Quieres analizar la imagen, editarla o generar una nueva versión?');
@@ -168,6 +233,20 @@ function createDb() {
     chatId: 'chat-a',
     lastUserImage: sameChatImage
   }).intent, 'vision-analysis');
+  for (const text of ['qué hace este código', 'explica esta captura']) {
+    const previousVisualExplanation = detectUserIntentDetailed({
+      text,
+      chatId: 'chat-a',
+      lastAnalyzedImage: sameChatImage
+    });
+    assert.equal(previousVisualExplanation.intent, 'vision-analysis');
+    assert.equal(previousVisualExplanation.visualContext.hasVisualContext, true);
+    assert.equal(previousVisualExplanation.visualContext.source, 'previous-analyzed-image');
+    assert.equal(routeIntent(previousVisualExplanation.intent, {
+      currentProvider: 'alibaba',
+      currentModel: 'qwen3.7-max'
+    }).action, 'chat');
+  }
   const generatedAfterAnalysis = {
     type: 'image',
     url: 'https://example.test/new-context.png',
@@ -218,11 +297,24 @@ function createDb() {
   assert.equal(blockedStructuredTool.content, '');
   assert(!blockedStructuredTool.content.includes('"type":"tool_use"'));
   assert(!blockedStructuredTool.content.includes('Reintentando por el flujo correcto'));
-  const blockedRawTool = normalizeAlibabaAssistantOutput({
-    content: [{ type: 'text', text: '{"type":"tool_use","name":"generate_image"}' }]
+  // A: texto explicativo que contiene tool_use/generate_image no es una llamada de herramienta.
+  const explainedToolText = normalizeAlibabaAssistantOutput({
+    content: [{
+      type: 'text',
+      text: 'Este código usa {"type":"tool_use","name":"generate_image"}.'
+    }]
   });
-  assert.equal(blockedRawTool.blockedToolUse.name, 'generate_image');
-  assert(!blockedRawTool.content.includes('{"type"'));
+  assert.equal(explainedToolText.blockedToolUse, null);
+  assert.equal(explainedToolText.content, 'Este código usa {"type":"tool_use","name":"generate_image"}.');
+  assert(explainedToolText.content.includes('generate_image'));
+  const explainedToolMarkdown = normalizeAlibabaAssistantOutput({
+    content: [{
+      type: 'text',
+      text: '```json\n{ "type": "tool_use", "name": "generate_image" }\n```\nEse bloque proviene del log.'
+    }]
+  });
+  assert.equal(explainedToolMarkdown.blockedToolUse, null);
+  assert(explainedToolMarkdown.content.includes('"name": "generate_image"'));
   let generationCalls = 0;
   const terminalToolResult = await executeGenerateImageToolUse({
     toolUse: blockedStructuredTool.blockedToolUse,
@@ -235,6 +327,7 @@ function createDb() {
     generateImage: async params => {
       generationCalls++;
       assert.equal(params.prompt, generationFromEdit);
+      assert.deepEqual(params.sourceImages, [editPlan.sourceImage]);
       return { images: ['https://example.test/tool-generated.png'] };
     }
   });
@@ -255,6 +348,25 @@ function createDb() {
   );
   assert.equal(unsafeGenerationCalls, 0);
 
+  // C: un plan de vision-analysis (o de chat) jamás puede ejecutar generate_image.
+  let nonGenerativeCalls = 0;
+  for (const nonGenerativeMode of ['vision-analysis', 'normal-chat', undefined]) {
+    await assert.rejects(
+      () => executeGenerateImageToolUse({
+        toolUse: { name: 'generate_image', input: { prompt: 'una playa' } },
+        visualExecution: {
+          plan: { mode: nonGenerativeMode, objective: 'analizar el código adjunto' },
+          validation: { valid: true },
+          model: 'wan2.7-image',
+          generationPrompt: 'genera una imagen'
+        },
+        generateImage: async () => { nonGenerativeCalls++; return { images: ['x'] }; }
+      }),
+      /la tarea actual no es generativa/
+    );
+  }
+  assert.equal(nonGenerativeCalls, 0);
+
   for (const text of [
     'haz una versión más moderna de esta imagen',
     'crea una nueva versión basada en esta imagen',
@@ -271,6 +383,51 @@ function createDb() {
     assert(Array.isArray(variationPlan.preserve));
     assert(Array.isArray(variationPlan.allowChanges));
     assert(Array.isArray(variationPlan.styleGoals));
+  }
+  const previousGeneratedImage = {
+    ...generatedAfterAnalysis,
+    chatId: 'chat-diagnostico'
+  };
+  for (const text of [
+    'genera una nueva version',
+    'genera una nueva versión',
+    'crea otra version'
+  ]) {
+    const detailedVariation = detectUserIntentDetailed({
+      text,
+      chatId: 'chat-diagnostico',
+      lastGeneratedImage: previousGeneratedImage
+    });
+    assert.equal(detailedVariation.intent, 'image-variation');
+    assert.equal(detailedVariation.visualContext.hasVisualContext, true);
+    assert.equal(detailedVariation.visualContext.source, 'previous-generated-image');
+    const variationPlan = buildImageVariationPlan({
+      text,
+      detailed: detailedVariation,
+      visualContext: detailedVariation.visualContext
+    });
+    assert.equal(variationPlan.sourceImage, previousGeneratedImage);
+    assert.equal(validateVisualTaskPlan(variationPlan, { imageVariation: true }).valid, true);
+  }
+  for (const text of [
+    'rediseña el logo por un logo moderno',
+    'moderniza este logo'
+  ]) {
+    const detailedEdit = detectUserIntentDetailed({
+      text,
+      chatId: 'chat-diagnostico',
+      lastGeneratedImage: previousGeneratedImage
+    });
+    assert.notEqual(detailedEdit.intent, 'ambiguous-visual');
+    assert.equal(detailedEdit.intent, 'image-edit');
+    assert.equal(detailedEdit.visualContext.hasVisualContext, true);
+    const editPlan = buildImageEditPlan({
+      text,
+      detailed: detailedEdit,
+      visualContext: detailedEdit.visualContext
+    });
+    assert.equal(editPlan.sourceImage, previousGeneratedImage);
+    assert.equal(validateVisualTaskPlan(editPlan, { imageEdit: true }).valid, true);
   }
   const previousVisualAnalysis = {
     chatId: 'chat-suggestions',
@@ -555,6 +712,84 @@ function createDb() {
     global.fetch = originalFetch;
   }
 
+  const connectTimeoutError = () => Object.assign(new TypeError('fetch failed'), {
+    cause: { code: 'UND_ERR_CONNECT_TIMEOUT', name: 'ConnectTimeoutError' }
+  });
+  let timeoutFetchCalls = 0;
+  global.fetch = async () => {
+    timeoutFetchCalls++;
+    throw connectTimeoutError();
+  };
+  try {
+    await assert.rejects(
+      () => PROVIDERS.alibaba.generateImage({
+        model: 'wan2.7-image',
+        prompt: 'Una prueba de timeout',
+        apiKey: 'test-key',
+        providerConfig: ALIBABA_DEFAULT_CONFIG
+      }),
+      error => /No se pudo conectar con Alibaba Cloud Model Studio/.test(error.message)
+        && !/fetch failed|UND_ERR|ConnectTimeoutError|attempted addresses/i.test(error.message)
+    );
+    assert.equal(timeoutFetchCalls, 2);
+  } finally {
+    global.fetch = originalFetch;
+  }
+
+  let retryFetchCalls = 0;
+  let retryPayload = null;
+  global.fetch = async (_url, options) => {
+    retryFetchCalls++;
+    if (retryFetchCalls === 1) throw connectTimeoutError();
+    retryPayload = JSON.parse(options.body);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        output: { choices: [{ message: { content: [{ image: 'https://example.test/retry.png' }] } }] }
+      })
+    };
+  };
+  try {
+    const retried = await PROVIDERS.alibaba.generateImage({
+      model: 'wan2.7-image',
+      prompt: 'Conservar la referencia',
+      sourceImages: [{
+        type: 'image',
+        mediaType: 'image/jpeg',
+        base64: 'aGVsbG8='
+      }],
+      apiKey: 'test-key',
+      providerConfig: ALIBABA_DEFAULT_CONFIG
+    });
+    assert.equal(retryFetchCalls, 2);
+    assert.deepEqual(retried.images, ['https://example.test/retry.png']);
+    assert(/^data:image\/jpeg;base64,/.test(retryPayload.input.messages[0].content[0].image));
+  } finally {
+    global.fetch = originalFetch;
+  }
+
+  let unauthorizedFetchCalls = 0;
+  global.fetch = async () => {
+    unauthorizedFetchCalls++;
+    return { ok: false, status: 401 };
+  };
+  try {
+    await assert.rejects(
+      () => PROVIDERS.alibaba.generateImage({
+        model: 'wan2.7-image',
+        prompt: 'No reintentar HTTP',
+        apiKey: 'test-key',
+        providerConfig: ALIBABA_DEFAULT_CONFIG
+      }),
+      error => /rechazó la autenticación/.test(error.message)
+        && !/test-key/.test(error.message)
+    );
+    assert.equal(unauthorizedFetchCalls, 1);
+  } finally {
+    global.fetch = originalFetch;
+  }
+
   global.fetch = async () => ({
     ok: false,
     status: 400,
@@ -572,9 +807,8 @@ function createDb() {
         sanitize: false,
         providerConfig: ALIBABA_DEFAULT_CONFIG
       }),
-      error => /Modelo incompatible/.test(error.message)
-        && /InvalidParameter/.test(error.message)
-        && /req-test-123/.test(error.message)
+      error => /respondió con estado HTTP 400/.test(error.message)
+        && !/Modelo incompatible|InvalidParameter|req-test-123/.test(error.message)
         && !/test-key/.test(error.message)
     );
   } finally {
@@ -583,6 +817,17 @@ function createDb() {
 
   const db = createDb();
   const manager = new AIProviderManager(db);
+  manager.setProvider('openai');
+  const unsupportedOpenAiRoute = manager.routeIntent({
+    text: 'crea una imagen de prueba',
+    currentModel: 'gpt-4o'
+  });
+  assert.equal(unsupportedOpenAiRoute.action, 'unsupported');
+  assert.equal(unsupportedOpenAiRoute.validation.valid, false);
+  await assert.rejects(
+    () => manager.generateImage({ model: 'unsupported', prompt: 'no ejecutar' }),
+    /proveedor actual no soporta generación de imágenes/
+  );
   manager.setProvider('alibaba');
   manager.apiKeys.alibaba = 'test-key';
   const routedCritical = manager.routeIntent({
@@ -616,26 +861,66 @@ function createDb() {
   PROVIDERS.alibaba.generateImage = async params => {
     managerGenerationCalls++;
     assert.equal(params.prompt, routedCritical.visualExecution.generationPrompt);
+    assert.equal(params.apiKey, 'test-key');
+    assert.deepEqual(params.providerConfig, manager.getProviderConfig('alibaba'));
     return { images: ['https://example.test/manager-terminal.png'] };
   };
   try {
+    const directGeneration = await manager.generateImage({
+      model: 'wan2.7-image',
+      prompt: routedCritical.visualExecution.generationPrompt
+    });
+    assert.deepEqual(directGeneration.images, ['https://example.test/manager-terminal.png']);
     const terminalFromManager = await manager.chat({
       model: 'qwen3.7-plus',
       messages: [{ role: 'user', content: criticalText }],
       visualExecution: routedCritical.visualExecution
     });
     assert.equal(managerChatCalls, 1);
-    assert.equal(managerGenerationCalls, 1);
+    assert.equal(managerGenerationCalls, 2);
     assert.equal(terminalFromManager.terminalType, 'image');
     assert.deepEqual(terminalFromManager.images, ['https://example.test/manager-terminal.png']);
+    // Sin plan generativo, un tool_use del proveedor nunca produce imagen.
     await assert.rejects(
       () => manager.chat({
         model: 'qwen3.7-plus',
         messages: [{ role: 'user', content: criticalText }]
       }),
-      /plan visual seguro/
+      /herramienta visual fuera de la tarea solicitada/
     );
-    assert.equal(managerGenerationCalls, 1);
+    assert.equal(managerGenerationCalls, 2);
+    await assert.rejects(
+      () => manager.chat({
+        model: 'qwen3.7-plus',
+        messages: [{ role: 'user', content: criticalText }],
+        visualExecution: {
+          plan: { mode: 'vision-analysis' },
+          validation: { valid: true },
+          model: 'wan2.7-image',
+          generationPrompt: 'genera una imagen'
+        }
+      }),
+      /herramienta visual fuera de la tarea solicitada/
+    );
+    assert.equal(managerGenerationCalls, 2);
+    // Con texto disponible, se devuelve el texto en lugar de ejecutar la herramienta.
+    PROVIDERS.alibaba.chat = async () => ({
+      message: { role: 'assistant', content: 'El código llama a generate_image en la línea 12.' },
+      blockedToolUse: { name: 'generate_image', input: { prompt: 'ignorar' } }
+    });
+    const analysisFallback = await manager.chat({
+      model: 'qwen3.7-plus',
+      messages: [{ role: 'user', content: criticalText }],
+      visualExecution: {
+        plan: { mode: 'vision-analysis' },
+        validation: { valid: true },
+        model: 'wan2.7-image'
+      }
+    });
+    assert.equal(analysisFallback.terminalType, undefined);
+    assert.equal(analysisFallback.images, undefined);
+    assert.equal(analysisFallback.message.content, 'El código llama a generate_image en la línea 12.');
+    assert.equal(managerGenerationCalls, 2);
   } finally {
     PROVIDERS.alibaba.chat = originalAlibabaChat;
     PROVIDERS.alibaba.generateImage = originalAlibabaGenerateImage;
@@ -650,6 +935,210 @@ function createDb() {
   assert.equal(routedImplicitEdit.action, 'generate-image');
   assert.equal(routedImplicitEdit.visualContext.source, 'previous-analyzed-image');
   assert.notEqual(routedImplicitEdit.model, 'qwen3.7-max');
+  // --- REGRESIÓN: creación desde cero en un chat CON historial visual -------
+  // Caso real: en el chat donde antes se generó una tarjeta Razer, pedir "crea
+  // una imagen de una chica en la oficina…" devolvía otra tarjeta Razer. El
+  // mismo texto en un chat nuevo funcionaba. Causa: el texto activaba a la vez
+  // `referencesPrevious` (por el artículo "la" de "en la oficina") y
+  // `hasImplicitVisualSignal` (por "imagen", "rojo", "azul"), y el resolutor
+  // entregaba lastGeneratedImage como fuente.
+  const razerCard = {
+    name: 'razer-card.png',
+    chatId: 'chat-razer',
+    base64: 'cmF6ZXI=',
+    mediaType: 'image/png',
+    visualEntryId: 've-razer',
+    updatedAt: 2000
+  };
+  const officeRequest = 'crea una imagen de una chica en la oficina tomando café, '
+    + 'con la blusa rojo con azul y pantalón amarillo';
+
+  const routedFromScratch = manager.routeIntent({
+    text: officeRequest,
+    chatId: 'chat-razer',
+    lastGeneratedImage: razerCard,
+    lastUserImage: razerCard,
+    lastUploadedImage: razerCard,
+    lastAnalyzedImage: razerCard,
+    currentModel: ''
+  });
+  assert.equal(routedFromScratch.intent, 'image-generation', 'debe crear, no editar');
+  assert.equal(routedFromScratch.plan.mode, 'image-generation');
+  assert.equal(routedFromScratch.plan.createFromScratch, true);
+  assert.equal(routedFromScratch.plan.sourceImage, null, 'plan.sourceImage debe ser null');
+  assert.equal(routedFromScratch.visualContext.hasVisualContext, false);
+  assert.equal(routedFromScratch.visualContext.imageRef, null);
+  assert.equal(routedFromScratch.visualContext.policy, 'forbidden-historical-reference');
+  // Lo que el renderer usará como sourceImages: `plan.sourceImage || imageRef`.
+  const fromScratchSources = routedFromScratch.visualExecution?.plan?.sourceImage
+    || routedFromScratch.visualContext?.imageRef
+    || null;
+  assert.deepEqual(fromScratchSources ? [fromScratchSources] : [], [], 'sourceImages debe ir vacío');
+
+  const fromScratchPrompt = routedFromScratch.modelPrompt || '';
+  for (const term of ['chica', 'oficina', 'café', 'rojo', 'azul', 'amarillo']) {
+    assert(fromScratchPrompt.toLowerCase().includes(term), `el prompt conserva "${term}"`);
+  }
+  assert(!/razer/i.test(fromScratchPrompt), 'el prompt no menciona la imagen anterior');
+  assert(!/conserva|preserva|manten|identidad|composicion anterior|misma composici/i.test(fromScratchPrompt),
+    'el prompt no pide preservar identidad ni composición previa');
+  assert.notEqual(routedFromScratch.action, 'unsupported',
+    'una orden clara no debe pedir aclaración');
+  assert.equal(routedFromScratch.plan.needsClarification, false);
+
+  // 4. Chat NUEVO, misma petición → mismo routing.
+  const routedNewChat = manager.routeIntent({
+    text: officeRequest, chatId: 'chat-nuevo', currentModel: ''
+  });
+  assert.equal(routedNewChat.intent, routedFromScratch.intent,
+    'el resultado no puede depender del historial del chat');
+  assert.equal(routedNewChat.plan.createFromScratch, true);
+  assert.equal(routedNewChat.plan.sourceImage, null);
+
+  // 5. Contraste en el MISMO chat: una orden anafórica sí resuelve la tarjeta.
+  const routedAnaphoric = manager.routeIntent({
+    text: 'cambia esta tarjeta a verde',
+    chatId: 'chat-razer',
+    lastGeneratedImage: razerCard,
+    currentModel: ''
+  });
+  assert.equal(routedAnaphoric.intent, 'image-edit', 'la anáfora sigue editando');
+  assert.equal(routedAnaphoric.visualContext.hasVisualContext, true);
+  assert.equal(routedAnaphoric.visualContext.imageRef.name, 'razer-card.png',
+    'y usa exactamente la tarjeta anterior');
+  assert.equal(routedAnaphoric.plan.createFromScratch, undefined,
+    'un plan de edición no declara creación desde cero');
+
+  // Las demás instrucciones anafóricas no pueden romperse.
+  for (const [texto, esperado] of [
+    ['ahora ponlo verde', true],
+    ['cámbiala', true],
+    ['haz otra versión', true],
+    ['usa la imagen anterior', true],
+    ['conserva la composición', true],
+    ['rediseña este logo', true]
+  ]) {
+    const routed = manager.routeIntent({
+      text: texto, chatId: 'chat-razer', lastGeneratedImage: razerCard, currentModel: ''
+    });
+    assert.equal(routed.visualContext.hasVisualContext, esperado,
+      `"${texto}" debe seguir resolviendo la imagen previa`);
+    assert.notEqual(routed.plan?.createFromScratch, true,
+      `"${texto}" no puede clasificarse como creación desde cero`);
+  }
+
+  // "haz una mejor" es ambigua por diseño: NO es creación desde cero (no puede
+  // ignorar el historial) pero tampoco se fuerza a editar — queda para el camino
+  // de aclaración, que es donde corresponde.
+  const routedAmbiguous = manager.routeIntent({
+    text: 'haz una mejor', chatId: 'chat-razer', lastGeneratedImage: razerCard, currentModel: ''
+  });
+  assert.notEqual(routedAmbiguous.plan?.createFromScratch, true,
+    'una frase ambigua no puede clasificarse como creación desde cero');
+
+  // --- Borde 1: política del ADJUNTO DEL TURNO -----------------------------
+  // currentImage se devolvía antes de aplicar la política, así que una creación
+  // autosuficiente con un adjunto no mencionado lo convertía en edición.
+  const attachedCard = {
+    type: 'image', name: 'razer-card.png', chatId: 'chat-razer',
+    base64: 'cmF6ZXI=', mediaType: 'image/png', visualEntryId: 've-razer'
+  };
+  const routedUnmentioned = manager.routeIntent({
+    text: 'crea una imagen de una chica en una oficina tomando café',
+    chatId: 'chat-razer',
+    attachments: [attachedCard],
+    currentModel: ''
+  });
+  assert.equal(routedUnmentioned.intent, 'image-generation');
+  assert.equal(routedUnmentioned.plan.sourceImage, null, 'plan.sourceImage null');
+  assert.equal(routedUnmentioned.visualContext.hasVisualContext, false);
+  assert.equal(routedUnmentioned.visualContext.policy, 'forbidden-unmentioned-attachment');
+  assert.equal(
+    (routedUnmentioned.visualExecution?.plan?.sourceImage
+      || routedUnmentioned.visualContext?.imageRef || null), null,
+    'sourceImages queda vacío: el adjunto no se usa en silencio'
+  );
+
+  // D: referencia explícita al adjunto → se usa.
+  const routedRequired = manager.routeIntent({
+    text: 'usa esta imagen como referencia para crear una oficina',
+    chatId: 'chat-razer', attachments: [attachedCard], currentModel: ''
+  });
+  assert.equal(routedRequired.visualContext.hasVisualContext, true);
+  assert.equal(routedRequired.visualContext.source, 'current-attachment');
+  assert.equal(routedRequired.visualContext.policy, 'required-current-attachment');
+  assert.equal(routedRequired.visualContext.imageRef.name, 'razer-card.png');
+
+  // Exclusión explícita del adjunto.
+  const routedForbidden = manager.routeIntent({
+    text: 'crea desde cero un logo, sin usar la imagen',
+    chatId: 'chat-razer', attachments: [attachedCard], currentModel: ''
+  });
+  assert.equal(routedForbidden.visualContext.hasVisualContext, false);
+  assert.equal(routedForbidden.visualContext.policy, 'forbidden-current-attachment');
+
+  // Sin orden de creación, el adjunto sigue siendo el contexto natural.
+  const routedPlainAttachment = manager.routeIntent({
+    text: 'ponlo verde', chatId: 'chat-razer', attachments: [attachedCard], currentModel: ''
+  });
+  assert.equal(routedPlainAttachment.visualContext.source, 'current-attachment',
+    'sin creación autosuficiente el adjunto no cambia de comportamiento');
+
+  // --- Borde 2: "nueva/otra IMAGEN" no es anáfora --------------------------
+  for (const texto of [
+    'crea una nueva imagen de una playa',
+    'genera otra imagen de una ciudad futurista'
+  ]) {
+    const routed = manager.routeIntent({
+      text: texto, chatId: 'chat-razer', lastGeneratedImage: razerCard, currentModel: ''
+    });
+    assert.equal(routed.plan?.createFromScratch, true, `"${texto}" es creación, no anáfora`);
+    assert.equal(routed.visualContext.hasVisualContext, false);
+    assert.equal(
+      (routed.visualExecution?.plan?.sourceImage || routed.visualContext?.imageRef || null),
+      null, `"${texto}" no arrastra la tarjeta`);
+  }
+
+  // Pero "otra VERSIÓN" y "basada en la anterior" siguen siendo anáfora.
+  const routedOtherVersion = manager.routeIntent({
+    text: 'crea otra versión de esta tarjeta',
+    chatId: 'chat-razer', lastGeneratedImage: razerCard, currentModel: ''
+  });
+  assert.equal(routedOtherVersion.intent, 'image-variation');
+  assert.equal(routedOtherVersion.visualContext.imageRef.name, 'razer-card.png');
+
+  const routedBasedOn = manager.routeIntent({
+    text: 'crea otra imagen basada en la anterior',
+    chatId: 'chat-razer', lastGeneratedImage: razerCard, currentModel: ''
+  });
+  assert.equal(routedBasedOn.visualContext.hasVisualContext, true,
+    '"basada en la anterior" sí resuelve la imagen previa');
+  assert.equal(routedBasedOn.visualContext.imageRef.name, 'razer-card.png');
+
+  for (const texto of ['crea otra versión', 'con esos cambios', 'mantén la composición']) {
+    const routed = manager.routeIntent({
+      text: texto, chatId: 'chat-razer', lastGeneratedImage: razerCard, currentModel: ''
+    });
+    assert.notEqual(routed.plan?.createFromScratch, true,
+      `"${texto}" debe seguir siendo anafórico`);
+  }
+
+  // Órdenes autosuficientes en varias formas.
+  for (const texto of [
+    'genera una escena de un bosque nevado',
+    'dibuja un gato naranja',
+    'crea una fotografía de un coche antiguo',
+    'crea desde cero un logo minimalista'
+  ]) {
+    const routed = manager.routeIntent({
+      text: texto, chatId: 'chat-razer', lastGeneratedImage: razerCard, currentModel: ''
+    });
+    assert.equal(routed.visualContext.hasVisualContext, false,
+      `"${texto}" no puede heredar la imagen del historial`);
+    assert.equal(routed.plan?.createFromScratch, true,
+      `"${texto}" debe declarar createFromScratch`);
+  }
+
   const routedVariation = manager.routeIntent({
     text: 'haz una versión más moderna de esta imagen',
     lastUploadedImage: previousImage,

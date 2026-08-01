@@ -373,6 +373,9 @@ ipcMain.handle('ai:generate-image', (_e, params) => aiManager.generateImage(para
 ipcMain.handle('ai:route-intent', (_e, params) => aiManager.routeIntent(params));
 ipcMain.handle('ai:list-models', () => aiManager.listModels());
 ipcMain.handle('ai:status', () => aiManager.status());
+// Contrato de capacidades: la interfaz lo consulta en vez de adivinar por nombre.
+ipcMain.handle('ai:get-capabilities', (_e, providerId) => aiManager.getCapabilities(providerId));
+ipcMain.handle('ai:resolve-vision', (_e, params = {}) => aiManager.resolveVision(params));
 
 // --- Knowledge indexing queue (prevents parallel indexation race conditions) ---
 const indexQueue = [];
