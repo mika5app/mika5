@@ -1351,7 +1351,7 @@ function renderMarkdown(text) {
   try {
     let html = marked.parse(raw);
     if (!html) return raw.replace(/</g, "&lt;").replace(/\n/g, "<br>");
-    // Sanitize: strip dangerous tags and attributes (XSS protection)
+    // Parse first, then sanitize with the vendored DOM parser and explicit allowlist.
     html = sanitizeHtml(html);
     return html;
   } catch (e) {
@@ -1359,20 +1359,87 @@ function renderMarkdown(text) {
   }
 }
 
-// Sanitize HTML output from marked - strip dangerous elements without breaking code blocks
-function sanitizeHtml(html) {
-  // Remove script tags and their content
-  let safe = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-  // Remove iframe, object, embed tags
-  safe = safe.replace(/<\/?(?:iframe|object|embed|form|input|textarea|select|button|link|meta|base)\b[^>]*>/gi, '');
-  // Remove event handler attributes (onclick, onerror, onload, etc.)
-  safe = safe.replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
-  // Remove javascript: URLs in href/src
-  safe = safe.replace(/(href|src)\s*=\s*(['"])\s*javascript:/gi, '$1=$2#blocked:');
-  // Force links to open in new tab safely
-  safe = safe.replace(/<a\s/gi, '<a target="_blank" rel="noopener noreferrer" ');
-  return safe;
+const MARKDOWN_ALLOWED_TAGS = [
+  'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'blockquote',
+  'pre', 'code', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'a', 'img',
+  'strong', 'em', 'del', 'hr', 'br', 'span'
+];
+const MARKDOWN_ALLOWED_ATTR = [
+  'href', 'src', 'alt', 'title', 'class', 'target', 'rel', 'role', 'aria-label',
+  'loading', 'data-zoomable', 'colspan', 'rowspan'
+];
+let markdownSanitizerConfigured = false;
+
+function configureMarkdownSanitizer() {
+  if (markdownSanitizerConfigured || typeof DOMPurify === 'undefined') return;
+  DOMPurify.addHook('afterSanitizeAttributes', node => {
+    if (node.tagName === 'A') {
+      const rawHref = node.getAttribute('href');
+      try {
+        const parsed = new URL(rawHref || '', document.baseURI);
+        if (!['http:', 'https:', 'mailto:'].includes(parsed.protocol)) node.removeAttribute('href');
+      } catch (_) {
+        node.removeAttribute('href');
+      }
+      node.setAttribute('target', '_blank');
+      node.setAttribute('rel', 'noopener noreferrer');
+    }
+    if (node.tagName === 'IMG') {
+      const rawSrc = node.getAttribute('src') || '';
+      const allowedData = /^data:image\/(?:png|jpeg|webp|gif);base64,/i.test(rawSrc);
+      let allowedHttps = false;
+      try {
+        allowedHttps = new URL(rawSrc, document.baseURI).protocol === 'https:';
+      } catch (_) {}
+      if (!allowedData && !allowedHttps) node.removeAttribute('src');
+    }
+  });
+  markdownSanitizerConfigured = true;
 }
+
+// La sanitización por expresiones regulares sobre HTML es evitable: basta un
+// payload que el parser del navegador interprete distinto que el regex. Se
+// delega en DOMPurify, que parsea de verdad y aplica una allowlist explícita.
+function sanitizeHtml(html) {
+  // Fail-closed: sin sanitizador NO se devuelve HTML sin limpiar. Quien llama
+  // (renderMarkdown) degrada a texto escapado.
+  if (typeof DOMPurify === 'undefined') {
+    throw new Error('DOMPurify no está disponible');
+  }
+  configureMarkdownSanitizer();
+  return DOMPurify.sanitize(String(html || ''), {
+    ALLOWED_TAGS: MARKDOWN_ALLOWED_TAGS,
+    ALLOWED_ATTR: MARKDOWN_ALLOWED_ATTR,
+    ALLOW_DATA_ATTR: false,
+    FORBID_TAGS: [
+      'script', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'textarea',
+      'select', 'option', 'svg', 'math', 'style'
+    ],
+    FORBID_ATTR: ['style', 'srcdoc', 'formaction'],
+    ALLOW_UNKNOWN_PROTOCOLS: false
+  });
+}
+
+function safeExternalHref(value) {
+  try {
+    const parsed = new URL(String(value || ''));
+    return ['http:', 'https:', 'mailto:'].includes(parsed.protocol) && !parsed.username && !parsed.password
+      ? parsed.href
+      : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// Los enlaces sanitizados llevan target="_blank"; sin este interceptor abrirían
+// una ventana dentro de la aplicación en vez del navegador del sistema.
+document.addEventListener('click', event => {
+  const link = event.target.closest?.('.message-content a[href]');
+  if (!link) return;
+  event.preventDefault();
+  const href = safeExternalHref(link.getAttribute('href'));
+  if (href) window.mika5.openExternal(href);
+});
 
 function wrapTablesResponsive(container) {
   if (!container) return;
