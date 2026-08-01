@@ -178,10 +178,20 @@ try {
   // ============================================
   console.log('\n=== Cascade Deletion ===');
   // ============================================
-  // Delete chat should clean up chat-scoped knowledge
+  // Delete chat should clean up chat-scoped knowledge.
+  // Ya no se consulta con listKnowledge(): un chat borrado es un alcance
+  // inválido y la API falla cerrada en vez de devolver una lista vacía
+  // indistinguible de "no había documentos".
   dbApi.deleteChat(c1.id);
-  const chatKAfter = dbApi.listKnowledge(p1.id, c1.id);
-  assertEq(chatKAfter.length, 0, 'deleteChat cleans up chat-scoped knowledge');
+  const { getDb } = require('../src/main/db');
+  const chatKAfter = getDb()
+    .prepare('SELECT COUNT(*) AS n FROM knowledge_items WHERE chat_id = ?').get(c1.id).n;
+  assertEq(chatKAfter, 0, 'deleteChat cleans up chat-scoped knowledge');
+
+  let deletedScopeError = null;
+  try { dbApi.listKnowledge(p1.id, c1.id); } catch (e) { deletedScopeError = e.code; }
+  assertEq(deletedScopeError, 'INVALID_CHAT',
+    'consultar el alcance de un chat borrado falla cerrado');
 
   // Delete project should cascade
   dbApi.deleteProject(p1.id);

@@ -10,8 +10,27 @@ const TOP_K_DEFAULT = 3;
 const CHUNK_CHARS = 4200;
 const OVERLAP_CHARS = 700;
 
-const projectCache = new Map(); // projectId -> { rows: [{ title, chunk_text, emb, ... }], ts }
+// Clave = ALCANCE completo, no sólo el proyecto: el mismo proyecto ve distinto
+// conocimiento según el chat activo, así que cachear por projectId a secas
+// devolvía fragmentos de otro chat.
+const projectCache = new Map(); // scopeKey -> { rows: [{ title, chunk_text, emb, ... }], ts }
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes TTL for cache entries
+
+// La clave lleva los TRES componentes del alcance. Sin `includeProjectScope`,
+// "proyecto + chat" y "sólo chat" comparten entrada y el segundo lector recibe
+// los documentos de proyecto que no le corresponden.
+function scopeKey(projectId, chatId, includeProjectScope) {
+  return `proj:${projectId || ""}|chat:${chatId || ""}|pscope:${includeProjectScope ? 1 : 0}`;
+}
+
+// Invalida todas las entradas que puedan contener conocimiento del proyecto o
+// del chat afectado, sin barrer la caché entera.
+function invalidateKnowledgeCache({ projectId = null, chatId = null } = {}) {
+  for (const key of [...projectCache.keys()]) {
+    if (projectId && key.includes(`proj:${projectId}|`)) { projectCache.delete(key); continue; }
+    if (chatId && key.includes(`|chat:${chatId}|`)) projectCache.delete(key);
+  }
+}
 
 function chunkText(text) {
   const t = (text || "").toString();
@@ -38,8 +57,10 @@ function dot(a, b) {
   return s;
 }
 
-async function embedBatch(texts, embedModel) {
-  const res = await ollamaApi.embed({ model: embedModel, input: texts });
+// `embeddingClient` es un punto de inyección para las pruebas: permite ejercitar
+// el alcance y la caché sin un Ollama vivo. En producción sigue siendo ollamaApi.
+async function embedBatch(texts, embedModel, embeddingClient = ollamaApi) {
+  const res = await embeddingClient.embed({ model: embedModel, input: texts });
   if (!res || !Array.isArray(res.embeddings)) throw new Error("INVALID_EMBED_RESPONSE");
   return res.embeddings;
 }
@@ -53,11 +74,14 @@ const ragApi = {
 
     dbApi.setKnowledgeIndexStatus(knowledgeItemId, "indexing", { indexedAt: null, error: "" });
 
-    const cacheKey = item.chat_id ? `chat:${item.chat_id}` : item.project_id;
+    const invalidate = () => invalidateKnowledgeCache({
+      projectId: item.project_id,
+      chatId: item.chat_id || null
+    });
 
     if (!item.content_path || !fs.existsSync(item.content_path)) {
       dbApi.setKnowledgeIndexStatus(knowledgeItemId, "error", { indexedAt: null, error: "CONTENT_FILE_MISSING" });
-      projectCache.delete(cacheKey);
+      invalidate();
       return { ok: false, error: "CONTENT_FILE_MISSING" };
     }
 
@@ -69,7 +93,7 @@ const ragApi = {
 
       if (!chunks.length) {
         dbApi.setKnowledgeIndexStatus(knowledgeItemId, "ready", { indexedAt: Date.now(), error: "" });
-        projectCache.delete(cacheKey);
+        invalidate();
         return { ok: true, indexed: 0 };
       }
 
@@ -92,124 +116,111 @@ const ragApi = {
       }
 
       dbApi.setKnowledgeIndexStatus(knowledgeItemId, "ready", { indexedAt: Date.now(), error: "" });
-      projectCache.delete(cacheKey);
+      invalidate();
       return { ok: true, indexed: chunks.length };
     } catch (e) {
       const msg = String(e?.message || e);
       dbApi.setKnowledgeIndexStatus(knowledgeItemId, "error", { indexedAt: null, error: msg.slice(0, 500) });
-      projectCache.delete(cacheKey);
+      invalidate();
       return { ok: false, error: msg };
     }
   },
 
+  /**
+   * Búsqueda semántica dentro de un alcance.
+   *
+   * `opts.chatId` incluye además el conocimiento exclusivo de ESE chat. Sin él,
+   * sólo conocimiento de proyecto. Nunca fragmentos de otro chat.
+   */
   async query(projectId, text, k = TOP_K_DEFAULT, opts = {}) {
-    const embedModel = opts.embedModel || EMBED_MODEL_DEFAULT;
-    const q = (text || "").toString().trim();
-    if (!projectId) return { ok: false, error: "INVALID_PROJECT" };
-    if (!q) return { ok: true, chunks: [] };
-
-    let cached = projectCache.get(projectId);
-
-    // Invalidate if expired
-    if (cached && (Date.now() - cached.ts) > CACHE_TTL_MS) {
-      projectCache.delete(projectId);
-      cached = null;
-    }
-
-    if (!cached) {
-      const rows = dbApi.listChunksForProject(projectId);
-      const parsed = [];
-      for (const r of rows) {
-        try {
-          parsed.push({
-            title: r.title,
-            chunk_text: r.chunk_text,
-            knowledge_item_id: r.knowledge_item_id,
-            chunk_index: r.chunk_index,
-            emb: JSON.parse(r.embedding_json)
-          });
-        } catch {}
-      }
-      cached = { rows: parsed, ts: Date.now() };
-      projectCache.set(projectId, cached);
-    }
-
-    if (!cached.rows.length) return { ok: true, chunks: [] };
-
-    const vec = (await embedBatch([q], embedModel))[0];
-
-    const scored = [];
-    for (const r of cached.rows) {
-      const score = dot(vec, r.emb);
-      scored.push({
-        score,
-        title: r.title,
-        chunk_text: r.chunk_text,
-        knowledge_item_id: r.knowledge_item_id,
-        chunk_index: r.chunk_index
+    const chatId = opts.chatId || null;
+    const includeProjectScope = opts.includeProjectScope === undefined
+      ? true
+      : !!opts.includeProjectScope;
+    try {
+      return await runScopedQuery({
+        key: scopeKey(projectId, chatId, includeProjectScope),
+        loadRows: () => dbApi.listScopedChunks({ projectId, chatId, includeProjectScope }),
+        text,
+        k,
+        embedModel: opts.embedModel || EMBED_MODEL_DEFAULT,
+        embeddingClient: opts.embeddingClient
       });
+    } catch (e) {
+      // Fail-closed: un alcance incoherente no devuelve fragmentos de nadie.
+      if (e && e.knowledgeScope) return { ok: false, error: e.code, chunks: [] };
+      throw e;
     }
-
-    scored.sort((a, b) => b.score - a.score);
-
-    const top = scored.slice(0, Math.max(1, Math.min(10, Number(k) || TOP_K_DEFAULT)));
-
-    return { ok: true, chunks: top };
   },
 
+  // Conocimiento EXCLUSIVO del chat — contrato histórico de `queryByChat`, que
+  // consultaba `WHERE kc.chat_id = ?` sin conocimiento de proyecto. No se amplía.
+  // El proyecto se resuelve desde el chat, así que un chat movido consulta
+  // siempre su proyecto actual.
   async queryByChat(chatId, text, k = TOP_K_DEFAULT, opts = {}) {
-    const embedModel = opts.embedModel || EMBED_MODEL_DEFAULT;
-    const q = (text || "").toString().trim();
-    if (!chatId) return { ok: false, error: "INVALID_CHAT" };
-    if (!q) return { ok: true, chunks: [] };
-
-    const cacheKey = `chat:${chatId}`;
-    let cached = projectCache.get(cacheKey);
-
-    // Invalidate if expired
-    if (cached && (Date.now() - cached.ts) > CACHE_TTL_MS) {
-      projectCache.delete(cacheKey);
-      cached = null;
-    }
-
-    if (!cached) {
-      const rows = dbApi.listChunksForChat(chatId);
-      const parsed = [];
-      for (const r of rows) {
-        try {
-          parsed.push({
-            title: r.title,
-            chunk_text: r.chunk_text,
-            knowledge_item_id: r.knowledge_item_id,
-            chunk_index: r.chunk_index,
-            emb: JSON.parse(r.embedding_json)
-          });
-        } catch {}
-      }
-      cached = { rows: parsed, ts: Date.now() };
-      projectCache.set(cacheKey, cached);
-    }
-
-    if (!cached.rows.length) return { ok: true, chunks: [] };
-
-    const vec = (await embedBatch([q], embedModel))[0];
-
-    const scored = [];
-    for (const r of cached.rows) {
-      const score = dot(vec, r.emb);
-      scored.push({
-        score,
-        title: r.title,
-        chunk_text: r.chunk_text,
-        knowledge_item_id: r.knowledge_item_id,
-        chunk_index: r.chunk_index
+    try {
+      if (!chatId) return { ok: false, error: "INVALID_CHAT", chunks: [] };
+      const chat = dbApi.getChat ? dbApi.getChat(chatId) : null;
+      if (!chat) return { ok: false, error: "INVALID_CHAT", chunks: [] };
+      return await runScopedQuery({
+        key: scopeKey(chat.project_id, chatId, false),
+        loadRows: () => dbApi.listChunksForChat(chatId),
+        text,
+        k,
+        embedModel: opts.embedModel || EMBED_MODEL_DEFAULT,
+        embeddingClient: opts.embeddingClient
       });
+    } catch (e) {
+      if (e && e.knowledgeScope) return { ok: false, error: e.code, chunks: [] };
+      throw e;
     }
+  },
 
-    scored.sort((a, b) => b.score - a.score);
-    const top = scored.slice(0, Math.max(1, Math.min(10, Number(k) || TOP_K_DEFAULT)));
-    return { ok: true, chunks: top };
-  }
+  invalidateKnowledgeCache
 };
 
-module.exports = { ragApi };
+async function runScopedQuery({ key, loadRows, text, k, embedModel, embeddingClient }) {
+  const q = (text || "").toString().trim();
+  // El alcance se valida SIEMPRE, aunque el texto esté vacío: así una consulta
+  // vacía con un par proyecto/chat incoherente falla igual que una con texto.
+  if (!q) { loadRows(); return { ok: true, chunks: [] }; }
+
+  let cached = projectCache.get(key);
+  if (cached && (Date.now() - cached.ts) > CACHE_TTL_MS) {
+    projectCache.delete(key);
+    cached = null;
+  }
+
+  if (!cached) {
+    const parsed = [];
+    for (const r of loadRows()) {
+      try {
+        parsed.push({
+          title: r.title,
+          chunk_text: r.chunk_text,
+          knowledge_item_id: r.knowledge_item_id,
+          chunk_index: r.chunk_index,
+          emb: JSON.parse(r.embedding_json)
+        });
+      } catch {}
+    }
+    cached = { rows: parsed, ts: Date.now() };
+    projectCache.set(key, cached);
+  }
+
+  if (!cached.rows.length) return { ok: true, chunks: [] };
+
+  const vec = (await embedBatch([q], embedModel, embeddingClient || ollamaApi))[0];
+  const scored = cached.rows.map(r => ({
+    score: dot(vec, r.emb),
+    title: r.title,
+    chunk_text: r.chunk_text,
+    knowledge_item_id: r.knowledge_item_id,
+    chunk_index: r.chunk_index
+  }));
+
+  scored.sort((a, b) => b.score - a.score);
+  return { ok: true, chunks: scored.slice(0, Math.max(1, Math.min(10, Number(k) || TOP_K_DEFAULT))) };
+}
+
+module.exports = { ragApi, invalidateKnowledgeCache, scopeKey };

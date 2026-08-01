@@ -5,7 +5,7 @@ const { initDb, dbApi, getDb } = require("./db");
 const { ollamaApi } = require("./ollama");
 const { AIProviderManager } = require("./ai-providers");
 let aiManager;
-const { ragApi } = require("./rag");
+const { ragApi, invalidateKnowledgeCache } = require("./rag");
 // Document extraction libraries (graceful if missing)
 let PDFParseClass, mammoth, XLSX;
 try { PDFParseClass = require('pdf-parse').PDFParse; } catch (_) {}
@@ -111,7 +111,16 @@ ipcMain.handle("db:deleteProject", (_e, id) => dbApi.deleteProject(id));
 
 ipcMain.handle("db:listChats", (_e, projectId) => dbApi.listChats(projectId));
 ipcMain.handle("db:createChat", (_e, payload) => dbApi.createChat(payload));
-ipcMain.handle("db:updateChat", (_e, chatId, payload) => dbApi.updateChat(chatId, payload));
+ipcMain.handle("db:updateChat", (_e, chatId, payload) => {
+  const res = dbApi.updateChat(chatId, payload);
+  // Mover un chat cambia qué conocimiento ve cada proyecto: la caché RAG de
+  // origen y destino queda obsoleta al instante.
+  if (res?.ok && res.moved) {
+    invalidateKnowledgeCache({ projectId: res.fromProjectId, chatId });
+    invalidateKnowledgeCache({ projectId: res.toProjectId, chatId });
+  }
+  return res;
+});
 ipcMain.handle("db:listMessages", (_e, chatId, opts) => dbApi.listMessages(chatId, opts));
 ipcMain.handle("db:countMessages", (_e, chatId) => dbApi.countMessages(chatId));
 ipcMain.handle("db:addMessage", (_e, payload) => dbApi.addMessage(payload));
@@ -128,7 +137,20 @@ ipcMain.handle("db:getChatContext", (_e, chatId) => dbApi.getChatContext(chatId)
 ipcMain.handle("db:setChatContext", (_e, chatId, systemPrompt) => dbApi.setChatContext(chatId, systemPrompt));
 
 // Knowledge
-ipcMain.handle("db:listKnowledge", (_e, projectId, chatId) => dbApi.listKnowledge(projectId, chatId));
+// Fail-closed: si el par proyecto/chat es incoherente NO se devuelve un alcance
+// más amplio. Se registra el código estable y se devuelve la lista vacía, que es
+// el contrato externo histórico (array).
+ipcMain.handle("db:listKnowledge", (_e, projectId, chatId, opts) => {
+  try {
+    return dbApi.listKnowledge(projectId, chatId, opts);
+  } catch (e) {
+    if (e && e.knowledgeScope) {
+      console.warn("[knowledge] listKnowledge con alcance rechazado:", e.code);
+      return [];
+    }
+    throw e;
+  }
+});
 ipcMain.handle("db:addKnowledgeFromText", async (_e, payload) => {
   const res = dbApi.addKnowledgeFromText(payload);
   if (res?.ok && res.id) {
@@ -137,10 +159,17 @@ ipcMain.handle("db:addKnowledgeFromText", async (_e, payload) => {
   }
   return res;
 });
-ipcMain.handle("db:deleteKnowledge", (_e, itemId) => dbApi.deleteKnowledge(itemId));
+ipcMain.handle("db:deleteKnowledge", (_e, itemId) => {
+  // Se lee el alcance ANTES de borrar: después ya no hay fila que consultar y la
+  // caché quedaría sirviendo un documento eliminado.
+  const item = dbApi.getKnowledgeItem(itemId);
+  const res = dbApi.deleteKnowledge(itemId);
+  if (item) invalidateKnowledgeCache({ projectId: item.project_id, chatId: item.chat_id || null });
+  return res;
+});
 
 // RAG
-ipcMain.handle("rag:query", (_e, projectId, text, k) => ragApi.query(projectId, text, k));
+ipcMain.handle("rag:query", (_e, projectId, text, k, opts) => ragApi.query(projectId, text, k, opts || {}));
 ipcMain.handle("rag:queryByChat", (_e, chatId, text, k) => ragApi.queryByChat(chatId, text, k));
 ipcMain.handle("rag:indexKnowledgeItem", (_e, knowledgeItemId) => ragApi.indexKnowledgeItem(knowledgeItemId));
 ipcMain.handle("rag:getFullDocumentText", async (_e, knowledgeItemId) => {
@@ -154,66 +183,24 @@ ipcMain.handle("rag:getFullDocumentText", async (_e, knowledgeItemId) => {
   }
 });
 // Returns chunk text with server-side truncation and round-robin distribution across documents
-ipcMain.handle("rag:listChunksRaw", (_e, projectId, chatId, maxChars, mode = 'selective') => {
+ipcMain.handle("rag:listChunksRaw", (_e, projectId, chatId, maxChars, mode = 'selective', opts = {}) => {
   try {
-    const db = getDb();
-    // Safety limit: 100k chars for complete mode, otherwise use provided maxChars (default 24k)
-    const limit = mode === 'complete'
-      ? Math.min(100000, 500000) // 100k safety cap for complete mode
-      : Math.min(maxChars || 24000, 50000);
-    const whereClause = chatId ? 'kc.chat_id = ?' : 'kc.project_id = ?';
-    const param = chatId || projectId;
-    if (!param) return [];
-    const rows = db.prepare(`
-      SELECT kc.chunk_text, kc.chunk_index, ki.title
-      FROM knowledge_chunks kc
-      JOIN knowledge_items ki ON ki.id = kc.knowledge_item_id
-      WHERE ${whereClause} ORDER BY ki.title, kc.chunk_index
-    `).all(param);
-
-    if (mode === 'complete') {
-      // Complete mode: return chunks in order until limit reached (no round-robin bias)
-      let chars = 0;
-      const result = [];
-      for (const r of rows) {
-        const chunkLength = (r.chunk_text || '').length;
-        if (chars + chunkLength > limit) break;
-        result.push(r);
-        chars += chunkLength;
-      }
-      return result;
-    }
-
-    // Selective mode: original round-robin behavior
-    // Group chunks by document
-    const byDoc = new Map();
-    for (const r of rows) {
-      if (!byDoc.has(r.title)) byDoc.set(r.title, []);
-      byDoc.get(r.title).push(r);
-    }
-
-    // Round-robin: take first chunk from each doc, then second, etc.
-    const docArrays = [...byDoc.values()];
-    let chars = 0;
-    const result = [];
-    let idx = 0;
-    let added = true;
-    while (added) {
-      added = false;
-      for (const docChunks of docArrays) {
-        if (idx < docChunks.length) {
-          const r = docChunks[idx];
-          if (chars + (r.chunk_text || '').length > limit) continue;
-          result.push(r);
-          chars += (r.chunk_text || '').length;
-          added = true;
-        }
-      }
-      idx++;
-      if (chars >= limit) break;
-    }
-    return result;
-  } catch (_) { return []; }
+    return dbApi.listChunksRaw({
+      projectId,
+      chatId,
+      maxChars,
+      mode,
+      includeProjectScope: opts && opts.includeProjectScope !== undefined
+        ? !!opts.includeProjectScope
+        : undefined
+    });
+  } catch (e) {
+    // Fail-closed: un alcance incoherente NO degrada a la consulta de proyecto
+    // entera. Se devuelve vacío y se deja constancia del código.
+    if (e && e.knowledgeScope) console.warn("[knowledge] listChunksRaw con alcance rechazado:", e.code);
+    else console.error("[knowledge] listChunksRaw falló:", String(e?.message || e));
+    return [];
+  }
 });
 ipcMain.handle("rag:getDocumentText", async (_e, knowledgeItemId) => {
   try {

@@ -19,10 +19,15 @@
     "postinstall": "electron-builder install-app-deps",
     "icons:mac": "bash scripts/gen-icns.sh",
     "icons:win": "node scripts/gen-ico.js",
-    "test": "node test/rag.test.js && node test/vision.test.js",
+    "test": "node test/rag.test.js && node test/vision.test.js && npm run test:knowledge-cli",
     "test:db": "electron test/db.test.js",
     "test:rag": "node test/rag.test.js",
-    "test:vision": "node test/vision.test.js"
+    "test:vision": "node test/vision.test.js",
+    "test:all": "bash scripts/run-stage0a-gates.sh",
+    "test:knowledge-scope": "electron test/knowledge-scope.test.js",
+    "test:knowledge-cli": "node test/knowledge-scope-cli.test.js",
+    "knowledge:preflight": "electron scripts/knowledge-scope-repair.js",
+    "knowledge:repair": "electron scripts/knowledge-scope-repair.js"
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",
