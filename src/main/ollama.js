@@ -17,12 +17,21 @@ function fetchWithTimeout(url, options = {}) {
   return new Promise((resolve, reject) => {
     const parsedUrl = new URL(url);
     const controller = new AbortController();
+    const externalSignal = options.signal;
+    let externalAborted = false;
     let settled = false;
+    const abortFromUser = () => {
+      externalAborted = true;
+      controller.abort(externalSignal?.reason);
+    };
+    if (externalSignal?.aborted) abortFromUser();
+    else externalSignal?.addEventListener('abort', abortFromUser, { once: true });
 
     function finish(fn) {
       if (settled) return;
       settled = true;
       clearTimeout(timeoutId);
+      externalSignal?.removeEventListener('abort', abortFromUser);
       fn();
     }
 
@@ -87,6 +96,11 @@ function fetchWithTimeout(url, options = {}) {
       finish(() => {
         if (error.code === 'ECONNREFUSED') {
           reject(new Error('Ollama no está ejecutándose. Inicia: ollama serve'));
+        } else if (externalAborted) {
+          const canceled = new Error('Solicitud cancelada por el usuario');
+          canceled.name = 'AbortError';
+          canceled.code = 'USER_CANCELED';
+          reject(canceled);
         } else if (error.name === 'AbortError') {
           reject(new Error('Timeout: Ollama no respondió a tiempo'));
         } else {
@@ -151,7 +165,7 @@ const ollamaApi = {
     return fetchJson(`${BASE}/api/tags`);
   },
 
-  async chat({ model, messages }) {
+  async chat({ model, messages, signal }) {
     const m = (model || "").trim();
     if (!m) throw new Error("INVALID_MODEL");
 
@@ -175,7 +189,8 @@ const ollamaApi = {
             num_ctx: numCtx,
             num_predict: 4096
           }
-        })
+        }),
+        signal
       });
     } catch (error) {
       console.error('Error en chat Ollama:', error.message);
@@ -238,4 +253,4 @@ const ollamaApi = {
   }
 };
 
-module.exports = { ollamaApi };
+module.exports = { ollamaApi, fetchWithTimeout };

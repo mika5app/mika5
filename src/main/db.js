@@ -8,6 +8,108 @@ const { v4: uuidv4 } = require("uuid");
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// Adjuntos visuales de un turno. Se guarda solo lo necesario para volver a
+// pintar la miniatura y reabrir el visor; nunca campos arbitrarios del renderer.
+//
+// LIMITACIÓN CONOCIDA — durabilidad desigual:
+//   · Imagen SUBIDA por la usuaria → se guarda su base64. Es durable.
+//   · Imagen GENERADA por el proveedor → se guarda solo la `url` https. Las URLs
+//     firmadas de Alibaba CADUCAN, así que esa miniatura dejará de cargar pasado
+//     un tiempo, aunque la fila siga en la base.
+// Para hacerlas durables habría que descargarlas a almacenamiento local
+// administrado y guardar una referencia; queda fuera de este parche a propósito,
+// porque implica gestión de ciclo de vida de archivos en disco.
+const ATTACHMENT_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp']);
+const MAX_ATTACHMENTS_PER_MESSAGE = 8;
+// El proceso principal no confía en el renderer: aunque la interfaz limite los
+// archivos a 5 MB, una llamada IPC puede pedir escribir cientos de megabytes en
+// una sola fila. El límite se aplica ANTES de serializar o tocar SQLite.
+const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+const MAX_MESSAGE_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+// Los campos no binarios también ocupan. Una URL https no tiene tope natural,
+// así que sin estos límites se podría rodear el máximo de 20 MB con texto.
+const MAX_ATTACHMENT_URL_CHARS = 4096;
+const MAX_MEDIA_TYPE_CHARS = 64;
+const MAX_SERIALIZED_ATTACHMENTS_BYTES = 28 * 1024 * 1024;
+
+function decodedBase64Size(base64) {
+  const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
+  return Math.floor((base64.length * 3) / 4) - padding;
+}
+
+// Devuelve { ok: true, value } o { ok: false, error }. Nunca null silencioso:
+// quien llama tiene que poder distinguir "no había adjuntos" de "el adjunto se
+// descartó", porque lo segundo debe abortar el mensaje entero.
+function normalizeMessageAttachment(raw) {
+  if (!raw || typeof raw !== 'object') return { ok: false, error: 'ATTACHMENT_INVALID' };
+  const mediaType = String(raw.mediaType || raw.media_type || '').toLowerCase();
+  if (mediaType.length > MAX_MEDIA_TYPE_CHARS) return { ok: false, error: 'ATTACHMENT_INVALID' };
+  const name = String(raw.name || 'imagen').slice(0, 200);
+  const visualEntryId = raw.visualEntryId ? String(raw.visualEntryId).slice(0, 100) : null;
+
+  const url = String(raw.url || '').trim();
+  if (url) {
+    if (url.length > MAX_ATTACHMENT_URL_CHARS) return { ok: false, error: 'ATTACHMENT_TOO_LARGE' };
+    try {
+      if (new URL(url).protocol !== 'https:') return { ok: false, error: 'ATTACHMENT_INVALID' };
+    } catch (_) {
+      return { ok: false, error: 'ATTACHMENT_INVALID' };
+    }
+    return { ok: true, value: { name, mediaType: mediaType || null, url, visualEntryId } };
+  }
+
+  if (!ATTACHMENT_MEDIA_TYPES.has(mediaType)) return { ok: false, error: 'ATTACHMENT_INVALID' };
+  const base64 = String(raw.base64 || raw.data || '')
+    .replace(/^data:[^;]+;base64,/, '')
+    .replace(/\s+/g, '');
+  if (!base64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(base64)) {
+    return { ok: false, error: 'ATTACHMENT_INVALID' };
+  }
+  // Longitud de base64 válida: siempre múltiplo de 4.
+  if (base64.length % 4 !== 0) return { ok: false, error: 'ATTACHMENT_INVALID' };
+  if (decodedBase64Size(base64) > MAX_ATTACHMENT_BYTES) {
+    return { ok: false, error: 'ATTACHMENT_TOO_LARGE' };
+  }
+  return { ok: true, value: { name, mediaType, base64, visualEntryId } };
+}
+
+/**
+ * Serialización ATÓMICA: o se guardan todos los adjuntos aportados, o el mensaje
+ * falla con un error explícito. Nunca un subconjunto.
+ *
+ * Guardar solo algunos y devolver ok reabría la omisión visual: el proveedor
+ * recibía las cinco imágenes, SQLite conservaba cuatro, y al recargar faltaba
+ * una sin que nada lo indicara.
+ */
+function serializeMessageAttachments(attachments) {
+  if (!Array.isArray(attachments) || attachments.length === 0) {
+    return { ok: true, json: null };
+  }
+  if (attachments.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+    return { ok: false, error: 'TOO_MANY_ATTACHMENTS' };
+  }
+
+  const normalized = [];
+  let totalBytes = 0;
+  for (const raw of attachments) {
+    const result = normalizeMessageAttachment(raw);
+    if (!result.ok) return { ok: false, error: result.error };
+    totalBytes += result.value.base64 ? decodedBase64Size(result.value.base64) : 0;
+    if (totalBytes > MAX_MESSAGE_ATTACHMENT_BYTES) {
+      return { ok: false, error: 'ATTACHMENTS_TOTAL_TOO_LARGE' };
+    }
+    normalized.push(result.value);
+  }
+
+  const json = JSON.stringify(normalized);
+  // Última comprobación sobre el payload REAL, ya con nombres, URLs y JSON:
+  // los campos no binarios también ocupan y no los cubre el conteo de bytes.
+  if (Buffer.byteLength(json, 'utf8') > MAX_SERIALIZED_ATTACHMENTS_BYTES) {
+    return { ok: false, error: 'ATTACHMENTS_PAYLOAD_TOO_LARGE' };
+  }
+  return { ok: true, json };
+}
+
 let db;
 
 function initDb() {
@@ -53,6 +155,12 @@ function initDb() {
 
   // Migration: add reply_to_id column if it doesn't exist
   const msgCols = db.prepare("PRAGMA table_info(messages)").all();
+  // Migración aditiva: adjuntos visuales del turno del usuario. Sin esta columna
+  // la imagen llegaba al proveedor pero desaparecía de la burbuja al recargar,
+  // porque solo vivía en memoria (chatAttachments / visualContextMemory).
+  if (!msgCols.find(c => c.name === 'attachments')) {
+    db.exec(`ALTER TABLE messages ADD COLUMN attachments TEXT DEFAULT NULL;`);
+  }
   if (!msgCols.find(c => c.name === 'reply_to_id')) {
     db.exec(`ALTER TABLE messages ADD COLUMN reply_to_id TEXT DEFAULT NULL;`);
   }
@@ -255,14 +363,24 @@ const dbApi = {
     return row ? row.total : 0;
   },
 
-  addMessage({ chatId, role, content, replyToId, model }) {
+  addMessage({ chatId, role, content, replyToId, model, attachments }) {
     const c = (content || "").toString();
-    if (!c.trim()) return { ok: false, error: "EMPTY_MESSAGE" };
+    // Atómico: si algún adjunto aportado no cabe o no es válido, el mensaje NO
+    // se escribe. Guardar el texto y perder la imagen en silencio es la misma
+    // omisión que este trabajo lleva cerrando.
+    const serialized = serializeMessageAttachments(attachments);
+    if (!serialized.ok) return { ok: false, error: serialized.error };
+    // Una imagen sin texto es un mensaje legítimo: la interfaz permite enviarla
+    // y `content` puede llegar vacío.
+    if (!c.trim() && !serialized.json) return { ok: false, error: "EMPTY_MESSAGE" };
 
     const id = uuidv4();
     db.prepare(
-      "INSERT INTO messages (id, chat_id, role, content, created_at, reply_to_id, model) VALUES (?, ?, ?, ?, ?, ?, ?)"
-    ).run(id, chatId, role, c, Date.now(), replyToId || null, model || null);
+      "INSERT INTO messages (id, chat_id, role, content, created_at, reply_to_id, model, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      id, chatId, role, c, Date.now(), replyToId || null, model || null,
+      serialized.json
+    );
 
     return { ok: true, id };
   },

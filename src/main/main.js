@@ -1,10 +1,12 @@
 const path = require("path");
 const fs = require("fs").promises;
-const { app, BrowserWindow, ipcMain, shell, dialog, Menu } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, dialog, Menu, net } = require("electron");
 const { initDb, dbApi, getDb } = require("./db");
 const { ollamaApi } = require("./ollama");
 const { AIProviderManager } = require("./ai-providers");
+const { RequestRegistry } = require("./request-registry");
 let aiManager;
+const aiRequests = new RequestRegistry();
 const { ragApi } = require("./rag");
 // Document extraction libraries (graceful if missing)
 let PDFParseClass, mammoth, XLSX;
@@ -40,9 +42,10 @@ function createWindow() {
   // Disable renderer cache in dev to prevent stale CSS/JS
   win.webContents.session.clearCache();
 
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
-    return { action: "deny" };
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  win.webContents.on('will-navigate', (event, targetUrl) => {
+    const currentUrl = win.webContents.getURL();
+    if (!currentUrl || targetUrl !== currentUrl) event.preventDefault();
   });
 
   // Native right-click context menu with Cut/Copy/Paste for inputs
@@ -138,7 +141,6 @@ ipcMain.handle("db:addKnowledgeFromText", async (_e, payload) => {
   return res;
 });
 ipcMain.handle("db:deleteKnowledge", (_e, itemId) => dbApi.deleteKnowledge(itemId));
-
 // RAG
 ipcMain.handle("rag:query", (_e, projectId, text, k) => ragApi.query(projectId, text, k));
 ipcMain.handle("rag:queryByChat", (_e, chatId, text, k) => ragApi.queryByChat(chatId, text, k));
@@ -275,19 +277,65 @@ ipcMain.handle("file:extractSpreadsheet", async (_e, base64Data) => {
 });
 
 
-ipcMain.handle("appState:get", (_, key) => dbApi.getAppState(key));
-ipcMain.handle("appState:set", (_, key, value) => dbApi.setAppState(key, value));
-ipcMain.handle("openExternal", (_, url) => {
-  // Security: only allow http and https URLs
+const CLOUD_CONSENT_KEY_PATTERN =
+  /^cloud-consent:v1:(openai|anthropic|groq|moonshot|alibaba):(global|project:[A-Za-z0-9._:-]{1,128})$/;
+
+function validateCloudConsentValue(key, value) {
+  if (value === '') return '';
+  const serialized = String(value || '');
+  if (serialized.length > 4096) throw new Error('Consentimiento cloud demasiado grande');
+  const parsed = JSON.parse(serialized);
+  const keyMatch = key.match(CLOUD_CONSENT_KEY_PATTERN);
+  const allowedCategories = [
+    'message', 'history', 'projectInstructions', 'textAttachments',
+    'imageAttachments', 'ragContext'
+  ];
+  if (parsed.schemaVersion !== 1
+    || parsed.providerId !== keyMatch[1]
+    || parsed.projectScope !== keyMatch[2]
+    || typeof parsed.grantedAt !== 'string'
+    || !parsed.categories
+    || Object.keys(parsed.categories).some(category => !allowedCategories.includes(category))
+    || allowedCategories.some(category => typeof parsed.categories[category] !== 'boolean')) {
+    throw new Error('Registro de consentimiento cloud inválido');
+  }
+  return JSON.stringify({
+    providerId: parsed.providerId,
+    projectScope: parsed.projectScope,
+    categories: Object.fromEntries(
+      allowedCategories.map(category => [category, parsed.categories[category]])
+    ),
+    schemaVersion: 1,
+    grantedAt: parsed.grantedAt
+  });
+}
+
+ipcMain.handle("appState:get", (_, key) => {
+  if (!CLOUD_CONSENT_KEY_PATTERN.test(String(key || ''))) return dbApi.getAppState(key);
+  const row = getDb().prepare('SELECT value FROM app_state WHERE key = ?').get(key);
+  return row ? row.value : null;
+});
+ipcMain.handle("appState:set", (_, key, value) => {
+  if (!CLOUD_CONSENT_KEY_PATTERN.test(String(key || ''))) return dbApi.setAppState(key, value);
+  const validated = validateCloudConsentValue(key, value);
+  if (!validated) {
+    getDb().prepare('DELETE FROM app_state WHERE key = ?').run(key);
+    return { ok: true };
+  }
+  getDb().prepare(
+    'INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+  ).run(key, validated);
+  return { ok: true };
+});
+ipcMain.handle("openExternal", async (_, url) => {
   try {
-    const parsed = new URL(url);
-    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-      shell.openExternal(url);
-    } else {
-      console.warn('Blocked openExternal for non-http URL:', url);
-    }
-  } catch (e) {
-    console.warn('Invalid URL for openExternal:', url);
+    const parsed = new URL(String(url || ''));
+    if (!['http:', 'https:', 'mailto:'].includes(parsed.protocol)) return { opened: false };
+    if (parsed.username || parsed.password) return { opened: false };
+    await shell.openExternal(parsed.href);
+    return { opened: true };
+  } catch (_) {
+    return { opened: false };
   }
 });
 
@@ -306,54 +354,6 @@ ipcMain.handle("app:saveFile", async (_, { defaultName, filters, content, encodi
   return { ok: true, filePath };
 });
 
-// PDF export: render HTML in hidden BrowserWindow → printToPDF → save
-ipcMain.handle("app:printToPDF", async (_, { html, defaultName }) => {
-  let pdfWin = null;
-  try {
-    // Security: strip scripts, iframes, and event handlers from HTML
-    let safeHtml = (html || '')
-      .replace(/<script[\s\S]*?<\/script>/gi, '')
-      .replace(/<iframe[\s\S]*?<\/iframe>/gi, '')
-      .replace(/<object[\s\S]*?<\/object>/gi, '')
-      .replace(/<embed[\s\S]*?>/gi, '')
-      .replace(/\son\w+\s*=/gi, ' data-removed=');
-
-    pdfWin = new BrowserWindow({
-      show: false,
-      width: 1024,
-      height: 800,
-      webPreferences: { offscreen: true, contextIsolation: true, nodeIntegration: false }
-    });
-
-    await pdfWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(safeHtml));
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    const pdfData = await pdfWin.webContents.printToPDF({
-      marginsType: 2,
-      printBackground: true,
-      landscape: false,
-      pageSize: 'A4'
-    });
-
-    pdfWin.close();
-    pdfWin = null;
-
-    const { canceled, filePath } = await dialog.showSaveDialog({
-      defaultPath: defaultName || 'chat.pdf',
-      filters: [{ name: 'PDF', extensions: ['pdf'] }]
-    });
-
-    if (canceled || !filePath) return { ok: false, canceled: true };
-    await fs.writeFile(filePath, pdfData);
-    return { ok: true, filePath };
-  } catch (error) {
-    console.error('printToPDF error:', error);
-    return { ok: false, error: error.message };
-  } finally {
-    if (pdfWin) try { pdfWin.close(); } catch (_) {}
-  }
-});
-
 // AI provider handlers (exponer API genérica)
 ipcMain.handle('ai:get-providers', () => aiManager.getAllProviders());
 ipcMain.handle('ai:get-current-provider', () => aiManager.getProvider());
@@ -364,12 +364,17 @@ ipcMain.handle('ai:save-provider-config', (_e, provider, config) => aiManager.sa
 ipcMain.handle('ai:add-provider-model', (_e, provider, model) => aiManager.addProviderModel(provider, model));
 ipcMain.handle('ai:update-provider-model', (_e, provider, modelId, model) => aiManager.updateProviderModel(provider, modelId, model));
 ipcMain.handle('ai:delete-provider-model', (_e, provider, modelId) => aiManager.deleteProviderModel(provider, modelId));
-ipcMain.handle('ai:chat', (_e, params) => {
-  currentAbortController = new AbortController();
-  params._signal = currentAbortController.signal;
-  return aiManager.chat(params).finally(() => { currentAbortController = null; });
+ipcMain.handle('ai:chat', (_e, params = {}) => {
+  const controller = aiRequests.start(params.requestId);
+  return aiManager.chat({ ...params, signal: controller.signal })
+    .finally(() => aiRequests.finish(params.requestId));
 });
-ipcMain.handle('ai:generate-image', (_e, params) => aiManager.generateImage(params));
+ipcMain.handle('ai:generate-image', (_e, params) => {
+  if (!params || typeof params !== 'object') throw new Error('Parámetros de generación inválidos');
+  const controller = aiRequests.start(params.requestId);
+  return aiManager.generateImage({ ...params, signal: controller.signal })
+    .finally(() => aiRequests.finish(params.requestId));
+});
 ipcMain.handle('ai:route-intent', (_e, params) => aiManager.routeIntent(params));
 ipcMain.handle('ai:list-models', () => aiManager.listModels());
 ipcMain.handle('ai:status', () => aiManager.status());
@@ -391,7 +396,17 @@ async function enqueueIndex(itemId) {
       // Notify renderer so it can refresh the knowledge list status indicators
       const mainWin = BrowserWindow.getAllWindows()[0];
       if (mainWin && !mainWin.isDestroyed()) {
-        mainWin.webContents.send('knowledge:index-complete', { id, ok: result?.ok, indexed: result?.indexed, error: result?.error });
+        mainWin.webContents.send('knowledge:index-complete', {
+          id,
+          ok: result?.ok,
+          saved: result?.saved,
+          pending: result?.pending,
+          code: result?.code,
+          indexed: result?.indexed,
+          error: result?.error,
+          embeddingProvider: result?.embeddingProvider,
+          embeddingModel: result?.embeddingModel
+        });
       }
     } catch (err) {
       console.warn("RAG index error:", err?.message || err);
@@ -404,15 +419,7 @@ async function enqueueIndex(itemId) {
   indexRunning = false;
 }
 
-// Abort: signal the AI manager to cancel the current request
-let currentAbortController = null;
-ipcMain.handle('ai:abort', () => {
-  if (currentAbortController) {
-    currentAbortController.abort();
-    currentAbortController = null;
-  }
-  return { ok: true };
-});
+ipcMain.handle('ai:abort', (_event, requestId) => aiRequests.abort(requestId));
 
 // Mantener compatibilidad con canales 'ollama:*' redirigiendo a aiManager
 ipcMain.handle("ollama:status", () => aiManager.status());

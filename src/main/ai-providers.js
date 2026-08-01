@@ -182,9 +182,19 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
 }
 
-function createAbortContext(timeoutMs, providerLabel) {
+function createAbortContext(externalSignal, timeoutMs, providerLabel) {
   const controller = new AbortController();
   let abortKind = null;
+  const abortFromUser = () => {
+    if (abortKind) return;
+    abortKind = 'user';
+    controller.abort(externalSignal?.reason);
+  };
+  if (externalSignal?.aborted) {
+    abortFromUser();
+  } else if (externalSignal) {
+    externalSignal.addEventListener('abort', abortFromUser, { once: true });
+  }
   const timeoutId = setTimeout(() => {
     if (abortKind) return;
     abortKind = 'timeout';
@@ -195,8 +205,15 @@ function createAbortContext(timeoutMs, providerLabel) {
     signal: controller.signal,
     cleanup() {
       clearTimeout(timeoutId);
+      externalSignal?.removeEventListener('abort', abortFromUser);
     },
     normalize(error) {
+      if (abortKind === 'user') {
+        const canceled = new Error('Solicitud cancelada por el usuario');
+        canceled.name = 'AbortError';
+        canceled.code = 'USER_CANCELED';
+        return canceled;
+      }
       if (abortKind === 'timeout') {
         const timeout = new Error(`Timeout: ${providerLabel} tardó demasiado`);
         timeout.code = 'PROVIDER_TIMEOUT';
@@ -1221,7 +1238,7 @@ const PROVIDERS = {
       vision: true
     },
     
-    async chat({ model, messages, images }) {
+    async chat({ model, messages, images, signal }) {
       const imageList = Array.isArray(images) ? images : [];
       // La sonda es la única fuente de verdad para Ollama, y se consulta justo
       // antes de enviar: no se hereda de un estado de UI que puede estar obsoleto.
@@ -1254,7 +1271,7 @@ const PROVIDERS = {
         });
       }
 
-      const data = await ollamaApi.chat({ model, messages: finalMessages });
+      const data = await ollamaApi.chat({ model, messages: finalMessages, signal });
       return normalizeChatResult({
         providerId: 'local',
         model: data?.model || model || null,
@@ -1313,7 +1330,7 @@ const PROVIDERS = {
     baseUrl: 'https://api.openai.com/v1',
     timeout: 120000, // 2 minutes
     
-    async chat({ model, messages, images = [], apiKey, sanitize = true }) {
+    async chat({ model, messages, images = [], apiKey, sanitize = true, signal }) {
       if (!apiKey) throw new Error('API Key requerida para OpenAI');
       const selectedModel = model || 'gpt-3.5-turbo';
       // Barrera dura: si el modelo no acepta imágenes, la petición falla aquí.
@@ -1330,7 +1347,7 @@ const PROVIDERS = {
       }));
       const finalMessages = attachOpenAIImages(processedMessages, images);
 
-      const abortContext = createAbortContext(this.timeout, 'OpenAI');
+      const abortContext = createAbortContext(signal, this.timeout, 'OpenAI');
 
       try {
         const res = await fetch(`${this.baseUrl}/chat/completions`, {
@@ -1396,7 +1413,7 @@ const PROVIDERS = {
     baseUrl: 'https://api.anthropic.com/v1',
     timeout: 120000,
 
-    async chat({ model, messages, images = [], apiKey, sanitize = true }) {
+    async chat({ model, messages, images = [], apiKey, sanitize = true, signal }) {
       if (!apiKey) throw new Error('API Key requerida para Anthropic');
       const selectedModel = model || 'claude-3-5-haiku-20241022';
       assertVisionSupported({
@@ -1446,7 +1463,7 @@ const PROVIDERS = {
         lastUser.content = [{ type: 'text', text: lastUser.content }, ...imageBlocks];
       }
 
-      const abortContext = createAbortContext(this.timeout, 'Claude');
+      const abortContext = createAbortContext(signal, this.timeout, 'Claude');
 
       try {
         const body = {
@@ -1521,7 +1538,7 @@ const PROVIDERS = {
     baseUrl: 'https://api.groq.com/openai/v1',
     timeout: 30000,
 
-    async chat({ model, messages, images = [], apiKey, sanitize = true }) {
+    async chat({ model, messages, images = [], apiKey, sanitize = true, signal }) {
       if (!apiKey) throw new Error('API Key requerida. Obtén una en console.groq.com');
       // Groq no tiene modelos de visión verificados en MIKA5: esto lanza siempre
       // que llegue una imagen, en vez de descartarla. El transporte de abajo ya
@@ -1534,7 +1551,7 @@ const PROVIDERS = {
       }));
       const finalMessages = attachOpenAIImages(processedMessages, images);
 
-      const abortContext = createAbortContext(this.timeout, 'Groq');
+      const abortContext = createAbortContext(signal, this.timeout, 'Groq');
 
       try {
         const res = await fetch(`${this.baseUrl}/chat/completions`, {
@@ -1611,7 +1628,7 @@ const PROVIDERS = {
     baseUrl: 'https://api.moonshot.cn/v1',
     timeout: 120000,
 
-    async chat({ model, messages, images = [], apiKey, sanitize = true }) {
+    async chat({ model, messages, images = [], apiKey, sanitize = true, signal }) {
       if (!apiKey) throw new Error('API Key requerida. Obtén una en platform.moonshot.cn');
       const selectedModel = model || 'kimi-k2-5-latest';
       // El nombre "kimi" activaba la heurística de visión del renderer y la imagen
@@ -1628,7 +1645,7 @@ const PROVIDERS = {
       }));
       const finalMessages = attachOpenAIImages(processedMessages, images);
 
-      const abortContext = createAbortContext(this.timeout, 'Kimi');
+      const abortContext = createAbortContext(signal, this.timeout, 'Kimi');
 
       try {
         const res = await fetch(`${this.baseUrl}/chat/completions`, {
@@ -1696,7 +1713,7 @@ const PROVIDERS = {
     },
     timeout: 120000,
 
-    async chat({ model, messages, images = [], apiKey, sanitize = true, providerConfig }) {
+    async chat({ model, messages, images = [], apiKey, sanitize = true, providerConfig, signal }) {
       if (!apiKey) throw new Error('API Key requerida para Alibaba Cloud Model Studio');
       const config = normalizeAlibabaConfig(providerConfig);
       const selectedModelId = model || ALIBABA_DEFAULT_MODEL_ID;
@@ -1709,7 +1726,7 @@ const PROVIDERS = {
         throw new Error('Este modelo genera video y no puede usarse en chat.');
       }
 
-      const abortContext = createAbortContext(this.timeout, 'Alibaba');
+      const abortContext = createAbortContext(signal, this.timeout, 'Alibaba');
       try {
         const res = await fetchWithProviderRetry(`${config.endpoint}/v1/messages`, {
           method: 'POST',
@@ -1776,7 +1793,8 @@ const PROVIDERS = {
         prompt,
         sourceImages = [],
         apiKey,
-        providerConfig
+        providerConfig,
+        signal
       }) {
         if (!apiKey) throw new Error('API Key requerida para Alibaba Cloud Model Studio');
         const config = normalizeAlibabaConfig(providerConfig);
@@ -1796,7 +1814,7 @@ const PROVIDERS = {
           { text: cleanPrompt }
         ];
 
-        const abortContext = createAbortContext(this.timeout, 'Alibaba Cloud Model Studio');
+        const abortContext = createAbortContext(signal, this.timeout, 'Alibaba Cloud Model Studio');
         try {
           const res = await fetchWithProviderRetry(ALIBABA_TOKEN_PLAN_IMAGE_ENDPOINT, {
             method: 'POST',
@@ -1848,7 +1866,7 @@ const PROVIDERS = {
     baseUrl: 'http://127.0.0.1:8080/v1',
     timeout: 300000, // 5 min — modelos grandes son lentos
 
-    async chat({ model, messages, images = [] }) {
+    async chat({ model, messages, images = [], signal }) {
       const selectedModel = model || 'default';
       // llama.cpp no expone si tiene proyector multimodal cargado, así que MIKA5
       // no declara visión: adjuntar una imagen falla en vez de perderse.
@@ -1857,7 +1875,7 @@ const PROVIDERS = {
         modelId: selectedModel,
         imageCount: images.length
       });
-      const abortContext = createAbortContext(this.timeout, 'llama.cpp');
+      const abortContext = createAbortContext(signal, this.timeout, 'llama.cpp');
       try {
         const res = await fetch(`${this.baseUrl}/chat/completions`, {
           method: 'POST',

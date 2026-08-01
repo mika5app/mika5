@@ -19,12 +19,16 @@
     "postinstall": "electron-builder install-app-deps",
     "icons:mac": "bash scripts/gen-icns.sh",
     "icons:win": "node scripts/gen-ico.js",
-    "test": "node test/rag.test.js && node test/vision.test.js && npm run test:alibaba && npm run test:provider-capabilities",
+    "test": "node test/rag.test.js && node test/vision.test.js && npm run test:alibaba && npm run test:provider-capabilities && npm run test:request-context && npm run test:provider-cancellation && npm run test:cloud-consent",
     "test:db": "electron test/db.test.js",
     "test:rag": "node test/rag.test.js",
     "test:vision": "node test/vision.test.js",
     "test:provider-capabilities": "node test/provider-capabilities.test.js",
-    "test:alibaba": "node test/alibaba-provider.test.js"
+    "test:alibaba": "node test/alibaba-provider.test.js",
+    "test:request-context": "node test/request-context.test.js",
+    "test:provider-cancellation": "node test/provider-cancellation.test.js",
+    "test:cloud-consent": "node test/cloud-consent.test.js",
+    "test:electron-renderer": "electron test/electron-renderer-integration.test.js"
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",

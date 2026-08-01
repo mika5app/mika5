@@ -50,7 +50,7 @@ contextBridge.exposeInMainWorld("mika5", {
     routeIntent: (params) => ipcRenderer.invoke('ai:route-intent', params),
     listModels: () => ipcRenderer.invoke('ai:list-models'),
     status: () => ipcRenderer.invoke('ai:status'),
-    abort: () => ipcRenderer.invoke('ai:abort'),
+    abort: (requestId) => ipcRenderer.invoke('ai:abort', requestId),
     getCapabilities: (providerId) => ipcRenderer.invoke('ai:get-capabilities', providerId),
     resolveVision: (params) => ipcRenderer.invoke('ai:resolve-vision', params)
   },
