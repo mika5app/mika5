@@ -19,7 +19,7 @@
     "postinstall": "electron-builder install-app-deps",
     "icons:mac": "bash scripts/gen-icns.sh",
     "icons:win": "node scripts/gen-ico.js",
-    "test": "node test/rag.test.js && node test/vision.test.js && npm run test:alibaba && npm run test:provider-capabilities && npm run test:request-context && npm run test:provider-cancellation && npm run test:cloud-consent && npm run test:network-security && npm run test:knowledge-cli",
+    "test": "node test/rag.test.js && node test/vision.test.js && npm run test:alibaba && npm run test:provider-capabilities && npm run test:request-context && npm run test:provider-cancellation && npm run test:cloud-consent && npm run test:network-security && npm run test:knowledge-cli && npm run test:ci-gates",
     "test:all": "bash scripts/run-stage0a-gates.sh",
     "test:db": "electron test/db.test.js",
     "test:rag": "node test/rag.test.js",
@@ -36,7 +36,8 @@
     "test:electron-security": "electron test/electron-security.test.js",
     "test:image-download-electron": "electron test/image-download-electron.test.js",
     "knowledge:preflight": "electron scripts/knowledge-scope-repair.js",
-    "knowledge:repair": "electron scripts/knowledge-scope-repair.js"
+    "knowledge:repair": "electron scripts/knowledge-scope-repair.js",
+    "test:ci-gates": "node test/ci-gates.test.js"
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",

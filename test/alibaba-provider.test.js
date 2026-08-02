@@ -1234,7 +1234,10 @@ function createDb() {
   assert(listed.models.every(model => ['chat', 'vision'].includes(model.taskType)));
   assert.equal(manager.getProvider().name, 'Alibaba Cloud Model Studio');
 
-  const rendererSource = fs.readFileSync(require.resolve('../src/renderer/app.js'), 'utf8');
+  // Normalizado a LF en memoria: el checkout puede materializar CRLF en Windows.
+  const { readRendererSource } = require('./helpers/renderer-source');
+  const renderer = readRendererSource(require.resolve('../src/renderer/app.js'));
+  const rendererSource = renderer.text;
   const providerSource = fs.readFileSync(require.resolve('../src/main/ai-providers.js'), 'utf8');
   const sendGuard = rendererSource.indexOf('Este modelo se usa desde Crear imagen, no desde chat.');
   const chatCall = rendererSource.indexOf('window.mika5.ai.chat(payload)', sendGuard);
@@ -1420,17 +1423,10 @@ function createDb() {
   const GENERATIVE_VISUAL_MODES_TEST = ['image-generation', 'image-edit', 'image-variation'];
   // Las funciones de nivel superior de app.js cierran con '}' en la columna 0.
   // No se cuentan llaves porque los regex del código las contienen ({4,}, [{}]).
-  function sliceRendererFunction(name) {
-    const declaration = rendererSource.indexOf(`function ${name}(`);
-    assert(declaration >= 0, `no se encontró function ${name}`);
-    // Conserva el prefijo async: sin él, un await del cuerpo dejaría de compilar.
-    const start = rendererSource.startsWith('async ', declaration - 'async '.length)
-      ? declaration - 'async '.length
-      : declaration;
-    const end = rendererSource.indexOf('\n}\n', start);
-    assert(end > start, `function ${name} sin cierre en columna 0`);
-    return rendererSource.slice(start, end + 2);
-  }
+  // Delegado en test/helpers/renderer-source.js: tolera LF y CRLF y lanza un
+  // error explícito si la función no existe o no cierra en columna 0.
+  // Declaración, no const: se invoca antes de esta línea y necesita hoisting.
+  function sliceRendererFunction(name) { return renderer.slice(name); }
 
   // --- BUG 1: confirmaciones naturales de una acción visual pendiente -------
   // "generar una nueva versión" no coincidía con /^(2|opcion 2|generar|genera)$/,

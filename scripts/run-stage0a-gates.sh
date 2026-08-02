@@ -22,6 +22,10 @@ cd "$(dirname "$0")/.."
 LOGDIR="${MIKA5_GATE_LOGS:-.gate-logs}"
 mkdir -p "$LOGDIR"
 
+# En CI de Linux, Electron necesita --no-sandbox. Se inyecta por entorno en vez
+# de fijarlo aquí, para que en local siga corriendo con la configuración normal.
+ELECTRON_ARGS="${MIKA5_ELECTRON_ARGS:-}"
+
 NAMES=(
   "npm-test"
   "db"
@@ -32,11 +36,11 @@ NAMES=(
 )
 CMDS=(
   "npm test"
-  "npx electron test/db.test.js"
-  "npx electron test/knowledge-scope.test.js"
-  "npx electron test/electron-security.test.js"
-  "npx electron test/electron-renderer-integration.test.js"
-  "npx electron test/image-download-electron.test.js"
+  "npx electron $ELECTRON_ARGS test/db.test.js"
+  "npx electron $ELECTRON_ARGS test/knowledge-scope.test.js"
+  "npx electron $ELECTRON_ARGS test/electron-security.test.js"
+  "npx electron $ELECTRON_ARGS test/electron-renderer-integration.test.js"
+  "npx electron $ELECTRON_ARGS test/image-download-electron.test.js"
 )
 
 FAILED=0
