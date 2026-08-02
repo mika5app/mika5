@@ -19,6 +19,9 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const { normalizeEol, sliceFunction, readRendererSource } = require('./helpers/renderer-source');
+// Sin parser no hay validación del workflow. Un require que falla debe tumbar
+// el gate, no degradarlo: por eso js-yaml es dependencia directa declarada.
+const yaml = require('js-yaml');
 
 const ROOT = path.join(__dirname, '..');
 let passed = 0;
@@ -178,59 +181,97 @@ check(gateScript.includes('exit $FAILED'),
   'el gate canónico propaga un exit code distinto de cero');
 
 // =====================================================================
+console.log('\n=== js-yaml es dependencia directa, no un regalo transitivo ===');
+// =====================================================================
+
+// js-yaml ya está en node_modules porque electron-builder lo arrastra. Un
+// require que funciona no prueba nada: el día que esa cadena cambie, el parser
+// desaparece sin aviso. Lo que se comprueba aquí es la DECLARACIÓN.
+
+const lock = JSON.parse(fs.readFileSync(path.join(ROOT, 'package-lock.json'), 'utf8'));
+const VERSION_YAML = '4.1.1';
+
+const declarada = (pkg.devDependencies || {})['js-yaml'];
+check(typeof declarada === 'string',
+  'package.json declara js-yaml como devDependency directa');
+check(declarada === VERSION_YAML,
+  `la versión declarada es exactamente ${VERSION_YAML} (encontrada: ${declarada})`);
+check(!/[\^~]/.test(declarada || ''),
+  'la versión está fijada sin ^ ni ~');
+check(!(pkg.dependencies || {})['js-yaml'],
+  'js-yaml no se declara además como dependencia de producción');
+
+const lockRaiz = (lock.packages && lock.packages[''] && lock.packages[''].devDependencies) || {};
+check(lockRaiz['js-yaml'] === VERSION_YAML,
+  `package-lock packages[""].devDependencies fija ${VERSION_YAML}`);
+
+const lockEntrada = lock.packages && lock.packages['node_modules/js-yaml'];
+check(Boolean(lockEntrada), 'el lockfile conserva la entrada node_modules/js-yaml');
+check(lockEntrada && lockEntrada.version === VERSION_YAML,
+  `node_modules/js-yaml resuelve a ${VERSION_YAML}`);
+check(Boolean(lockEntrada && lockEntrada.dev),
+  'node_modules/js-yaml está marcada dev: true');
+check(Boolean(lockEntrada && lockEntrada.resolved && lockEntrada.integrity),
+  'la entrada conserva resolved e integrity');
+check(lock.lockfileVersion === 3, 'el lockfile sigue en la versión 3');
+
+// El propio gate no puede volver a degradarse: sin parser debe caerse, no
+// seguir con una validación más débil.
+const propio = normalizeEol(fs.readFileSync(__filename, 'utf8'));
+const cargas = propio.match(/require\(['"]js-yaml['"]\)/g) || [];
+check(cargas.length === 1, 'js-yaml se carga una sola vez');
+check(/^const yaml = require\('js-yaml'\);$/m.test(propio),
+  'la carga es directa y en el ámbito superior');
+// Los patrones se construyen para que este archivo no se detecte a sí mismo.
+const patronCaptura = new RegExp(['ca', 'tch'].join(''));
+const patronModulo = new RegExp(['MODULE', 'NOT', 'FOUND'].join('_'));
+check(!patronCaptura.test(propio),
+  'el gate no envuelve la carga del parser en una captura de errores');
+check(!patronModulo.test(propio),
+  'el gate no contempla la ausencia del módulo como caso tolerable');
+
+check(typeof yaml.load === 'function', 'el parser expone load()');
+
+// =====================================================================
 console.log('\n=== Workflow: el empaquetado depende de los gates ===');
 // =====================================================================
 
 const workflowPath = path.join(ROOT, '.github/workflows/build.yml');
 const workflowRaw = normalizeEol(fs.readFileSync(workflowPath, 'utf8'));
 
-let workflow = null;
-try {
-  workflow = require('js-yaml').load(workflowRaw);
-  console.log('  · YAML parseado con js-yaml');
-} catch (error) {
-  console.log(`  · js-yaml no disponible (${error.code || 'error'}): se valida la estructura sin parser`);
+const workflow = yaml.load(workflowRaw);
+check(typeof workflow.jobs === 'object' && workflow.jobs !== null,
+  'el workflow declara jobs');
+check(Boolean(workflow.on && workflow.on.pull_request),
+  'el workflow se ejecuta en pull_request');
+check(workflow.permissions && workflow.permissions.contents === 'read',
+  'permisos mínimos: contents: read');
+
+const qg = workflow.jobs['quality-gates'];
+check(Boolean(qg), 'existe el job quality-gates');
+const os = qg && qg.strategy && qg.strategy.matrix && qg.strategy.matrix.os;
+check(Array.isArray(os) && os.includes('ubuntu-latest') && os.includes('windows-latest'),
+  'quality-gates cubre ubuntu-latest y windows-latest');
+
+const dependeDeGates = nombre => {
+  const necesita = workflow.jobs[nombre] && workflow.jobs[nombre].needs;
+  const lista = Array.isArray(necesita) ? necesita : (necesita ? [necesita] : []);
+  if (lista.includes('quality-gates')) return true;
+  return lista.some(dependeDeGates);
+};
+for (const trabajo of ['build-windows', 'build-macos', 'build-linux']) {
+  check(dependeDeGates(trabajo),
+    `${trabajo} depende de quality-gates (directa o transitivamente)`);
 }
 
-if (workflow) {
-  check(typeof workflow.jobs === 'object' && workflow.jobs !== null,
-    'el workflow declara jobs');
-  check(Boolean(workflow.on && workflow.on.pull_request),
-    'el workflow se ejecuta en pull_request');
-  check(workflow.permissions && workflow.permissions.contents === 'read',
-    'permisos mínimos: contents: read');
+const texto = JSON.stringify(workflow);
+check(!texto.includes('continue-on-error'),
+  'ningún job usa continue-on-error');
 
-  const qg = workflow.jobs['quality-gates'];
-  check(Boolean(qg), 'existe el job quality-gates');
-  const os = qg && qg.strategy && qg.strategy.matrix && qg.strategy.matrix.os;
-  check(Array.isArray(os) && os.includes('ubuntu-latest') && os.includes('windows-latest'),
-    'quality-gates cubre ubuntu-latest y windows-latest');
-
-  const dependeDeGates = nombre => {
-    const necesita = workflow.jobs[nombre] && workflow.jobs[nombre].needs;
-    const lista = Array.isArray(necesita) ? necesita : (necesita ? [necesita] : []);
-    if (lista.includes('quality-gates')) return true;
-    return lista.some(dependeDeGates);
-  };
-  for (const trabajo of ['build-windows', 'build-macos', 'build-linux']) {
-    check(dependeDeGates(trabajo),
-      `${trabajo} depende de quality-gates (directa o transitivamente)`);
-  }
-
-  const texto = JSON.stringify(workflow);
-  check(!texto.includes('continue-on-error'),
-    'ningún job usa continue-on-error');
-
-  // Ningún paso de los gates puede leer secretos.
-  const pasosGates = JSON.stringify(qg || {});
-  check(!pasosGates.includes('secrets.'),
-    'quality-gates no lee ningún secreto');
-} else {
-  check(/^\s*quality-gates:/m.test(workflowRaw), 'existe el job quality-gates');
-  check(/needs:[\s\S]{0,200}quality-gates/.test(workflowRaw),
-    'algún job depende de quality-gates');
-  check(!workflowRaw.includes('continue-on-error'), 'ningún job usa continue-on-error');
-}
+// Ningún paso de los gates puede leer secretos.
+const pasosGates = JSON.stringify(qg || {});
+check(!pasosGates.includes('secrets.'),
+  'quality-gates no lee ningún secreto');
 
 console.log(`\n${'='.repeat(40)}`);
 console.log(`CI gates tests passed (${passed} comprobaciones)`);
