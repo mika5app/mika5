@@ -5,6 +5,11 @@ const { initDb, dbApi, getDb } = require("./db");
 const { ollamaApi } = require("./ollama");
 const { AIProviderManager } = require("./ai-providers");
 const { RequestRegistry } = require("./request-registry");
+const {
+  downloadAndSaveElectronImage,
+  detectImageMimeFromBuffer,
+  safeImageExtensionFromMime
+} = require("./network-security");
 let aiManager;
 const aiRequests = new RequestRegistry();
 const { ragApi } = require("./rag");
@@ -355,6 +360,82 @@ ipcMain.handle("app:saveFile", async (_, { defaultName, filters, content, encodi
 });
 
 // AI provider handlers (exponer API genérica)
+ipcMain.handle('files:download-image', async (_event, params) => {
+  const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
+
+  try {
+    const src = typeof params?.src === 'string' ? params.src.trim() : '';
+    if (!src) return { ok: false, error: 'La imagen no tiene una fuente válida' };
+
+    let mimeType = '';
+    let imageBuffer = null;
+    const dataMatch = src.match(/^data:(image\/(?:png|jpeg|jpg|webp|bmp));base64,([\s\S]+)$/i);
+
+    if (dataMatch) {
+      mimeType = dataMatch[1].toLowerCase();
+      const base64 = dataMatch[2].replace(/\s+/g, '');
+      if (!base64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(base64) || base64.length % 4 !== 0) {
+        return { ok: false, error: 'Los datos de la imagen no son válidos' };
+      }
+      imageBuffer = Buffer.from(base64, 'base64');
+    } else {
+      try {
+        return await downloadAndSaveElectronImage(src, {
+          fetchImpl: net.fetch,
+          lookup: require('dns').promises.lookup,
+          maxRedirects: 5,
+          maxBytes: MAX_IMAGE_BYTES,
+          timeoutMs: 30000,
+          appVersion: app.getVersion(),
+          suggestedName: params?.suggestedName,
+          downloadsPath: app.getPath('downloads'),
+          joinPath: path.join,
+          showSaveDialog: options => dialog.showSaveDialog(options),
+          writeFile: (filePath, buffer) => fs.writeFile(filePath, buffer)
+        });
+      } catch (error) {
+        const code = typeof error?.code === 'string' && error.code.startsWith('DOWNLOAD_')
+          ? error.code
+          : 'DOWNLOAD_UNKNOWN';
+        if (!app.isPackaged) console.warn(`Image download failed: ${code}`);
+        return {
+          ok: false,
+          error: 'No se pudo descargar la imagen remota',
+          ...(!app.isPackaged ? { code } : {})
+        };
+      }
+    }
+
+    if (!imageBuffer?.length) return { ok: false, error: 'La imagen está vacía' };
+    if (imageBuffer.length > MAX_IMAGE_BYTES) {
+      return { ok: false, error: 'La imagen excede el límite de 50 MB' };
+    }
+
+    const extension = safeImageExtensionFromMime(mimeType) || 'png';
+    const requestedName = path.basename(String(params?.suggestedName || 'imagen-mika5'))
+      .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
+      .replace(/^\.+/, '')
+      .slice(0, 120);
+    const baseName = requestedName.replace(/\.[A-Za-z0-9]{1,8}$/, '') || 'imagen-mika5';
+    const safeName = `${baseName}.${extension}`;
+    const { canceled, filePath } = await dialog.showSaveDialog({
+      defaultPath: path.join(app.getPath('downloads'), safeName),
+      filters: [{ name: 'Imagen', extensions: [extension] }]
+    });
+    if (canceled || !filePath) return { ok: false, canceled: true };
+
+    await fs.writeFile(filePath, imageBuffer);
+    return { ok: true, path: filePath };
+  } catch (error) {
+    if (!app.isPackaged) console.warn('Image download failed: DOWNLOAD_UNKNOWN');
+    return {
+      ok: false,
+      error: 'No se pudo descargar la imagen remota',
+      ...(!app.isPackaged ? { code: 'DOWNLOAD_UNKNOWN' } : {})
+    };
+  }
+});
+
 ipcMain.handle('ai:get-providers', () => aiManager.getAllProviders());
 ipcMain.handle('ai:get-current-provider', () => aiManager.getProvider());
 ipcMain.handle('ai:set-provider', (_e, id) => aiManager.setProvider(id));

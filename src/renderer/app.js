@@ -491,6 +491,26 @@ function suggestedImageDownloadName({ model = '', name = '' } = {}) {
   return safeName || `imagen-mika5-${timestamp}.png`;
 }
 
+async function downloadImageFromSrc(src, name, button = null) {
+  if (!window.mika5?.files?.downloadImage) {
+    showToast('La descarga de imágenes no está disponible', 'error');
+    return;
+  }
+  if (button) button.disabled = true;
+  try {
+    const result = await window.mika5.files.downloadImage({ src, suggestedName: name });
+    if (result?.ok) {
+      showToast('Imagen guardada correctamente', 'success');
+    } else if (!result?.canceled) {
+      showToast(result?.error || 'No se pudo guardar la imagen', 'error');
+    }
+  } catch (_) {
+    showToast('No se pudo guardar la imagen', 'error');
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 function openImageViewer(src, name) {
   closeImageViewer();
   const modal = document.createElement('div');
@@ -518,7 +538,16 @@ function openImageViewer(src, name) {
   img.src = src;
   img.alt = name || 'Imagen';
 
-  panel.append(closeButton, img);
+  const modalActions = document.createElement('div');
+  modalActions.className = 'image-modal-actions';
+  const downloadButton = document.createElement('button');
+  downloadButton.type = 'button';
+  downloadButton.className = 'image-action-btn';
+  downloadButton.textContent = 'Descargar';
+  downloadButton.addEventListener('click', () => downloadImageFromSrc(src, name, downloadButton));
+  modalActions.appendChild(downloadButton);
+
+  panel.append(closeButton, img, modalActions);
   modal.appendChild(panel);
   document.body.appendChild(modal);
   closeButton.focus();
@@ -552,7 +581,15 @@ function enhanceMessageImages(container, messageContext = {}) {
     viewButton.textContent = 'Ver grande';
     viewButton.addEventListener('click', () => openImageViewer(img.currentSrc || img.src, suggestedName));
 
-    controls.append(viewButton);
+    const downloadButton = document.createElement('button');
+    downloadButton.type = 'button';
+    downloadButton.className = 'image-action-btn';
+    downloadButton.textContent = 'Descargar';
+    downloadButton.addEventListener('click', () => {
+      downloadImageFromSrc(img.currentSrc || img.src, suggestedName, downloadButton);
+    });
+
+    controls.append(viewButton, downloadButton);
     frame.appendChild(controls);
   }
 }

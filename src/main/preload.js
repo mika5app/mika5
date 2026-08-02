@@ -35,6 +35,9 @@ contextBridge.exposeInMainWorld("mika5", {
     getDocumentText: (knowledgeItemId) => ipcRenderer.invoke("rag:getDocumentText", knowledgeItemId),
     listChunksRaw: (projectId, chatId, maxChars, mode = 'selective') => ipcRenderer.invoke("rag:listChunksRaw", projectId, chatId, maxChars, mode)
   },
+  files: {
+    downloadImage: (params) => ipcRenderer.invoke('files:download-image', params)
+  },
   ai: {
     getProviders: () => ipcRenderer.invoke('ai:get-providers'),
     getCurrentProvider: () => ipcRenderer.invoke('ai:get-current-provider'),
