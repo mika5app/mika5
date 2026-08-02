@@ -131,7 +131,97 @@ assert(isCacheExpired(Date.now() - 6 * 60 * 1000), '6-min old cache is expired')
 assert(isCacheExpired(Date.now() - CACHE_TTL_MS - 1), 'exactly expired + 1ms is expired');
 
 // ============================================
-console.log(`\n${'='.repeat(40)}`);
-console.log(`Results: ${passed} passed, ${failed} failed`);
-console.log(`${'='.repeat(40)}`);
-process.exit(failed > 0 ? 1 : 0);
+// Embedding availability and degraded indexing
+// ============================================
+(async () => {
+  const fs = require('fs');
+  const path = require('path');
+  const {
+    ragApi,
+    checkEmbeddingModelAvailable,
+    EMBEDDING_UNAVAILABLE_ERROR
+  } = require('../src/main/rag');
+
+  const unavailableClient = {
+    status: async () => ({ ok: true }),
+    tags: async () => ({ models: [] }),
+    embed: async () => { throw new Error('embed must not run when model is missing'); }
+  };
+  const availability = await checkEmbeddingModelAvailable({ embeddingClient: unavailableClient });
+  assertEq(availability.available, false, 'missing embedding model returns controlled unavailable state');
+  assertEq(availability.error, EMBEDDING_UNAVAILABLE_ERROR, 'missing embedding model has user-safe error');
+  const notConfigured = await checkEmbeddingModelAvailable({
+    embeddingModel: '',
+    embeddingClient: unavailableClient
+  });
+  assertEq(notConfigured.code, 'EMBEDDING_MODEL_NOT_CONFIGURED', 'empty embedding model returns not-configured state');
+  assert(notConfigured.error.includes('Configura un modelo local de embeddings'),
+    'empty embedding model returns configuration guidance');
+
+  function createFakeDatabase() {
+    const statuses = [];
+    const chunks = [];
+    const item = {
+      id: 'knowledge-1',
+      project_id: 'project-1',
+      chat_id: null,
+      content_path: '/virtual/document.md'
+    };
+    return {
+      item,
+      statuses,
+      chunks,
+      getKnowledgeItem: () => item,
+      setKnowledgeIndexStatus: (_id, status, detail) => statuses.push({ status, ...detail }),
+      deleteChunksForKnowledgeItem: () => {},
+      insertChunk: (chunk) => chunks.push(chunk)
+    };
+  }
+
+  const unavailableDb = createFakeDatabase();
+  const unavailableResult = await ragApi.indexKnowledgeItem('knowledge-1', {
+    database: unavailableDb,
+    fileSystem: { existsSync: () => true },
+    embeddingClient: unavailableClient,
+    chatProvider: 'alibaba'
+  });
+  assertEq(unavailableResult.saved, true, 'document remains saved when embeddings are unavailable');
+  assertEq(unavailableResult.pending, true, 'embedding failure is reported as pending indexing');
+  assertEq(unavailableDb.statuses.at(-1).status, 'error', 'document gets separate failed index status');
+  assertEq(unavailableDb.statuses.at(-1).error, EMBEDDING_UNAVAILABLE_ERROR, 'index error is normalized');
+  assertEq(unavailableDb.item.id, 'knowledge-1', 'embedding failure does not delete document');
+
+  const availableDb = createFakeDatabase();
+  const availableClient = {
+    status: async () => ({ ok: true }),
+    tags: async () => ({ models: [{ name: 'nomic-embed-text:latest' }] }),
+    embed: async ({ input }) => ({ embeddings: input.map(() => [1, 0, 0]) })
+  };
+  const indexedResult = await ragApi.indexKnowledgeItem('knowledge-1', {
+    database: availableDb,
+    fileSystem: {
+      existsSync: () => true,
+      readFileSync: () => 'Document content'
+    },
+    embeddingClient: availableClient,
+    chatProvider: 'alibaba'
+  });
+  assertEq(indexedResult.ok, true, 'available embeddings index document');
+  assertEq(availableDb.statuses.at(-1).status, 'indexed', 'successful embedding sets indexed status');
+  assertEq(availableDb.chunks.length, 1, 'successful embedding stores chunks');
+
+  const rendererSource = fs.readFileSync(path.join(__dirname, '../src/renderer/app.js'), 'utf8');
+  const ollamaSource = fs.readFileSync(path.join(__dirname, '../src/main/ollama.js'), 'utf8');
+  assert(rendererSource.includes('Documento guardado. Indexación pendiente: falta el modelo local de embeddings.'),
+    'renderer shows saved-with-pending warning');
+  assert(!ollamaSource.includes('ollama pull <nombre-modelo>'),
+    'Ollama never exposes pull placeholder');
+
+  console.log(`\n${'='.repeat(40)}`);
+  console.log(`Results: ${passed} passed, ${failed} failed`);
+  console.log(`${'='.repeat(40)}`);
+  process.exit(failed > 0 ? 1 : 0);
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

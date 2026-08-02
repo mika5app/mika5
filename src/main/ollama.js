@@ -134,7 +134,7 @@ async function fetchJson(url, opts = {}) {
   } catch (error) {
     // Si es error de modelo no encontrado, dar mensaje específico
     if (error.message === 'MODEL_NOT_FOUND' || error.message.includes('not found')) {
-      throw new Error('El modelo no está descargado. Ejecuta: ollama pull <nombre-modelo>');
+      throw new Error('MODEL_NOT_FOUND');
     }
     
     // Si es timeout específico de headers (el error original)
