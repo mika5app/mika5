@@ -133,6 +133,8 @@ jobs:
           path: .gate-logs/
           retention-days: 7
           if-no-files-found: warn
+          # .gate-logs empieza por punto y upload-artifact lo trata como oculto.
+          include-hidden-files: true
 
       - name: Check whitespace errors
         shell: bash
