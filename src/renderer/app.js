@@ -466,13 +466,13 @@ async function processImageAttachment({
 
 (function addImageStyles() {
   const style = document.createElement('style');
-  style.textContent = '.embedded-image{margin:12px 0;border-radius:8px;overflow:hidden;border:1px solid var(--border-subtle,#1b2a55);display:inline-block;max-width:100%}.embedded-image img{max-width:100%;max-height:400px;object-fit:contain;cursor:zoom-in;transition:transform .2s}.embedded-image img:hover{transform:scale(1.02)}.msg.user .embedded-image{border-color:var(--accent,#49C2F4)}.image-modal{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.9);display:flex;align-items:center;justify-content:center;cursor:zoom-out}.image-modal img{max-width:90vw;max-height:90vh;object-fit:contain;border-radius:8px}.embedded-image-preview{max-width:120px;max-height:120px;border-radius:6px;margin:4px;border:1px solid var(--border-subtle,#1b2a55);display:inline-block;object-fit:contain;background:var(--bg-card,#101a33);padding:2px;cursor:zoom-in;transition:transform .15s}.embedded-image-preview:hover{transform:scale(1.05);border-color:var(--accent,#49C2F4)}.msg.user .embedded-image-preview{border-color:var(--accent,#49C2F4)}';
+  style.textContent = '.embedded-image{margin:12px 0;border-radius:8px;overflow:hidden;border:1px solid var(--border-subtle,#14213F);display:inline-block;max-width:100%}.embedded-image img{max-width:100%;max-height:400px;object-fit:contain;cursor:zoom-in;transition:transform .2s}.embedded-image img:hover{transform:scale(1.02)}.msg.user .embedded-image{border-color:var(--accent,#49C2F4)}.image-modal{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.9);display:flex;align-items:center;justify-content:center;cursor:zoom-out}.image-modal img{max-width:90vw;max-height:90vh;object-fit:contain;border-radius:8px}.embedded-image-preview{max-width:120px;max-height:120px;border-radius:6px;margin:4px;border:1px solid var(--border-subtle,#14213F);display:inline-block;object-fit:contain;background:var(--bg-card,#070C1A);padding:2px;cursor:zoom-in;transition:transform .15s}.embedded-image-preview:hover{transform:scale(1.05);border-color:var(--accent,#49C2F4)}.msg.user .embedded-image-preview{border-color:var(--accent,#49C2F4)}';
   document.head.appendChild(style);
   const attachmentStyle = document.createElement('style');
   attachmentStyle.textContent = '.msg-unsaved{margin-top:6px;font-size:11px;color:var(--danger,#e5534b);border:1px dashed var(--danger,#e5534b);border-radius:4px;padding:3px 8px;display:inline-flex;align-items:center;gap:8px}.msg-unsaved-ok{color:var(--ok,#3fb950);border-color:var(--ok,#3fb950)}.msg-unsaved-retry{font-size:11px;padding:1px 8px;border-radius:4px;border:1px solid currentColor;background:transparent;color:inherit;cursor:pointer}.msg-unsaved-retry:disabled{opacity:.6;cursor:wait}.msg-attachments{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}.msg-attachment{display:flex;flex-direction:column;align-items:center;gap:2px;max-width:132px}.msg-attachment-name{font-size:10px;opacity:.75;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:128px}';
   document.head.appendChild(attachmentStyle);
   const imageUxStyle = document.createElement('style');
-  imageUxStyle.textContent = '.image-viewer-frame{display:inline-flex;flex-direction:column;background:var(--bg-card,#101a33)}.image-controls{display:flex;gap:8px;align-items:center;padding:8px;background:rgba(0,0,0,.2)}.image-action-btn{border:1px solid var(--border-subtle,#1b2a55);border-radius:6px;background:var(--bg-hover,#17213d);color:var(--text-main,#fff);padding:5px 10px;cursor:pointer;font-size:12px}.image-action-btn:hover:not(:disabled){border-color:var(--accent,#49C2F4)}.image-action-btn:disabled{opacity:.6;cursor:wait}.image-modal{padding:24px;cursor:default}.image-modal-panel{position:relative;display:flex;flex-direction:column;align-items:center;gap:12px;max-width:95vw;max-height:95vh}.image-modal-panel>img{max-width:95vw;max-height:85vh}.image-modal-close{position:absolute;top:-16px;right:-16px;width:36px;height:36px;border:0;border-radius:50%;background:#fff;color:#111;font-size:24px;line-height:1;cursor:pointer}.image-modal-actions{display:flex;justify-content:center}';
+  imageUxStyle.textContent = '.image-viewer-frame{display:inline-flex;flex-direction:column;background:var(--bg-card,#070C1A)}.image-controls{display:flex;gap:8px;align-items:center;padding:8px;background:rgba(0,0,0,.2)}.image-action-btn{border:1px solid var(--border-subtle,#14213F);border-radius:6px;background:var(--bg-hover,#0D1630);color:var(--text-main,#fff);padding:5px 10px;cursor:pointer;font-size:12px}.image-action-btn:hover:not(:disabled){border-color:var(--accent,#49C2F4)}.image-action-btn:disabled{opacity:.6;cursor:wait}.image-modal{padding:24px;cursor:default}.image-modal-panel{position:relative;display:flex;flex-direction:column;align-items:center;gap:12px;max-width:95vw;max-height:95vh}.image-modal-panel>img{max-width:95vw;max-height:85vh}.image-modal-close{position:absolute;top:-16px;right:-16px;width:36px;height:36px;border:0;border-radius:50%;background:#fff;color:#111;font-size:24px;line-height:1;cursor:pointer}.image-modal-actions{display:flex;justify-content:center}';
   document.head.appendChild(imageUxStyle);
 })();
 
@@ -828,11 +828,11 @@ function mikaSelect(title, options) {
 
     const box = document.createElement('div');
     box.className = 'modal-content';
-    box.style.cssText = 'background:var(--bg-sidebar,#0f1629);border:1px solid var(--border-subtle,#1b2a55);border-radius:14px;padding:0;min-width:320px;max-width:420px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.5);animation:modalFadeIn 0.15s ease-out;overflow:hidden;';
+    box.style.cssText = 'background:var(--bg-sidebar,#000208);border:1px solid var(--border-subtle,#14213F);border-radius:14px;padding:0;min-width:320px;max-width:420px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.5);animation:modalFadeIn 0.15s ease-out;overflow:hidden;';
 
     // Header
     const header = document.createElement('div');
-    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border-subtle,#1b2a55);';
+    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border-subtle,#14213F);';
     const titleEl = document.createElement('h3');
     titleEl.style.cssText = 'margin:0;font-size:15px;font-weight:600;color:var(--text-main,#eef3ff);';
     titleEl.textContent = title || 'Seleccionar';
@@ -857,7 +857,7 @@ function mikaSelect(title, options) {
       options.forEach(opt => {
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.style.cssText = 'display:flex;align-items:center;gap:10px;width:100%;background:var(--bg-base,#070b16);border:1px solid var(--border-subtle,#1b2a55);color:var(--text-main,#eef3ff);padding:12px 14px;border-radius:8px;cursor:pointer;font-size:14px;text-align:left;transition:all 0.15s;';
+        btn.style.cssText = 'display:flex;align-items:center;gap:10px;width:100%;background:var(--bg-base,#04070F);border:1px solid var(--border-subtle,#14213F);color:var(--text-main,#eef3ff);padding:12px 14px;border-radius:8px;cursor:pointer;font-size:14px;text-align:left;transition:all 0.15s;';
 
         // Icon/color indicator
         if (opt.icon || opt.color) {
@@ -873,8 +873,8 @@ function mikaSelect(title, options) {
         labelSpan.textContent = opt.label;
         btn.appendChild(labelSpan);
 
-        btn.onmouseenter = () => { btn.style.background = 'var(--bg-hover,#152044)'; btn.style.borderColor = 'var(--accent,#2d8cff)'; };
-        btn.onmouseleave = () => { btn.style.background = 'var(--bg-base,#070b16)'; btn.style.borderColor = 'var(--border-subtle,#1b2a55)'; };
+        btn.onmouseenter = () => { btn.style.background = 'var(--bg-hover,#0D1630)'; btn.style.borderColor = 'var(--accent,#2d8cff)'; };
+        btn.onmouseleave = () => { btn.style.background = 'var(--bg-base,#04070F)'; btn.style.borderColor = 'var(--border-subtle,#14213F)'; };
         btn.onclick = () => {
           modal.remove();
           if (_mikaSelectResolve) { _mikaSelectResolve(opt.value); _mikaSelectResolve = null; }
@@ -885,13 +885,13 @@ function mikaSelect(title, options) {
 
     // Cancel button
     const footer = document.createElement('div');
-    footer.style.cssText = 'padding:8px 8px 12px;border-top:1px solid var(--border-subtle,#1b2a55);';
+    footer.style.cssText = 'padding:8px 8px 12px;border-top:1px solid var(--border-subtle,#14213F);';
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
-    cancelBtn.style.cssText = 'width:100%;background:transparent;border:1px solid var(--border-subtle,#1b2a55);color:var(--text-muted,#a9b4d0);padding:10px;border-radius:8px;cursor:pointer;font-size:13px;transition:all 0.15s;';
+    cancelBtn.style.cssText = 'width:100%;background:transparent;border:1px solid var(--border-subtle,#14213F);color:var(--text-muted,#a9b4d0);padding:10px;border-radius:8px;cursor:pointer;font-size:13px;transition:all 0.15s;';
     cancelBtn.textContent = 'Cancelar';
     cancelBtn.onmouseenter = () => { cancelBtn.style.color = 'var(--text-main,#eef3ff)'; cancelBtn.style.borderColor = 'var(--text-muted,#a9b4d0)'; };
-    cancelBtn.onmouseleave = () => { cancelBtn.style.color = 'var(--text-muted,#a9b4d0)'; cancelBtn.style.borderColor = 'var(--border-subtle,#1b2a55)'; };
+    cancelBtn.onmouseleave = () => { cancelBtn.style.color = 'var(--text-muted,#a9b4d0)'; cancelBtn.style.borderColor = 'var(--border-subtle,#14213F)'; };
     cancelBtn.onclick = () => { modal.remove(); if (_mikaSelectResolve) { _mikaSelectResolve(null); _mikaSelectResolve = null; } };
     footer.appendChild(cancelBtn);
 
@@ -2695,7 +2695,7 @@ function showProjectStylePicker(projectId, iconBtnEl, currentIcon, currentColor)
   
   const picker = document.createElement('div');
   picker.className = 'project-style-picker';
-  picker.style.cssText = 'position:absolute;left:0;top:100%;background:var(--bg-sidebar,#0f1629);border:1px solid var(--border-subtle);border-radius:10px;padding:10px;z-index:60;box-shadow:0 8px 24px rgba(0,0,0,0.4);width:200px;';
+  picker.style.cssText = 'position:absolute;left:0;top:100%;background:var(--bg-sidebar,#000208);border:1px solid var(--border-subtle);border-radius:10px;padding:10px;z-index:60;box-shadow:0 8px 24px rgba(0,0,0,0.4);width:200px;';
   
   // Color row
   const colorLabel = document.createElement('div');
@@ -2728,7 +2728,7 @@ function showProjectStylePicker(projectId, iconBtnEl, currentIcon, currentColor)
   iconGrid.style.cssText = 'display:flex;gap:4px;flex-wrap:wrap;';
   PROJECT_ICONS.forEach(icon => {
     const btn = document.createElement('span');
-    btn.style.cssText = `width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:6px;cursor:pointer;font-size:16px;background:${icon === currentIcon ? 'var(--bg-hover,#152044)' : 'transparent'};border:1px solid ${icon === currentIcon ? 'var(--accent)' : 'transparent'};`;
+    btn.style.cssText = `width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:6px;cursor:pointer;font-size:16px;background:${icon === currentIcon ? 'var(--bg-hover,#0D1630)' : 'transparent'};border:1px solid ${icon === currentIcon ? 'var(--accent)' : 'transparent'};`;
     btn.textContent = icon;
     btn.onclick = async (e) => {
       e.stopPropagation();

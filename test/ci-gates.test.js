@@ -129,7 +129,8 @@ const EN_NPM_TEST = [
   'test:cloud-consent',
   'test:network-security',
   'test:knowledge-cli',
-  'test:ci-gates'
+  'test:ci-gates',
+  'test:palette'
 ];
 for (const suite of EN_NPM_TEST) {
   check(pkg.scripts.test.includes(suite),
@@ -141,7 +142,7 @@ const SCRIPTS_REQUERIDOS = [
   'test', 'test:all', 'test:db', 'test:rag', 'test:vision', 'test:alibaba',
   'test:provider-capabilities', 'test:request-context', 'test:provider-cancellation',
   'test:cloud-consent', 'test:network-security', 'test:knowledge-scope',
-  'test:knowledge-cli', 'test:ci-gates', 'test:electron-renderer',
+  'test:knowledge-cli', 'test:ci-gates', 'test:palette', 'test:electron-renderer',
   'test:electron-security', 'test:image-download-electron',
   'knowledge:preflight', 'knowledge:repair'
 ];
