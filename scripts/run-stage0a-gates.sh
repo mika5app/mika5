@@ -33,6 +33,7 @@ NAMES=(
   "electron-security"
   "electron-renderer-integration"
   "image-download-electron"
+  "print-pdf-electron"
 )
 CMDS=(
   "npm test"
@@ -41,6 +42,7 @@ CMDS=(
   "npx electron $ELECTRON_ARGS test/electron-security.test.js"
   "npx electron $ELECTRON_ARGS test/electron-renderer-integration.test.js"
   "npx electron $ELECTRON_ARGS test/image-download-electron.test.js"
+  "npx electron $ELECTRON_ARGS test/print-pdf-electron.test.js"
 )
 
 FAILED=0

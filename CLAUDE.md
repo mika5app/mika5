@@ -16,7 +16,7 @@ Standard scripts (`dev`, `build`, `test`) live in `package.json`. Non-obvious:
   native modules against Electron — a plain `npm ci` is not enough.
 - `npm run test:db` and every `test:electron-*` script need `npx electron`, not plain node.
 - `npm run test:all` is the canonical local gate battery (`scripts/run-stage0a-gates.sh`).
-  It runs six gates and propagates a non-zero exit code; it does not tolerate failures.
+  It runs seven gates and propagates a non-zero exit code; it does not tolerate failures.
 - `npm run knowledge:preflight` and `npm run knowledge:repair` both point at
   `scripts/knowledge-scope-repair.js`. The script decides what to do from its
   arguments — see "Knowledge scope tooling" below.
@@ -34,15 +34,24 @@ Local battery (`npm run test:all`):
 
 | Gate | Runner |
 |---|---|
-| `npm-test` | node — chains every non-Electron suite, including `test:ci-gates` and `test:palette` |
+| `npm-test` | node — chains every non-Electron suite, including `test:ci-gates`, `test:palette` and `test:ipc-contracts` |
 | `db` | electron |
 | `knowledge-scope` | electron |
 | `electron-security` | electron |
 | `electron-renderer-integration` | electron |
 | `image-download-electron` | electron |
+| `print-pdf-electron` | electron |
 
 Every Electron suite builds its own temporary userData directory. None of them reads or
 writes the real user profile.
+
+`test/ipc-contracts.test.js` checks that every channel `preload.js` invokes has
+exactly one `ipcMain.handle` registration. It exists because the opposite
+already happened: a reorganisation of `main.js` dropped `app:printToPDF` while
+preload kept exposing it, and PDF export silently degraded to HTML with every
+gate green. One pre-existing exception is listed explicitly in the test —
+`debug:ragState`, exposed since before this branch, never handled and never
+called; it has to be removed in its own commit.
 
 `test/ci-gates.test.js` is the gate that guards the gates: it checks that the scripts still
 exist, that `npm test` still chains them, that the canonical script has no
@@ -131,6 +140,53 @@ Limits worth knowing, because the code does not pretend otherwise:
   download path; `fetchElectronImage()` is.
 - Generated images are not durably persisted. Do not describe them as saved.
 
+## PDF export
+
+`app:printToPDF` renders into an isolated local window (`print.html`, offscreen,
+`sandbox: true`, `contextIsolation: true`, `nodeIntegration: false`), sanitizes
+the payload with the vendored DOMPurify, blocks `window.open` and navigation,
+and prints with `webContents.printToPDF`. The body lives in
+`src/main/print-export.js` so the Electron suite can drive the exact handler
+`main.js` registers without booting the app.
+
+Printable content can contain generated images whose URL is a signed remote link
+(`?OSSAccessKeyId=…&Signature=…`). If the print window loaded those, every export
+would emit an outbound request carrying that signature. So the flow runs in two
+phases:
+
+1. `MIKA5Print.inspect(html)` sanitizes in memory and returns the distinct remote
+   image URLs **without touching the document**, so nothing is requested.
+2. The main process downloads each one through `fetchElectronImage` — the same
+   primitive the image-download path uses — and hands back `url → data:` URIs.
+   `MIKA5Print.render()` sanitizes again, substitutes, verifies no `http:`/
+   `https:` survives, and only then writes to the DOM.
+
+`print.html` declares `img-src 'self' data:` with no network origin. The print
+window performs no outbound requests; the suite asserts that with a session
+request counter.
+
+Failures are not silent: a remote image that expired, was refused by policy,
+exceeded a limit or returned an invalid type fails the whole export with a
+normalized code. There is no partial PDF. The renderer only ever receives a code
+from `PRINT_ERRORS`, never an internal message, path or signed URL, and the log
+records origin plus pathname with the query stripped.
+
+Limits are exported constants: at most 20 distinct remote images, 8 MiB each,
+32 MiB in total, concurrency 2, and a shared 60 s deadline. Identical URLs are
+deduplicated and counted once.
+
+The print window is closed by awaiting its `closed` event, with `destroy()` as a
+bounded fallback. A bare `destroy()` looks safer but breaks the *next* offscreen
+window's `loadFile` with `ERR_FAILED (-2)`, so the second export of a session
+would fail — measured, not assumed.
+
+What this does **not** solve: images are converted to `data:` only for the
+duration of the export and never cached or persisted, so durable storage of
+generated images is still pending; chats whose signed links already expired
+cannot be exported; and the limitations of the reused network primitive still
+apply — no protection against DNS rebinding, the effective IP is not pinned, and
+system proxies are outside its control.
+
 ## RAG and embeddings
 
 `rag.js` chunks documents, embeds them through Ollama and searches by cosine similarity
@@ -183,7 +239,8 @@ fail closed rather than defaulting to a write.
 - Most CSS lives inline in `index.html`; `styles.css` holds shared rules, and the renderer
   also sets colors inline — a palette change has to be applied in all three places, which
   is what `test/palette.test.js` enforces
-- Print-to-PDF is not integrated: it has no tests
+- Generated images are not durably persisted, so exporting an old chat whose
+  signed links have expired fails instead of printing
 - Cross-platform behaviour is verified locally on Windows only; the Ubuntu leg of the
   gates has not been run on this branch
 

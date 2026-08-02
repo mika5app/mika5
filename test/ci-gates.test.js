@@ -133,7 +133,8 @@ const EN_NPM_TEST = [
   'test:network-security',
   'test:knowledge-cli',
   'test:ci-gates',
-  'test:palette'
+  'test:palette',
+  'test:ipc-contracts'
 ];
 for (const suite of EN_NPM_TEST) {
   check(pkg.scripts.test.includes(suite),
@@ -145,7 +146,8 @@ const SCRIPTS_REQUERIDOS = [
   'test', 'test:all', 'test:db', 'test:rag', 'test:vision', 'test:alibaba',
   'test:provider-capabilities', 'test:request-context', 'test:provider-cancellation',
   'test:cloud-consent', 'test:network-security', 'test:knowledge-scope',
-  'test:knowledge-cli', 'test:ci-gates', 'test:palette', 'test:electron-renderer',
+  'test:knowledge-cli', 'test:ci-gates', 'test:palette', 'test:ipc-contracts',
+  'test:print-pdf-electron', 'test:electron-renderer',
   'test:electron-security', 'test:image-download-electron',
   'knowledge:preflight', 'knowledge:repair'
 ];
@@ -168,7 +170,8 @@ const gateScript = normalizeEol(
   fs.readFileSync(path.join(ROOT, 'scripts/run-stage0a-gates.sh'), 'utf8'));
 const GATES_CANONICOS = [
   'npm-test', 'db', 'knowledge-scope',
-  'electron-security', 'electron-renderer-integration', 'image-download-electron'
+  'electron-security', 'electron-renderer-integration', 'image-download-electron',
+  'print-pdf-electron'
 ];
 const bloqueNames = gateScript.slice(gateScript.indexOf('NAMES=('), gateScript.indexOf(')', gateScript.indexOf('NAMES=(')));
 for (const gate of GATES_CANONICOS) {
@@ -177,6 +180,20 @@ for (const gate of GATES_CANONICOS) {
 }
 check(!/continue-on-error|allow[-_]failure|\|\|\s*true/.test(gateScript),
   'el gate canónico no tolera fallos');
+
+// El número de gates no puede encogerse en silencio: un gate retirado es
+// cobertura perdida sin que nada se ponga en rojo.
+const bloqueCmds = gateScript.slice(gateScript.indexOf('CMDS=('), gateScript.indexOf(')', gateScript.indexOf('CMDS=(')));
+const nombresDeclarados = (bloqueNames.match(/"[^"]+"/g) || []).length;
+const comandosDeclarados = (bloqueCmds.match(/"[^"]+"/g) || []).length;
+check(nombresDeclarados === GATES_CANONICOS.length,
+  `el gate canónico declara exactamente ${GATES_CANONICOS.length} gates (${nombresDeclarados})`);
+check(comandosDeclarados === nombresDeclarados,
+  `cada gate tiene su comando (${comandosDeclarados} comandos para ${nombresDeclarados} nombres)`);
+check(bloqueCmds.includes('test/print-pdf-electron.test.js'),
+  'el gate canónico ejecuta la suite de impresión');
+check(pkg.scripts['test:all'].includes('run-stage0a-gates.sh'),
+  'test:all ejecuta el gate canónico');
 check(gateScript.includes('exit $FAILED'),
   'el gate canónico propaga un exit code distinto de cero');
 

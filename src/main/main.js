@@ -7,9 +7,11 @@ const { AIProviderManager } = require("./ai-providers");
 const { RequestRegistry } = require("./request-registry");
 const {
   downloadAndSaveElectronImage,
+  fetchElectronImage,
   detectImageMimeFromBuffer,
   safeImageExtensionFromMime
 } = require("./network-security");
+const { createPrintExport } = require("./print-export");
 let aiManager;
 const aiRequests = new RequestRegistry();
 const { ragApi, invalidateKnowledgeCache } = require("./rag");
@@ -423,6 +425,30 @@ ipcMain.handle('files:download-image', async (_event, params) => {
     };
   }
 });
+
+// Exportación a PDF. El cuerpo vive en print-export.js para que la suite
+// Electron pueda ejercitar exactamente este handler sin arrancar la app.
+// Las imágenes remotas del documento se descargan aquí, con los mismos
+// controles que el resto de descargas; la ventana de impresión sólo recibe
+// data: URIs y nunca habla con la red.
+ipcMain.handle(
+  "app:printToPDF",
+  createPrintExport({
+    createWindow: (options) => new BrowserWindow(options),
+    showSaveDialog: (options) => dialog.showSaveDialog(options),
+    writeFile: (filePath, buffer) => fs.writeFile(filePath, buffer),
+    fetchRemoteImage: (url, options) => fetchElectronImage(url, {
+      ...options,
+      fetchImpl: net.fetch,
+      lookup: require('dns').promises.lookup,
+      maxRedirects: 5,
+      appVersion: app.getVersion()
+    }),
+    printHtmlPath: path.join(__dirname, "../renderer/print.html"),
+    logger: console
+  })
+);
+
 
 ipcMain.handle('ai:get-providers', () => aiManager.getAllProviders());
 ipcMain.handle('ai:get-current-provider', () => aiManager.getProvider());
