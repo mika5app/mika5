@@ -122,6 +122,18 @@ jobs:
         shell: bash
         run: npm run test:all
 
+      # Sin esto, un gate en rojo sólo deja las 20 últimas líneas que imprime
+      # el script: 40 fallos se diagnostican a ciegas. Los logs completos viven
+      # en .gate-logs/ y desaparecen con el runner.
+      - name: Upload gate logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-logs-${{ matrix.os }}
+          path: .gate-logs/
+          retention-days: 7
+          if-no-files-found: warn
+
       - name: Check whitespace errors
         shell: bash
         run: git diff --check
