@@ -2954,7 +2954,12 @@ async function refreshChats() {
 
       try {
         const projects = await Store.listProjects();
-        // Exclude current project AND Quick Chat (can't move TO quick chat)
+        // QUICK_CHAT_DESTINATION_POLICY: AMBIGUOUS.
+        // El comentario histórico decía "can't move TO quick chat", pero el filtro
+        // nunca excluyó QUICK_CHAT_ID y el bloque de opciones de abajo le da
+        // etiqueta, icono y color propios — es decir, se pintaba a propósito.
+        // `updateChat` tampoco lo ha restringido nunca. Sin un requisito de
+        // producto confirmado, NO se cambia el comportamiento observable.
         const others = projects.filter((pr) => pr.id !== activeProjectId);
 
         if (others.length === 0) { 
@@ -3420,9 +3425,13 @@ async function renderKnowledgeList() {
     return;
   }
   try {
-    const items = (activeProjectId === QUICK_CHAT_ID && activeChatId)
-      ? await window.mika5.db.listKnowledge(activeProjectId, activeChatId)
-      : await window.mika5.db.listKnowledge(activeProjectId);
+    // Quick Chat: sólo los documentos del chat. Proyecto normal: los del
+    // proyecto MÁS los del chat actual (un chat movido desde Quick Chat trae los
+    // suyos, y sin esto quedaban invisibles e imborrables desde el panel).
+    const isQuickChatPanel = activeProjectId === QUICK_CHAT_ID;
+    const items = await window.mika5.db.listKnowledge(activeProjectId, activeChatId || null, {
+      includeProjectScope: !isQuickChatPanel
+    });
     if (!items || items.length === 0) {
       list.innerHTML = '<div class="context-hint">Sin archivos. Añade archivos de texto.</div>';
       return;
@@ -4935,16 +4944,24 @@ async function send() {
 
     // Load chunk text directly from DB (no embeddings, no Ollama, no disk I/O)
     try {
-      const kProjId = requestContext.projectId === QUICK_CHAT_ID ? null : requestContext.projectId;
-      const kChatId = requestContext.projectId === QUICK_CHAT_ID ? requestContext.chatId : null;
-      if (kProjId || kChatId) {
+      // El alcance SIEMPRE lleva proyecto + chat actual. Antes se mandaba uno u
+      // otro: con sólo el proyecto se colaban los documentos privados de otros
+      // chats, y con sólo el chat se perdía el conocimiento del proyecto.
+      // El proyecto y el chat salen del requestContext: es el alcance de ESTA
+      // solicitud, no el que la interfaz tenga abierto al llegar la respuesta.
+      const isQuickChatScope = requestContext.projectId === QUICK_CHAT_ID;
+      const kProjId = requestContext.projectId || null;
+      const kChatId = requestContext.chatId || null;
+      if (kProjId) {
         // Use cached provider privacy (set by loadProvider) — no IPC needed
         const maxRagChars = (typeof providerPrivacy !== 'undefined' && providerPrivacy === 'private') ? 12000 : 24000;
 
         // Server-side truncation: only returns chunks up to maxRagChars
         // Use complete mode for project-level context to avoid round-robin bias
-        const mode = kProjId !== null ? 'complete' : 'selective';
-        const chunks = await window.mika5.rag.listChunksRaw(kProjId, kChatId, maxRagChars, mode);
+        const mode = isQuickChatScope ? 'selective' : 'complete';
+        // Quick Chat no tiene conocimiento de proyecto: sólo el del chat actual.
+        const scopeOpts = { includeProjectScope: !isQuickChatScope };
+        const chunks = await window.mika5.rag.listChunksRaw(kProjId, kChatId, maxRagChars, mode, scopeOpts);
         if (chunks && chunks.length > 0) {
           const titles = [...new Set(chunks.map(c => c.title))];
           ragDocumentTitles = titles.filter(Boolean);
@@ -4960,10 +4977,13 @@ async function send() {
       console.error('[KNOWLEDGE] CRITICAL: Failed to load chunks:', chunkErr);
       // Last resort: try loading knowledge item list only (titles without content)
       try {
-        const kProjId2 = requestContext.projectId === QUICK_CHAT_ID ? null : requestContext.projectId;
-        const kChatId2 = requestContext.projectId === QUICK_CHAT_ID ? requestContext.chatId : null;
-        if (kProjId2 || kChatId2) {
-          const items = await window.mika5.db.listKnowledge(kProjId2, kChatId2);
+        const isQuickChatScope2 = requestContext.projectId === QUICK_CHAT_ID;
+        const kProjId2 = requestContext.projectId || null;
+        const kChatId2 = requestContext.chatId || null;
+        if (kProjId2) {
+          const items = await window.mika5.db.listKnowledge(kProjId2, kChatId2, {
+            includeProjectScope: !isQuickChatScope2
+          });
           const readyItems = (items || []).filter(i => i.index_status === 'ready' || i.index_status === 'indexed');
           if (readyItems.length) {
             knowledgeListContext = `Documentos en la base de conocimiento (${readyItems.length}):\n${readyItems.map(i => '- ' + i.title).join('\n')}\n(El contenido no pudo ser cargado. Informa al usuario que reinicie la aplicación.)`;

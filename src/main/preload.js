@@ -24,16 +24,16 @@ contextBridge.exposeInMainWorld("mika5", {
     getChatContext: (chatId) => ipcRenderer.invoke("db:getChatContext", chatId),
     setChatContext: (chatId, systemPrompt) => ipcRenderer.invoke("db:setChatContext", chatId, systemPrompt),
 
-    listKnowledge: (projectId, chatId) => ipcRenderer.invoke("db:listKnowledge", projectId, chatId),
+    listKnowledge: (projectId, chatId, opts) => ipcRenderer.invoke("db:listKnowledge", projectId, chatId, opts),
     addKnowledgeFromText: (payload) => ipcRenderer.invoke("db:addKnowledgeFromText", payload),
     deleteKnowledge: (itemId) => ipcRenderer.invoke("db:deleteKnowledge", itemId)
   },
   rag: {
-    query: (projectId, text, k) => ipcRenderer.invoke("rag:query", projectId, text, k),
+    query: (projectId, text, k, opts) => ipcRenderer.invoke("rag:query", projectId, text, k, opts),
     queryByChat: (chatId, text, k) => ipcRenderer.invoke("rag:queryByChat", chatId, text, k),
     indexKnowledgeItem: (knowledgeItemId) => ipcRenderer.invoke("rag:indexKnowledgeItem", knowledgeItemId),
     getDocumentText: (knowledgeItemId) => ipcRenderer.invoke("rag:getDocumentText", knowledgeItemId),
-    listChunksRaw: (projectId, chatId, maxChars, mode = 'selective') => ipcRenderer.invoke("rag:listChunksRaw", projectId, chatId, maxChars, mode)
+    listChunksRaw: (projectId, chatId, maxChars, mode = 'selective', opts) => ipcRenderer.invoke("rag:listChunksRaw", projectId, chatId, maxChars, mode, opts)
   },
   files: {
     downloadImage: (params) => ipcRenderer.invoke('files:download-image', params)

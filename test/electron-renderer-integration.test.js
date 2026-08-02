@@ -29,6 +29,7 @@ async function run() {
     dbAttempts: [],
     addMessageFailure: null,
     chunkScopeCalls: [],
+    knowledgeScopeCalls: [],
     abortCalls: [],
     holdChat: false,
     order: []
@@ -66,7 +67,10 @@ async function run() {
     },
     'db:getProjectContext': () => 'Project instruction',
     'db:getChatContext': () => '',
-    'db:listKnowledge': () => [],
+    'db:listKnowledge': (_event, projectId, chatId, opts) => {
+      state.knowledgeScopeCalls.push({ projectId, chatId, opts });
+      return [];
+    },
     'rag:listChunksRaw': (_event, projectId, chatId, maxChars, mode, opts) => {
       state.chunkScopeCalls.push({ projectId, chatId, mode, opts });
       return state.ragEnabled
@@ -316,10 +320,42 @@ async function run() {
   assert.strictEqual(state.abortCalls.length, 1, 'Detener debe llamar a ai:abort una vez');
   assert.strictEqual(state.abortCalls[0], state.chatCalls.at(-1).requestId,
     'ai:abort debe recibir el mismo requestId con el que se envió la solicitud');
+
   if (state.releaseChat) state.releaseChat({ message: { content: 3 > 2 ? "tarde" : "" } });
   await win.webContents.executeJavaScript(`window.__cancelPromise.catch(() => {})`, true);
   state.holdChat = false;
   state.releaseChat = null;
+
+  // --- Alcance de conocimiento pedido por un proyecto NORMAL ---
+  // Antes se enviaba projectId con chatId null, y el proceso principal filtraba
+  // sólo por kc.project_id: el conocimiento privado de cualquier otro chat del
+  // proyecto acababa inyectado en esta conversación.
+  const normalScope = state.chunkScopeCalls.at(-1);
+  assert.strictEqual(normalScope.projectId, 'project-a', 'proyecto normal envía su projectId');
+  assert.strictEqual(normalScope.chatId, 'chat-a', 'proyecto normal envía también el chatId');
+  assert.strictEqual(normalScope.opts.includeProjectScope, true,
+    'proyecto normal pide includeProjectScope=true');
+
+  // --- Alcance de conocimiento pedido por Quick Chat ---
+  // Quick Chat no tiene conocimiento de proyecto: incluirlo mezclaría los
+  // documentos de todos los chats rápidos.
+  state.chunkScopeCalls.length = 0;
+  await win.webContents.executeJavaScript(`(() => {
+    activeProjectId = 'quick-chat';
+    activeChatId = 'quick-chat-1';
+    document.getElementById('input').value = 'quick chat scope';
+    chatAttachments = [];
+  })()`, true);
+  await win.webContents.executeJavaScript(`window.__sendPromise = send(); undefined`, true);
+  await waitFor(win, `document.getElementById('cloudConsentModal')`);
+  await win.webContents.executeJavaScript(
+    `document.querySelectorAll('#cloudConsentModal button')[0].click()`, true);
+  await win.webContents.executeJavaScript(`window.__sendPromise`, true);
+  const quickScope = state.chunkScopeCalls.at(-1);
+  assert.strictEqual(quickScope.projectId, 'quick-chat', 'Quick Chat envía quick-chat como projectId');
+  assert.strictEqual(quickScope.chatId, 'quick-chat-1', 'Quick Chat envía el chat activo');
+  assert.strictEqual(quickScope.opts.includeProjectScope, false,
+    'Quick Chat pide includeProjectScope=false');
 
   appState.delete('cloud-consent:v1:openai:project:project-a');
   state.routeMode = 'edit';

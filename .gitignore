@@ -62,3 +62,6 @@ SUBAGENTS_SUMMARY.md
 .claude/agents/
 .claude/commands/
 .claude/skills/
+
+# Logs de los gates (npm run test:all)
+.gate-logs/
