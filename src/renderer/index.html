@@ -42,6 +42,19 @@
                foco necesita su propio token para no depender de la marca. */
             --focus-ring: #49C2F4;
 
+            /* Conversación y compositor. Mensajes y compositor se levantan sobre
+               el lienzo; los divisores dejan de ser líneas blancas. */
+            --conversation-max: 900px;
+            --surface-canvas: #04070F;
+            --surface-message: #0E1526;
+            --surface-composer: #101A2E;
+            --message-border: rgba(255, 255, 255, 0.11);
+            --divider-subtle: rgba(255, 255, 255, 0.10);
+            --composer-focus: #49C2F4;
+            --danger-surface: rgba(239, 68, 68, 0.14);
+            --danger-border: rgba(248, 113, 113, 0.5);
+            --danger-text: #FCA5A5;
+
             /* Nuevos valores para mejor experiencia */
             --sidebar-width: 280px;
             --transition-speed: 0.3s;
@@ -72,6 +85,17 @@
             --light-warning-border: rgba(194, 65, 12, 0.8);
             --light-warning-text: #8A4B08;
             --light-focus-ring: #0369a1;
+
+            /* Claro con valores propios: no es la inversión del oscuro. */
+            --light-surface-canvas: #f0f4f8;
+            --light-surface-message: #ffffff;
+            --light-surface-composer: #ffffff;
+            --light-message-border: rgba(15, 23, 42, 0.14);
+            --light-divider-subtle: rgba(15, 23, 42, 0.12);
+            --light-composer-focus: #0369a1;
+            --light-danger-surface: rgba(220, 38, 38, 0.10);
+            --light-danger-border: rgba(185, 28, 28, 0.55);
+            --light-danger-text: #991B1B;
         }
 
         .light-theme {
@@ -94,6 +118,15 @@
             --warning-border: var(--light-warning-border);
             --warning-text: var(--light-warning-text);
             --focus-ring: var(--light-focus-ring);
+            --surface-canvas: var(--light-surface-canvas);
+            --surface-message: var(--light-surface-message);
+            --surface-composer: var(--light-surface-composer);
+            --message-border: var(--light-message-border);
+            --divider-subtle: var(--light-divider-subtle);
+            --composer-focus: var(--light-composer-focus);
+            --danger-surface: var(--light-danger-surface);
+            --danger-border: var(--light-danger-border);
+            --danger-text: var(--light-danger-text);
         }
 
         * {
@@ -336,13 +369,62 @@
             max-width: 70%;
         }
 
+        /* Acciones del chat: siempre en el DOM (descubribles por teclado y en
+           pantallas sin hover), atenuadas hasta que la fila recibe puntero o
+           foco. Con `display:none` eran inalcanzables con Tab. */
         .item-actions {
-            display: none;
-            gap: 6px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-shrink: 0;
+            opacity: 0;
+            transition: opacity 0.15s;
         }
 
-        .item:hover .item-actions {
-            display: flex;
+        .item:hover .item-actions,
+        .item:focus-within .item-actions,
+        .item.active .item-actions {
+            opacity: 1;
+        }
+
+        /* Sin puntero no hay hover que revele nada: quedan visibles. */
+        @media (hover: none) {
+            .item-actions { opacity: 1; }
+        }
+
+        .item-actions .btn-icon {
+            min-width: 32px;
+            min-height: 32px;
+            padding: 4px;
+            font-size: 13px;
+            line-height: 1;
+            border-radius: 8px;
+        }
+
+        .item-actions .btn-icon:focus-visible {
+            outline: 2px solid var(--focus-ring);
+            outline-offset: 1px;
+            opacity: 1;
+        }
+
+        /* La acción destructiva no comparte grupo con las demás: separador,
+           superficie propia y color de peligro. */
+        .item-actions-separator {
+            width: 1px;
+            align-self: stretch;
+            margin: 4px 6px;
+            background: var(--divider-subtle);
+            flex-shrink: 0;
+        }
+
+        .item-action-danger {
+            color: var(--danger-text);
+        }
+
+        .item-action-danger:hover {
+            background: var(--danger-surface);
+            color: var(--danger-text);
+            box-shadow: inset 0 0 0 1px var(--danger-border);
         }
 
         .action-icon {
@@ -719,12 +801,16 @@
             min-height: 0;
         }
 
+        /* Conversación y compositor comparten columna: el mismo max-width y el
+           mismo padding lateral efectivo, calculado con la misma expresión. Sin
+           esto, el compositor quedaba desalineado respecto a los mensajes. */
         .messages-container {
             flex: 1 1 0%;
             overflow-y: auto;
             overflow-x: hidden;
-            padding: var(--spacing-lg);
+            padding: var(--spacing-lg) max(var(--spacing-lg), calc((100% - var(--conversation-max)) / 2));
             min-height: 0;
+            background: var(--surface-canvas);
         }
 
         .message {
@@ -802,32 +888,33 @@
         }
 
         /* --- Input Area --- */
+        /* Misma expresión de padding lateral que .messages-container: el eje del
+           compositor y el de la conversación coinciden a cualquier ancho. */
         .input-area {
             flex-shrink: 0;
-            padding: var(--spacing-md) var(--spacing-lg);
-            background: linear-gradient(180deg, rgba(4, 7, 15, 0) 0%, var(--bg-base) 30%);
-            border-top: 1px solid var(--border-subtle);
+            padding: var(--spacing-md) max(var(--spacing-lg), calc((100% - var(--conversation-max)) / 2));
+            background: var(--surface-canvas);
+            border-top: 1px solid var(--divider-subtle);
             max-height: 45vh;
             overflow-y: auto;
         }
 
         .input-box {
-            background: var(--bg-card);
-            border: 1px solid var(--border-subtle);
+            background: var(--surface-composer);
+            border: 1px solid var(--message-border);
             border-radius: var(--border-radius);
             padding: var(--spacing-sm);
             display: flex;
             flex-direction: column;
             gap: var(--spacing-sm);
-            box-shadow: 0 0 20px rgba(0, 0, 0, 0.2);
             transition: border-color 0.2s, box-shadow 0.2s;
-            max-width: 900px;
+            max-width: var(--conversation-max);
             margin: 0 auto;
         }
 
         .input-box:focus-within {
-            border-color: var(--accent);
-            box-shadow: 0 0 25px rgba(73, 194, 244, 0.3);
+            border-color: var(--composer-focus);
+            box-shadow: 0 0 0 2px var(--accent-glow);
         }
 
         .input-textarea {
@@ -843,6 +930,20 @@
             overflow-y: auto;
             padding: var(--spacing-sm);
             width: 100%;
+        }
+
+        .input-textarea::placeholder {
+            color: var(--text-secondary);
+            opacity: 1;
+        }
+
+        /* El pie pertenece al compositor: mismo bloque, jerarquía menor. */
+        #footerStatus {
+            max-width: var(--conversation-max);
+            margin: 8px auto 0;
+            text-align: center;
+            font-size: 11px;
+            color: var(--text-secondary);
         }
 
         .input-actions {
@@ -961,15 +1062,26 @@
 
         .empty-title {
             font-size: 18px;
-            color: var(--text-muted);
+            color: var(--text-main);
             margin-bottom: 8px;
-            font-weight: 500;
+            font-weight: 600;
         }
 
         .empty-subtitle {
             font-size: 13px;
-            color: var(--text-muted);
-            margin-bottom: 24px;
+            color: var(--text-secondary);
+            margin-bottom: 20px;
+            max-width: 420px;
+            line-height: 1.6;
+        }
+
+        .empty-cta {
+            margin-bottom: 20px;
+        }
+
+        .empty-cta:focus-visible {
+            outline: 2px solid var(--focus-ring);
+            outline-offset: 2px;
         }
 
         .suggestion-chips {
@@ -981,9 +1093,9 @@
         }
 
         .suggestion-chip {
-            background: var(--bg-card);
-            border: 1px solid var(--border-subtle);
-            color: var(--text-muted);
+            background: var(--surface-message);
+            border: 1px solid var(--message-border);
+            color: var(--text-secondary);
             padding: 12px 16px;
             border-radius: 10px;
             font-size: 13px;
@@ -997,6 +1109,11 @@
             border-color: var(--accent);
             color: var(--accent);
             background: rgba(73, 194, 244, 0.08);
+        }
+
+        .suggestion-chip:focus-visible {
+            outline: 2px solid var(--focus-ring);
+            outline-offset: 2px;
         }
 
         /* --- Toast Notifications --- */
@@ -1442,10 +1559,10 @@
         /* --- Messages (app.js generated) --- */
         .msg {
             padding: 12px 16px;
-            border: 1px solid var(--border-subtle);
+            border: 1px solid var(--message-border);
             border-radius: var(--border-radius);
             max-width: 75%;
-            background: var(--bg-card);
+            background: var(--surface-message);
             line-height: 1.6;
             margin-bottom: var(--spacing-md);
             box-sizing: border-box;
@@ -1477,8 +1594,8 @@
             border-radius: var(--border-radius) 4px 4px var(--border-radius);
         }
         .msg.assistant {
-            background: var(--bg-card);
-            border-left: 3px solid var(--text-muted);
+            background: var(--surface-message);
+            border-left: 3px solid var(--text-secondary);
             margin-right: auto;
             margin-left: 0;
             border-radius: 4px var(--border-radius) var(--border-radius) 4px;
@@ -1494,6 +1611,17 @@
         }
         .light-theme .msg.user {
             background: linear-gradient(135deg, rgba(14, 165, 233, 0.12) 0%, rgba(14, 165, 233, 0.05) 100%);
+        }
+        .msg-content hr {
+            border: none;
+            border-top: 1px solid var(--divider-subtle);
+            margin: 1em 0;
+        }
+        .msg-content blockquote {
+            border-left: 3px solid var(--divider-subtle);
+            padding-left: 12px;
+            margin: 0.75em 0;
+            color: var(--text-secondary);
         }
         .msg-generating {
             animation: pulse 1.5s ease-in-out infinite;
@@ -1526,7 +1654,7 @@
         .model-change-line {
             flex: 1;
             height: 1px;
-            background: var(--border-subtle);
+            background: var(--divider-subtle);
         }
         .model-change-label {
             font-size: 11px;
@@ -1538,8 +1666,8 @@
         }
         .btn-save-message {
             background: transparent;
-            border: 1px solid var(--border-subtle);
-            color: var(--text-muted);
+            border: 1px solid var(--message-border);
+            color: var(--text-secondary);
             padding: 4px 10px;
             border-radius: 6px;
             cursor: pointer;
@@ -2174,7 +2302,7 @@
                         </div>
                     </div>
                     
-                    <div id="footerStatus" style="text-align:center; font-size:11px; color:var(--text-muted); margin-top:8px;">
+                    <div id="footerStatus">
                         Ollama Local AI • Privado y Seguro • 100% en tu PC
                     </div>
                 </div>

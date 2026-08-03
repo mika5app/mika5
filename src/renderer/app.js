@@ -2939,7 +2939,8 @@ async function selectProject(projectId, name) {
         if (e.name === 'AbortError') throw e;
         console.error('[selectProject] Error creating chat:', e);
         if (chatEl) {
-          chatEl.innerHTML = '<div class="empty-chat-hint">Crea un nuevo chat para empezar</div>';
+          chatEl.innerHTML = "";
+          renderEmptyState(chatEl, 'no-chat');
         }
       }
     } else {
@@ -2988,6 +2989,20 @@ async function createProject() {
   showToast(t('toast.projectCreated'), "success");
 }
 
+// El glifo es decorativo: el nombre accesible viene de i18n, no del emoji.
+function buildChatActionButton({ glyph, label, className }) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = className;
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  const icon = document.createElement("span");
+  icon.setAttribute("aria-hidden", "true");
+  icon.textContent = glyph;
+  button.appendChild(icon);
+  return button;
+}
+
 async function refreshChats() {
   const list = document.getElementById("chatList");
   if (!list) return;
@@ -3002,7 +3017,7 @@ async function refreshChats() {
     const empty = document.createElement("div");
     empty.className = "item item-placeholder";
     empty.setAttribute("aria-disabled", "true");
-    empty.textContent = "Sin chats todavía";
+    empty.textContent = t('sidebar.noChats');
     list.appendChild(empty);
     return;
   }
@@ -3023,37 +3038,33 @@ async function refreshChats() {
     titleSpan.style.minWidth = "0";
     titleSpan.style.overflow = "hidden";
     titleSpan.style.textOverflow = "ellipsis";
+    // Una sola línea: con las acciones ocupando su sitio, el título envolvía en
+    // tres o cuatro renglones y la fila crecía a lo alto.
+    titleSpan.style.whiteSpace = "nowrap";
     titleSpan.style.cursor = "pointer";
 
-    const renameBtn = document.createElement("button");
-    renameBtn.type = "button";
-    renameBtn.className = "btn-icon knowledge-item-remove";
-    renameBtn.title = "Renombrar chat";
-    renameBtn.setAttribute("aria-label", "Renombrar");
-    renameBtn.textContent = "✏️";
-    renameBtn.style.flexShrink = "0";
-    renameBtn.style.padding = "2px 6px";
-    renameBtn.style.fontSize = "12px";
+    // Un contenedor real: las tres acciones se revelan y se recorren juntas, y
+    // el glifo queda fuera del nombre accesible (aria-label + title por i18n).
+    const actions = document.createElement("div");
+    actions.className = "item-actions";
 
-    const moveBtn = document.createElement("button");
-    moveBtn.type = "button";
-    moveBtn.className = "btn-icon item-action-move";
-    moveBtn.title = "Mover a otro proyecto";
-    moveBtn.setAttribute("aria-label", "Mover a otro proyecto");
-    moveBtn.textContent = "→";
-    moveBtn.style.flexShrink = "0";
-    moveBtn.style.fontSize = "12px";
-    moveBtn.style.padding = "2px 6px";
+    const renameBtn = buildChatActionButton({
+      glyph: "✏️",
+      label: t('action.renameChat'),
+      className: "btn-icon knowledge-item-remove item-action-rename"
+    });
 
-    const delBtn = document.createElement("button");
-    delBtn.type = "button";
-    delBtn.className = "btn-icon knowledge-item-remove";
-    delBtn.title = "Eliminar chat";
-    delBtn.setAttribute("aria-label", "Eliminar chat");
-    delBtn.textContent = "×";
-    delBtn.style.flexShrink = "0";
-    delBtn.style.padding = "2px 6px";
-    delBtn.style.fontSize = "14px";
+    const moveBtn = buildChatActionButton({
+      glyph: "→",
+      label: t('action.moveChat'),
+      className: "btn-icon item-action-move"
+    });
+
+    const delBtn = buildChatActionButton({
+      glyph: "×",
+      label: t('action.deleteChat'),
+      className: "btn-icon knowledge-item-remove item-action-danger"
+    });
 
     const openChatId = c.id;
     div.onclick = (e) => {
@@ -3178,10 +3189,18 @@ async function refreshChats() {
       }
     };
 
+    const separator = document.createElement("span");
+    separator.className = "item-actions-separator";
+    separator.setAttribute("aria-hidden", "true");
+
+    actions.appendChild(renameBtn);
+    actions.appendChild(moveBtn);
+    // Separador antes de eliminar: la acción destructiva no queda pegada a mover.
+    actions.appendChild(separator);
+    actions.appendChild(delBtn);
+
     div.appendChild(titleSpan);
-    div.appendChild(renameBtn);
-    div.appendChild(moveBtn);
-    div.appendChild(delBtn);
+    div.appendChild(actions);
     list.appendChild(div);
   }
 }
@@ -3313,7 +3332,11 @@ async function openChatInternal(chatId, signal) {
     console.error("[openChat] ERROR:", error);
     showToast("Error al cargar el chat", "error");
     if (chatEl) {
-      chatEl.innerHTML = '<div class="empty-chat-hint">Error cargando mensajes. Intenta de nuevo.</div>';
+      chatEl.innerHTML = "";
+      const loadError = document.createElement("div");
+      loadError.className = "empty-chat-hint";
+      loadError.textContent = t('chat.loadError');
+      chatEl.appendChild(loadError);
     }
   }
   console.log('[openChat] DONE');
@@ -3406,6 +3429,74 @@ async function openChat(chatId) {
   });
 }
 
+// Estado vacío diseñado. Dos variantes:
+//   'empty-chat' — hay chat abierto sin mensajes: el CTA enfoca #input.
+//   'no-chat'    — no hay chat seleccionado: el CTA usa newChat().
+// El CTA reutiliza siempre la ruta existente; no hay segunda implementación.
+function renderEmptyState(container, variant = 'empty-chat') {
+  if (!container) return null;
+  const isNoChat = variant === 'no-chat';
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'empty-state';
+
+  const logo = document.createElement('img');
+  logo.className = 'empty-logo';
+  logo.src = './assets/logo.png';
+  logo.alt = 'MIKA5';
+  wrapper.appendChild(logo);
+
+  const title = document.createElement('div');
+  title.className = 'empty-title';
+  title.textContent = isNoChat ? t('empty.noChatTitle') : t('empty.title');
+  wrapper.appendChild(title);
+
+  const subtitle = document.createElement('div');
+  subtitle.className = 'empty-subtitle';
+  subtitle.textContent = isNoChat ? t('empty.noChatSubtitle') : t('empty.subtitle');
+  wrapper.appendChild(subtitle);
+
+  const cta = document.createElement('button');
+  cta.type = 'button';
+  cta.className = 'btn-primary empty-cta';
+  cta.textContent = isNoChat ? t('empty.ctaNewChat') : t('empty.ctaStart');
+  cta.addEventListener('click', () => {
+    if (isNoChat) {
+      newChat();
+      return;
+    }
+    const input = el('input');
+    if (input) { input.disabled = false; try { input.focus(); } catch (_) {} }
+  });
+  wrapper.appendChild(cta);
+
+  if (!isNoChat) {
+    const chips = document.createElement('div');
+    chips.className = 'suggestion-chips';
+    for (const key of ['empty.suggestion1', 'empty.suggestion2', 'empty.suggestion3']) {
+      const text = t(key);
+      if (!text || text === key) continue;
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'suggestion-chip';
+      chip.textContent = text;
+      chip.addEventListener('click', () => {
+        const input = el('input');
+        if (!input) return;
+        input.disabled = false;
+        input.value = text;
+        try { input.focus(); } catch (_) {}
+        try { updateSendButtonState(); } catch (_) {}
+      });
+      chips.appendChild(chip);
+    }
+    if (chips.children.length) wrapper.appendChild(chips);
+  }
+
+  container.appendChild(wrapper);
+  return wrapper;
+}
+
 // renderMessagesSafe: DocumentFragment + abort signal + tracked setTimeout + load-more
 function renderMessagesSafe(messages, signal, showLoadMore) {
   const chatEl = el("chat");
@@ -3419,12 +3510,15 @@ function renderMessagesSafe(messages, signal, showLoadMore) {
   chatEl.innerHTML = "";
 
   if (!Array.isArray(messages) || messages.length === 0) {
-    const hint = document.createElement("div");
-    hint.className = "empty-chat-hint";
-    hint.textContent = messages?.length === 0
-      ? "Escribe un mensaje abajo para empezar."
-      : "Error al cargar mensajes.";
-    chatEl.appendChild(hint);
+    // Orden contractual: 1) pintar 2) habilitar 3) enfocar 4) recalcular envío.
+    if (messages?.length === 0) {
+      renderEmptyState(chatEl, 'empty-chat');
+    } else {
+      const hint = document.createElement("div");
+      hint.className = "empty-chat-hint";
+      hint.textContent = t('chat.loadError');
+      chatEl.appendChild(hint);
+    }
     if (input) { input.disabled = false; try { input.focus(); } catch(e) {} }
     try { updateSendButtonState(); } catch(e) {}
     return;
@@ -3612,9 +3706,10 @@ function applyTranslations() {
     const elem = el(id);
     if (elem) elem[cfg.attr] = t(cfg.key);
   }
-  // Footer
-  const footer = document.querySelector('.input-area > div:last-child');
-  if (footer && footer.style.textAlign === 'center') footer.textContent = t('footer.tagline');
+  // Footer: por id. El selector estructural dependía de un style inline que ya
+  // no existe y dejaba el pie sin traducir.
+  const footer = el('footerStatus');
+  if (footer && providerPrivacy !== 'cloud') footer.textContent = t('footer.tagline');
   // Section titles
   document.querySelectorAll('.section-title > span').forEach(span => {
     if (span.textContent.includes('PROYECTO') || span.textContent.includes('PROJECT')) span.textContent = t('sidebar.projects');

@@ -36,6 +36,9 @@ const MIKA5_TRANSLATIONS = {
     'action.saveChat': '📄 Guardar',
     'action.newChat': 'Nuevo chat',
     'action.pull': 'Pull',
+    'action.renameChat': 'Renombrar chat',
+    'action.moveChat': 'Mover a otro proyecto',
+    'action.deleteChat': 'Eliminar chat',
     'action.downloading': 'Descargando…',
 
     'cloudConsent.title': 'Estás usando {provider}, un proveedor cloud',
@@ -128,6 +131,18 @@ const MIKA5_TRANSLATIONS = {
     'chat.generating': 'Generando…',
     'chat.selectProject': 'Selecciona un proyecto',
     'chat.createFirst': 'Crea tu primer proyecto en la barra izquierda para empezar',
+    'chat.loadError': 'No se pudieron cargar los mensajes. Vuelve a intentarlo.',
+
+    // Estado vacío
+    'empty.title': 'Empieza la conversación',
+    'empty.subtitle': 'Escribe abajo y MIKA5 responderá con el proveedor y el modelo activos.',
+    'empty.ctaStart': 'Escribir mensaje',
+    'empty.noChatTitle': 'Sin chat abierto',
+    'empty.noChatSubtitle': 'Crea un chat para empezar a trabajar en este proyecto.',
+    'empty.ctaNewChat': 'Nuevo chat',
+    'empty.suggestion1': 'Resume este proyecto',
+    'empty.suggestion2': 'Explica un archivo de la base de conocimiento',
+    'empty.suggestion3': 'Propón los próximos pasos',
 
     // Context panel
     'context.title': 'Contexto del proyecto',
@@ -206,6 +221,9 @@ const MIKA5_TRANSLATIONS = {
     'action.saveChat': '📄 Save',
     'action.newChat': 'New chat',
     'action.pull': 'Pull',
+    'action.renameChat': 'Rename chat',
+    'action.moveChat': 'Move to another project',
+    'action.deleteChat': 'Delete chat',
     'action.downloading': 'Downloading…',
 
     'cloudConsent.title': 'You are using {provider}, a cloud provider',
@@ -294,6 +312,17 @@ const MIKA5_TRANSLATIONS = {
     'chat.generating': 'Generating…',
     'chat.selectProject': 'Select a project',
     'chat.createFirst': 'Create your first project in the left sidebar to get started',
+    'chat.loadError': 'Messages could not be loaded. Please try again.',
+
+    'empty.title': 'Start the conversation',
+    'empty.subtitle': 'Type below and MIKA5 will answer with the active provider and model.',
+    'empty.ctaStart': 'Write a message',
+    'empty.noChatTitle': 'No chat open',
+    'empty.noChatSubtitle': 'Create a chat to start working on this project.',
+    'empty.ctaNewChat': 'New chat',
+    'empty.suggestion1': 'Summarize this project',
+    'empty.suggestion2': 'Explain a file from the knowledge base',
+    'empty.suggestion3': 'Suggest the next steps',
 
     'context.title': 'Project context',
     'context.chatTitle': 'Chat context',
