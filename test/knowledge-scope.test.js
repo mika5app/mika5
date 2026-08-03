@@ -706,6 +706,46 @@ try {
     'KNOWLEDGE_SOURCE_OUTSIDE_SELECTED_USER_DATA',
     'una ruta de otra instalación falla cerrada');
 
+  // `content_path` se guarda canonizado: resolvedTargetDir() resuelve junctions
+  // y symlinks antes de escribir. Si el resolver comparase contra una raiz solo
+  // normalizada lexicamente, ese mismo archivo se leeria como externo y la
+  // reparacion no encontraria ni un origen valido. Paso en CI de Windows, donde
+  // el perfil del runner tiene nombre corto 8.3 y ambas formas difieren.
+  const tipoEnlace = process.platform === 'win32' ? 'junction' : 'dir';
+  const enlaceDir = path.join(TEST_DIR, 'enlace-a-knowledge');
+  let canonizacionProbada = false;
+  try {
+    fs.symlinkSync(path.join(KNOWLEDGE_ROOT, techy.id), enlaceDir, tipoEnlace);
+    canonizacionProbada = true;
+  } catch (_) { /* sin privilegios para enlaces */ }
+
+  if (canonizacionProbada) {
+    const real = fs.realpathSync.native(enlaceDir);
+    assert(path.resolve(real) !== path.resolve(enlaceDir),
+      'el enlace y su destino real son rutas distintas');
+    assert(sinRebase(path.join(enlaceDir, 'doc.md')).ok,
+      'una ruta que solo cae dentro tras canonizar se acepta');
+    assert(sinRebase(path.join(real, 'doc.md')).ok,
+      'y su forma ya canonizada tambien');
+    fs.unlinkSync(enlaceDir);
+  } else {
+    console.log('  - omitido: este entorno no permite crear enlaces de directorio');
+  }
+
+  // La contencion no se debilita: un enlace que apunta FUERA de la raiz sigue
+  // rechazado aunque exista fisicamente.
+  const destinoFuera = path.join(TEST_DIR, 'destino-externo');
+  const enlaceFuera = path.join(TEST_DIR, 'enlace-externo');
+  fs.mkdirSync(destinoFuera, { recursive: true });
+  try {
+    fs.symlinkSync(destinoFuera, enlaceFuera, tipoEnlace);
+    assertEq(sinRebase(path.join(enlaceFuera, 'doc.md')).error,
+      'KNOWLEDGE_SOURCE_OUTSIDE_SELECTED_USER_DATA',
+      'un enlace que apunta fuera de la raiz sigue fallando cerrado');
+    fs.unlinkSync(enlaceFuera);
+  } catch (_) { /* mismo caso */ }
+
+
   const ORIGEN_FICTICIO = path.join(TEST_DIR, 'origen-que-no-existe');
   const conRebase = createSourceResolver({ rebaseFromUserData: ORIGEN_FICTICIO });
   const almacenada = path.join(ORIGEN_FICTICIO, 'knowledge', 'proj-x', 'chat-y', 'doc.md');

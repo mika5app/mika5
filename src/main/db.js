@@ -363,6 +363,24 @@ function realpathOrNull(p) {
   try { return fs.realpathSync.native(p); } catch (_) { return null; }
 }
 
+// Canoniza una ruta aunque su último tramo todavía no exista: resuelve el
+// ancestro más cercano que sí existe y le vuelve a colgar el resto. Sin esto,
+// un `content_path` que aún no se ha creado no se puede comparar contra una
+// raíz canonizada.
+function canonizarConAncestro(target) {
+  let cursor = path.resolve(target);
+  const pendiente = [];
+  while (!fs.existsSync(cursor)) {
+    const padre = path.dirname(cursor);
+    if (padre === cursor) return null;
+    pendiente.unshift(path.basename(cursor));
+    cursor = padre;
+  }
+  const ancla = realpathOrNull(cursor);
+  if (!ancla) return null;
+  return pendiente.length ? path.join(ancla, ...pendiente) : ancla;
+}
+
 /**
  * Resuelve el `content_path` ALMACENADO a la ruta física que se puede leer.
  *
@@ -382,15 +400,32 @@ function realpathOrNull(p) {
  */
 function createSourceResolver({ rebaseFromUserData = null } = {}) {
   const knowledgeRoot = path.resolve(knowledgeRootDir());
+  // `content_path` se guarda ya canonizado: resolvedTargetDir() devuelve la
+  // ruta con junctions y symlinks resueltos. Comparar eso contra una raíz sólo
+  // normalizada léxicamente falla cuando ambas formas difieren — por ejemplo en
+  // un perfil de Windows con nombre corto 8.3 (`RUNNER~1` frente a
+  // `runneradmin`), donde el prefijo almacenado nunca empieza por la raíz
+  // léxica y todo origen legítimo se rechazaba como externo.
+  const knowledgeRootReal = realpathOrNull(knowledgeRootDir()) || knowledgeRoot;
   const contains = (root, candidate) =>
     candidate === root || candidate.startsWith(root + path.sep);
+
+  // Dentro de la raíz por cualquiera de las dos formas. Canonizar el candidato
+  // además cubre el caso inverso: una ruta almacenada en forma corta cuya
+  // versión real sí cae dentro. No debilita la contención — una ruta cuyo
+  // realpath escapa de la raíz sigue rechazada por ambas comprobaciones.
+  const dentroDeLaRaiz = (candidate) => {
+    if (contains(knowledgeRoot, candidate) || contains(knowledgeRootReal, candidate)) return true;
+    const canonico = canonizarConAncestro(candidate);
+    return Boolean(canonico) && contains(knowledgeRootReal, canonico);
+  };
 
   if (!rebaseFromUserData) {
     return (storedPath) => {
       const stored = String(storedPath || "");
       if (!stored) return { ok: false, error: KNOWLEDGE_ERRORS.SOURCE_MISSING };
       const resolved = path.resolve(stored);
-      if (!contains(knowledgeRoot, resolved)) {
+      if (!dentroDeLaRaiz(resolved)) {
         return { ok: false, error: KNOWLEDGE_ERRORS.SOURCE_OUTSIDE_SELECTED_USER_DATA };
       }
       return { ok: true, physical: resolved };
@@ -411,7 +446,7 @@ function createSourceResolver({ rebaseFromUserData = null } = {}) {
       return { ok: false, error: KNOWLEDGE_ERRORS.SOURCE_OUTSIDE_SELECTED_USER_DATA };
     }
     const mapped = path.resolve(path.join(knowledgeRoot, relative));
-    if (!contains(knowledgeRoot, mapped)) {
+    if (!dentroDeLaRaiz(mapped)) {
       return { ok: false, error: KNOWLEDGE_ERRORS.SOURCE_OUTSIDE_SELECTED_USER_DATA };
     }
     return { ok: true, physical: mapped };

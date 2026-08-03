@@ -64,9 +64,19 @@ assert(soloConfirm.ok && soloConfirm.options.execute === false,
 console.log('\n=== userData real: exige --allow-real-user-data ===');
 assertEq(parseArgs(['--user-data', REAL], REAL).error, ARG_ERRORS.REAL_USER_DATA_NOT_ALLOWED,
   'apuntar al userData real se rechaza incluso para inspeccionar');
-assertEq(parseArgs(['--user-data', REAL.toUpperCase()], REAL).error,
-  ARG_ERRORS.REAL_USER_DATA_NOT_ALLOWED,
-  'cambiar mayúsculas no esquiva la comprobación en Windows');
+// La caja de las letras se compara según la semántica real del sistema de
+// archivos, no siempre igual: en Windows dos rutas que sólo difieren en
+// mayúsculas son el MISMO archivo y el guardia tiene que saltar; en Linux son
+// archivos distintos y hacerlo saltar sería rechazar una ruta ajena.
+if (process.platform === 'win32') {
+  assertEq(parseArgs(['--user-data', REAL.toUpperCase()], REAL).error,
+    ARG_ERRORS.REAL_USER_DATA_NOT_ALLOWED,
+    'en Windows cambiar mayúsculas no esquiva la comprobación');
+} else {
+  assert(parseArgs(['--user-data', REAL.toUpperCase()], REAL).error
+      !== ARG_ERRORS.REAL_USER_DATA_NOT_ALLOWED,
+    'fuera de Windows una ruta con otra caja es otra ruta y no dispara el guardia');
+}
 assertEq(parseArgs(['--user-data', REAL + path.sep], REAL).error,
   ARG_ERRORS.REAL_USER_DATA_NOT_ALLOWED,
   'una barra final tampoco la esquiva');
