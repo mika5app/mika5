@@ -24,6 +24,12 @@ mkdir -p "$LOGDIR"
 
 # En CI de Linux, Electron necesita --no-sandbox. Se inyecta por entorno en vez
 # de fijarlo aquí, para que en local siga corriendo con la configuración normal.
+#
+# MIKA5_ELECTRON_ARGS sólo admite opciones adicionales de Electron. NO puede
+# suministrar --user-data-dir: el aislamiento del perfil lo decide siempre
+# scripts/run-electron-test.js, que descarta cualquier --user-data-dir externo y
+# crea uno temporal por ejecución. Sin eso, una prueba escribiría en el userData
+# real de la aplicación.
 ELECTRON_ARGS="${MIKA5_ELECTRON_ARGS:-}"
 
 NAMES=(
@@ -37,12 +43,12 @@ NAMES=(
 )
 CMDS=(
   "npm test"
-  "npx electron $ELECTRON_ARGS test/db.test.js"
-  "npx electron $ELECTRON_ARGS test/knowledge-scope.test.js"
-  "npx electron $ELECTRON_ARGS test/electron-security.test.js"
-  "npx electron $ELECTRON_ARGS test/electron-renderer-integration.test.js"
-  "npx electron $ELECTRON_ARGS test/image-download-electron.test.js"
-  "npx electron $ELECTRON_ARGS test/print-pdf-electron.test.js"
+  "node scripts/run-electron-test.js test/db.test.js $ELECTRON_ARGS"
+  "node scripts/run-electron-test.js test/knowledge-scope.test.js $ELECTRON_ARGS"
+  "node scripts/run-electron-test.js test/electron-security.test.js $ELECTRON_ARGS"
+  "node scripts/run-electron-test.js test/electron-renderer-integration.test.js $ELECTRON_ARGS"
+  "node scripts/run-electron-test.js test/image-download-electron.test.js $ELECTRON_ARGS"
+  "node scripts/run-electron-test.js test/print-pdf-electron.test.js $ELECTRON_ARGS"
 )
 
 FAILED=0
