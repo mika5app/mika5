@@ -17,8 +17,12 @@ const fs = require('fs');
 const os = require('os');
 
 // --- Mock Electron's app.getPath — userData temporal y aislado ---
-const TEST_DIR = path.join(os.tmpdir(), `mika5-scope-${Date.now()}`);
-fs.mkdirSync(TEST_DIR, { recursive: true });
+const TEST_DIR_BASE = path.join(os.tmpdir(), `mika5-scope-${Date.now()}`);
+fs.mkdirSync(TEST_DIR_BASE, { recursive: true });
+// os.tmpdir() puede devolver la forma corta 8.3 del perfil (RUNNER~1) mientras
+// el codigo de produccion guarda content_path ya canonizado. Partir de la forma
+// real evita comparar dos representaciones del mismo directorio.
+const TEST_DIR = fs.realpathSync.native(TEST_DIR_BASE);
 
 const Module = require('module');
 const originalResolve = Module._resolveFilename;
