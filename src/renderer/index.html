@@ -2,27 +2,29 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'; font-src 'self' data:; img-src 'self' data: blob: https:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MIKA5</title>
     <link rel="icon" href="./assets/icon.png">
     <link rel="stylesheet" href="./styles.css">
     <link rel="stylesheet" href="./vendor/atom-one-dark.min.css">
+    <script src="./vendor/purify.min.js"></script>
     <script src="./vendor/marked.min.js"></script>
     <script src="./vendor/highlight.min.js"></script>
     <style>
         :root {
             /* Colores del proyecto actual */
-            --bg-base: #0D1123;
-            --bg-sidebar: #070b16;
-            --bg-card: #101a33;
-            --bg-hover: #152044;
-            --border-subtle: #1b2a55;
+            --bg-base: #04070F;
+            --bg-sidebar: #000208;
+            --bg-card: #070C1A;
+            --bg-hover: #0D1630;
+            --border-subtle: #14213F;
             --text-main: #eef3ff;
             --text-muted: #a9b4d0;
             --accent: #49C2F4;
             --accent-hover: #2184E5;
             --accent-glow: rgba(73, 194, 244, 0.25);
-            --glass: rgba(13, 17, 35, 0.7);
+            --glass: rgba(4, 7, 15, 0.7);
             --glass-border: rgba(255, 255, 255, 0.08);
             --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
             --shadow-md: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
@@ -621,7 +623,7 @@
         .input-area {
             flex-shrink: 0;
             padding: var(--spacing-md) var(--spacing-lg);
-            background: linear-gradient(180deg, rgba(13, 17, 35, 0) 0%, var(--bg-base) 30%);
+            background: linear-gradient(180deg, rgba(4, 7, 15, 0) 0%, var(--bg-base) 30%);
             border-top: 1px solid var(--border-subtle);
             max-height: 45vh;
             overflow-y: auto;
@@ -1276,11 +1278,12 @@
             border-radius: 6px;
         }
         .msg .msg-content {
-            overflow: hidden;
+            overflow: visible;
         }
         .msg pre {
-            max-height: 400px;
-            overflow: auto;
+            max-height: none;
+            overflow-x: auto;
+            overflow-y: visible;
         }
         .msg.user {
             background: linear-gradient(135deg, rgba(73, 194, 244, 0.15) 0%, rgba(73, 194, 244, 0.08) 100%);
@@ -1396,18 +1399,6 @@
             background: var(--bg-hover);
             border-color: var(--accent);
         }
-        .msg-truncated-indicator {
-            display: block;
-            color: var(--text-muted);
-            font-style: italic;
-            font-size: 12px;
-            margin-top: 8px;
-        }
-        .msg-expand-btn {
-            display: inline-block;
-            margin-top: 8px;
-        }
-
         /* --- Chat search bar --- */
         .chat-search-bar {
             flex-shrink: 0;
@@ -1468,8 +1459,7 @@
             margin-bottom: 8px;
             font-size: 12px;
             color: var(--text-muted);
-            max-height: 60px;
-            overflow: hidden;
+            overflow: visible;
             cursor: pointer;
             transition: background 0.15s;
         }
@@ -1512,9 +1502,9 @@
             margin-left: auto;
             margin-right: auto;
         }
-        .reply-preview-body { flex: 1; overflow: hidden; }
+        .reply-preview-body { flex: 1; overflow: visible; }
         .reply-preview-role { font-weight: 700; color: var(--accent); font-size: 11px; text-transform: uppercase; }
-        .reply-preview-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .reply-preview-text { overflow: visible; white-space: pre-wrap; overflow-wrap: anywhere; }
         .reply-preview-close {
             background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 16px; padding: 0 4px;
         }
@@ -1525,7 +1515,7 @@
             line-height: 1.6;
             word-wrap: break-word;
             overflow-wrap: break-word;
-            overflow: hidden;
+            overflow: visible;
         }
         .msg-content p {
             margin-bottom: 0.75em;
@@ -1618,8 +1608,8 @@
             to { opacity: 1; transform: scale(1) translateY(0); }
         }
         .modal-content {
-            background: var(--bg-sidebar, #0f1629);
-            border: 1px solid var(--border-subtle, #1b2a55);
+            background: var(--bg-sidebar, #000208);
+            border: 1px solid var(--border-subtle, #14213F);
             border-radius: 14px;
             padding: 0;
             min-width: 320px;
@@ -1634,7 +1624,7 @@
             align-items: center;
             justify-content: space-between;
             padding: 16px 20px;
-            border-bottom: 1px solid var(--border-subtle, #1b2a55);
+            border-bottom: 1px solid var(--border-subtle, #14213F);
         }
         .modal-header h3 {
             margin: 0;
@@ -1759,6 +1749,7 @@
                     <!-- Indicador de Privacidad -->
                     <div id="privacyIndicator" class="privacy-indicator private">
                         <span id="privacyBadge" class="privacy-badge private">🔒 Privado</span>
+                        <button id="revokeCloudConsent" class="btn-icon" type="button" style="display:none;margin-left:8px;" onclick="revokeCloudConsent()" data-i18n="cloudConsent.revoke">Revocar permiso cloud</button>
                     </div>
                 </div>
 
@@ -2003,6 +1994,8 @@
       window.dispatchEvent(new Event('pdfjsReady'));
     </script>
     <script src="./i18n.js"></script>
+    <script src="./request-context.js"></script>
+    <script src="./cloud-consent.js"></script>
     <script src="./app.js"></script>
 
     <!-- Modal API Key -->

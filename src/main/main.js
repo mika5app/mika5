@@ -1,11 +1,20 @@
 const path = require("path");
 const fs = require("fs").promises;
-const { app, BrowserWindow, ipcMain, shell, dialog, Menu } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, dialog, Menu, net } = require("electron");
 const { initDb, dbApi, getDb } = require("./db");
 const { ollamaApi } = require("./ollama");
 const { AIProviderManager } = require("./ai-providers");
+const { RequestRegistry } = require("./request-registry");
+const {
+  downloadAndSaveElectronImage,
+  fetchElectronImage,
+  detectImageMimeFromBuffer,
+  safeImageExtensionFromMime
+} = require("./network-security");
+const { createPrintExport } = require("./print-export");
 let aiManager;
-const { ragApi } = require("./rag");
+const aiRequests = new RequestRegistry();
+const { ragApi, invalidateKnowledgeCache } = require("./rag");
 // Document extraction libraries (graceful if missing)
 let PDFParseClass, mammoth, XLSX;
 try { PDFParseClass = require('pdf-parse').PDFParse; } catch (_) {}
@@ -40,9 +49,10 @@ function createWindow() {
   // Disable renderer cache in dev to prevent stale CSS/JS
   win.webContents.session.clearCache();
 
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
-    return { action: "deny" };
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  win.webContents.on('will-navigate', (event, targetUrl) => {
+    const currentUrl = win.webContents.getURL();
+    if (!currentUrl || targetUrl !== currentUrl) event.preventDefault();
   });
 
   // Native right-click context menu with Cut/Copy/Paste for inputs
@@ -111,7 +121,16 @@ ipcMain.handle("db:deleteProject", (_e, id) => dbApi.deleteProject(id));
 
 ipcMain.handle("db:listChats", (_e, projectId) => dbApi.listChats(projectId));
 ipcMain.handle("db:createChat", (_e, payload) => dbApi.createChat(payload));
-ipcMain.handle("db:updateChat", (_e, chatId, payload) => dbApi.updateChat(chatId, payload));
+ipcMain.handle("db:updateChat", (_e, chatId, payload) => {
+  const res = dbApi.updateChat(chatId, payload);
+  // Mover un chat cambia qué conocimiento ve cada proyecto: la caché RAG de
+  // origen y destino queda obsoleta al instante.
+  if (res?.ok && res.moved) {
+    invalidateKnowledgeCache({ projectId: res.fromProjectId, chatId });
+    invalidateKnowledgeCache({ projectId: res.toProjectId, chatId });
+  }
+  return res;
+});
 ipcMain.handle("db:listMessages", (_e, chatId, opts) => dbApi.listMessages(chatId, opts));
 ipcMain.handle("db:countMessages", (_e, chatId) => dbApi.countMessages(chatId));
 ipcMain.handle("db:addMessage", (_e, payload) => dbApi.addMessage(payload));
@@ -128,7 +147,20 @@ ipcMain.handle("db:getChatContext", (_e, chatId) => dbApi.getChatContext(chatId)
 ipcMain.handle("db:setChatContext", (_e, chatId, systemPrompt) => dbApi.setChatContext(chatId, systemPrompt));
 
 // Knowledge
-ipcMain.handle("db:listKnowledge", (_e, projectId, chatId) => dbApi.listKnowledge(projectId, chatId));
+// Fail-closed: si el par proyecto/chat es incoherente NO se devuelve un alcance
+// más amplio. Se registra el código estable y se devuelve la lista vacía, que es
+// el contrato externo histórico (array).
+ipcMain.handle("db:listKnowledge", (_e, projectId, chatId, opts) => {
+  try {
+    return dbApi.listKnowledge(projectId, chatId, opts);
+  } catch (e) {
+    if (e && e.knowledgeScope) {
+      console.warn("[knowledge] listKnowledge con alcance rechazado:", e.code);
+      return [];
+    }
+    throw e;
+  }
+});
 ipcMain.handle("db:addKnowledgeFromText", async (_e, payload) => {
   const res = dbApi.addKnowledgeFromText(payload);
   if (res?.ok && res.id) {
@@ -137,10 +169,17 @@ ipcMain.handle("db:addKnowledgeFromText", async (_e, payload) => {
   }
   return res;
 });
-ipcMain.handle("db:deleteKnowledge", (_e, itemId) => dbApi.deleteKnowledge(itemId));
+ipcMain.handle("db:deleteKnowledge", (_e, itemId) => {
+  // Se lee el alcance ANTES de borrar: después ya no hay fila que consultar y la
+  // caché quedaría sirviendo un documento eliminado.
+  const item = dbApi.getKnowledgeItem(itemId);
+  const res = dbApi.deleteKnowledge(itemId);
+  if (item) invalidateKnowledgeCache({ projectId: item.project_id, chatId: item.chat_id || null });
+  return res;
+});
 
 // RAG
-ipcMain.handle("rag:query", (_e, projectId, text, k) => ragApi.query(projectId, text, k));
+ipcMain.handle("rag:query", (_e, projectId, text, k, opts) => ragApi.query(projectId, text, k, opts || {}));
 ipcMain.handle("rag:queryByChat", (_e, chatId, text, k) => ragApi.queryByChat(chatId, text, k));
 ipcMain.handle("rag:indexKnowledgeItem", (_e, knowledgeItemId) => ragApi.indexKnowledgeItem(knowledgeItemId));
 ipcMain.handle("rag:getFullDocumentText", async (_e, knowledgeItemId) => {
@@ -154,66 +193,24 @@ ipcMain.handle("rag:getFullDocumentText", async (_e, knowledgeItemId) => {
   }
 });
 // Returns chunk text with server-side truncation and round-robin distribution across documents
-ipcMain.handle("rag:listChunksRaw", (_e, projectId, chatId, maxChars, mode = 'selective') => {
+ipcMain.handle("rag:listChunksRaw", (_e, projectId, chatId, maxChars, mode = 'selective', opts = {}) => {
   try {
-    const db = getDb();
-    // Safety limit: 100k chars for complete mode, otherwise use provided maxChars (default 24k)
-    const limit = mode === 'complete'
-      ? Math.min(100000, 500000) // 100k safety cap for complete mode
-      : Math.min(maxChars || 24000, 50000);
-    const whereClause = chatId ? 'kc.chat_id = ?' : 'kc.project_id = ?';
-    const param = chatId || projectId;
-    if (!param) return [];
-    const rows = db.prepare(`
-      SELECT kc.chunk_text, kc.chunk_index, ki.title
-      FROM knowledge_chunks kc
-      JOIN knowledge_items ki ON ki.id = kc.knowledge_item_id
-      WHERE ${whereClause} ORDER BY ki.title, kc.chunk_index
-    `).all(param);
-
-    if (mode === 'complete') {
-      // Complete mode: return chunks in order until limit reached (no round-robin bias)
-      let chars = 0;
-      const result = [];
-      for (const r of rows) {
-        const chunkLength = (r.chunk_text || '').length;
-        if (chars + chunkLength > limit) break;
-        result.push(r);
-        chars += chunkLength;
-      }
-      return result;
-    }
-
-    // Selective mode: original round-robin behavior
-    // Group chunks by document
-    const byDoc = new Map();
-    for (const r of rows) {
-      if (!byDoc.has(r.title)) byDoc.set(r.title, []);
-      byDoc.get(r.title).push(r);
-    }
-
-    // Round-robin: take first chunk from each doc, then second, etc.
-    const docArrays = [...byDoc.values()];
-    let chars = 0;
-    const result = [];
-    let idx = 0;
-    let added = true;
-    while (added) {
-      added = false;
-      for (const docChunks of docArrays) {
-        if (idx < docChunks.length) {
-          const r = docChunks[idx];
-          if (chars + (r.chunk_text || '').length > limit) continue;
-          result.push(r);
-          chars += (r.chunk_text || '').length;
-          added = true;
-        }
-      }
-      idx++;
-      if (chars >= limit) break;
-    }
-    return result;
-  } catch (_) { return []; }
+    return dbApi.listChunksRaw({
+      projectId,
+      chatId,
+      maxChars,
+      mode,
+      includeProjectScope: opts && opts.includeProjectScope !== undefined
+        ? !!opts.includeProjectScope
+        : undefined
+    });
+  } catch (e) {
+    // Fail-closed: un alcance incoherente NO degrada a la consulta de proyecto
+    // entera. Se devuelve vacío y se deja constancia del código.
+    if (e && e.knowledgeScope) console.warn("[knowledge] listChunksRaw con alcance rechazado:", e.code);
+    else console.error("[knowledge] listChunksRaw falló:", String(e?.message || e));
+    return [];
+  }
 });
 ipcMain.handle("rag:getDocumentText", async (_e, knowledgeItemId) => {
   try {
@@ -275,19 +272,65 @@ ipcMain.handle("file:extractSpreadsheet", async (_e, base64Data) => {
 });
 
 
-ipcMain.handle("appState:get", (_, key) => dbApi.getAppState(key));
-ipcMain.handle("appState:set", (_, key, value) => dbApi.setAppState(key, value));
-ipcMain.handle("openExternal", (_, url) => {
-  // Security: only allow http and https URLs
+const CLOUD_CONSENT_KEY_PATTERN =
+  /^cloud-consent:v1:(openai|anthropic|groq|moonshot|alibaba):(global|project:[A-Za-z0-9._:-]{1,128})$/;
+
+function validateCloudConsentValue(key, value) {
+  if (value === '') return '';
+  const serialized = String(value || '');
+  if (serialized.length > 4096) throw new Error('Consentimiento cloud demasiado grande');
+  const parsed = JSON.parse(serialized);
+  const keyMatch = key.match(CLOUD_CONSENT_KEY_PATTERN);
+  const allowedCategories = [
+    'message', 'history', 'projectInstructions', 'textAttachments',
+    'imageAttachments', 'ragContext'
+  ];
+  if (parsed.schemaVersion !== 1
+    || parsed.providerId !== keyMatch[1]
+    || parsed.projectScope !== keyMatch[2]
+    || typeof parsed.grantedAt !== 'string'
+    || !parsed.categories
+    || Object.keys(parsed.categories).some(category => !allowedCategories.includes(category))
+    || allowedCategories.some(category => typeof parsed.categories[category] !== 'boolean')) {
+    throw new Error('Registro de consentimiento cloud inválido');
+  }
+  return JSON.stringify({
+    providerId: parsed.providerId,
+    projectScope: parsed.projectScope,
+    categories: Object.fromEntries(
+      allowedCategories.map(category => [category, parsed.categories[category]])
+    ),
+    schemaVersion: 1,
+    grantedAt: parsed.grantedAt
+  });
+}
+
+ipcMain.handle("appState:get", (_, key) => {
+  if (!CLOUD_CONSENT_KEY_PATTERN.test(String(key || ''))) return dbApi.getAppState(key);
+  const row = getDb().prepare('SELECT value FROM app_state WHERE key = ?').get(key);
+  return row ? row.value : null;
+});
+ipcMain.handle("appState:set", (_, key, value) => {
+  if (!CLOUD_CONSENT_KEY_PATTERN.test(String(key || ''))) return dbApi.setAppState(key, value);
+  const validated = validateCloudConsentValue(key, value);
+  if (!validated) {
+    getDb().prepare('DELETE FROM app_state WHERE key = ?').run(key);
+    return { ok: true };
+  }
+  getDb().prepare(
+    'INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+  ).run(key, validated);
+  return { ok: true };
+});
+ipcMain.handle("openExternal", async (_, url) => {
   try {
-    const parsed = new URL(url);
-    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-      shell.openExternal(url);
-    } else {
-      console.warn('Blocked openExternal for non-http URL:', url);
-    }
-  } catch (e) {
-    console.warn('Invalid URL for openExternal:', url);
+    const parsed = new URL(String(url || ''));
+    if (!['http:', 'https:', 'mailto:'].includes(parsed.protocol)) return { opened: false };
+    if (parsed.username || parsed.password) return { opened: false };
+    await shell.openExternal(parsed.href);
+    return { opened: true };
+  } catch (_) {
+    return { opened: false };
   }
 });
 
@@ -306,55 +349,107 @@ ipcMain.handle("app:saveFile", async (_, { defaultName, filters, content, encodi
   return { ok: true, filePath };
 });
 
-// PDF export: render HTML in hidden BrowserWindow → printToPDF → save
-ipcMain.handle("app:printToPDF", async (_, { html, defaultName }) => {
-  let pdfWin = null;
+// AI provider handlers (exponer API genérica)
+ipcMain.handle('files:download-image', async (_event, params) => {
+  const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
+
   try {
-    // Security: strip scripts, iframes, and event handlers from HTML
-    let safeHtml = (html || '')
-      .replace(/<script[\s\S]*?<\/script>/gi, '')
-      .replace(/<iframe[\s\S]*?<\/iframe>/gi, '')
-      .replace(/<object[\s\S]*?<\/object>/gi, '')
-      .replace(/<embed[\s\S]*?>/gi, '')
-      .replace(/\son\w+\s*=/gi, ' data-removed=');
+    const src = typeof params?.src === 'string' ? params.src.trim() : '';
+    if (!src) return { ok: false, error: 'La imagen no tiene una fuente válida' };
 
-    pdfWin = new BrowserWindow({
-      show: false,
-      width: 1024,
-      height: 800,
-      webPreferences: { offscreen: true, contextIsolation: true, nodeIntegration: false }
-    });
+    let mimeType = '';
+    let imageBuffer = null;
+    const dataMatch = src.match(/^data:(image\/(?:png|jpeg|jpg|webp|bmp));base64,([\s\S]+)$/i);
 
-    await pdfWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(safeHtml));
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    if (dataMatch) {
+      mimeType = dataMatch[1].toLowerCase();
+      const base64 = dataMatch[2].replace(/\s+/g, '');
+      if (!base64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(base64) || base64.length % 4 !== 0) {
+        return { ok: false, error: 'Los datos de la imagen no son válidos' };
+      }
+      imageBuffer = Buffer.from(base64, 'base64');
+    } else {
+      try {
+        return await downloadAndSaveElectronImage(src, {
+          fetchImpl: net.fetch,
+          lookup: require('dns').promises.lookup,
+          maxRedirects: 5,
+          maxBytes: MAX_IMAGE_BYTES,
+          timeoutMs: 30000,
+          appVersion: app.getVersion(),
+          suggestedName: params?.suggestedName,
+          downloadsPath: app.getPath('downloads'),
+          joinPath: path.join,
+          showSaveDialog: options => dialog.showSaveDialog(options),
+          writeFile: (filePath, buffer) => fs.writeFile(filePath, buffer)
+        });
+      } catch (error) {
+        const code = typeof error?.code === 'string' && error.code.startsWith('DOWNLOAD_')
+          ? error.code
+          : 'DOWNLOAD_UNKNOWN';
+        if (!app.isPackaged) console.warn(`Image download failed: ${code}`);
+        return {
+          ok: false,
+          error: 'No se pudo descargar la imagen remota',
+          ...(!app.isPackaged ? { code } : {})
+        };
+      }
+    }
 
-    const pdfData = await pdfWin.webContents.printToPDF({
-      marginsType: 2,
-      printBackground: true,
-      landscape: false,
-      pageSize: 'A4'
-    });
+    if (!imageBuffer?.length) return { ok: false, error: 'La imagen está vacía' };
+    if (imageBuffer.length > MAX_IMAGE_BYTES) {
+      return { ok: false, error: 'La imagen excede el límite de 50 MB' };
+    }
 
-    pdfWin.close();
-    pdfWin = null;
-
+    const extension = safeImageExtensionFromMime(mimeType) || 'png';
+    const requestedName = path.basename(String(params?.suggestedName || 'imagen-mika5'))
+      .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
+      .replace(/^\.+/, '')
+      .slice(0, 120);
+    const baseName = requestedName.replace(/\.[A-Za-z0-9]{1,8}$/, '') || 'imagen-mika5';
+    const safeName = `${baseName}.${extension}`;
     const { canceled, filePath } = await dialog.showSaveDialog({
-      defaultPath: defaultName || 'chat.pdf',
-      filters: [{ name: 'PDF', extensions: ['pdf'] }]
+      defaultPath: path.join(app.getPath('downloads'), safeName),
+      filters: [{ name: 'Imagen', extensions: [extension] }]
     });
-
     if (canceled || !filePath) return { ok: false, canceled: true };
-    await fs.writeFile(filePath, pdfData);
-    return { ok: true, filePath };
+
+    await fs.writeFile(filePath, imageBuffer);
+    return { ok: true, path: filePath };
   } catch (error) {
-    console.error('printToPDF error:', error);
-    return { ok: false, error: error.message };
-  } finally {
-    if (pdfWin) try { pdfWin.close(); } catch (_) {}
+    if (!app.isPackaged) console.warn('Image download failed: DOWNLOAD_UNKNOWN');
+    return {
+      ok: false,
+      error: 'No se pudo descargar la imagen remota',
+      ...(!app.isPackaged ? { code: 'DOWNLOAD_UNKNOWN' } : {})
+    };
   }
 });
 
-// AI provider handlers (exponer API genérica)
+// Exportación a PDF. El cuerpo vive en print-export.js para que la suite
+// Electron pueda ejercitar exactamente este handler sin arrancar la app.
+// Las imágenes remotas del documento se descargan aquí, con los mismos
+// controles que el resto de descargas; la ventana de impresión sólo recibe
+// data: URIs y nunca habla con la red.
+ipcMain.handle(
+  "app:printToPDF",
+  createPrintExport({
+    createWindow: (options) => new BrowserWindow(options),
+    showSaveDialog: (options) => dialog.showSaveDialog(options),
+    writeFile: (filePath, buffer) => fs.writeFile(filePath, buffer),
+    fetchRemoteImage: (url, options) => fetchElectronImage(url, {
+      ...options,
+      fetchImpl: net.fetch,
+      lookup: require('dns').promises.lookup,
+      maxRedirects: 5,
+      appVersion: app.getVersion()
+    }),
+    printHtmlPath: path.join(__dirname, "../renderer/print.html"),
+    logger: console
+  })
+);
+
+
 ipcMain.handle('ai:get-providers', () => aiManager.getAllProviders());
 ipcMain.handle('ai:get-current-provider', () => aiManager.getProvider());
 ipcMain.handle('ai:set-provider', (_e, id) => aiManager.setProvider(id));
@@ -364,15 +459,23 @@ ipcMain.handle('ai:save-provider-config', (_e, provider, config) => aiManager.sa
 ipcMain.handle('ai:add-provider-model', (_e, provider, model) => aiManager.addProviderModel(provider, model));
 ipcMain.handle('ai:update-provider-model', (_e, provider, modelId, model) => aiManager.updateProviderModel(provider, modelId, model));
 ipcMain.handle('ai:delete-provider-model', (_e, provider, modelId) => aiManager.deleteProviderModel(provider, modelId));
-ipcMain.handle('ai:chat', (_e, params) => {
-  currentAbortController = new AbortController();
-  params._signal = currentAbortController.signal;
-  return aiManager.chat(params).finally(() => { currentAbortController = null; });
+ipcMain.handle('ai:chat', (_e, params = {}) => {
+  const controller = aiRequests.start(params.requestId);
+  return aiManager.chat({ ...params, signal: controller.signal })
+    .finally(() => aiRequests.finish(params.requestId));
 });
-ipcMain.handle('ai:generate-image', (_e, params) => aiManager.generateImage(params));
+ipcMain.handle('ai:generate-image', (_e, params) => {
+  if (!params || typeof params !== 'object') throw new Error('Parámetros de generación inválidos');
+  const controller = aiRequests.start(params.requestId);
+  return aiManager.generateImage({ ...params, signal: controller.signal })
+    .finally(() => aiRequests.finish(params.requestId));
+});
 ipcMain.handle('ai:route-intent', (_e, params) => aiManager.routeIntent(params));
 ipcMain.handle('ai:list-models', () => aiManager.listModels());
 ipcMain.handle('ai:status', () => aiManager.status());
+// Contrato de capacidades: la interfaz lo consulta en vez de adivinar por nombre.
+ipcMain.handle('ai:get-capabilities', (_e, providerId) => aiManager.getCapabilities(providerId));
+ipcMain.handle('ai:resolve-vision', (_e, params = {}) => aiManager.resolveVision(params));
 
 // --- Knowledge indexing queue (prevents parallel indexation race conditions) ---
 const indexQueue = [];
@@ -388,7 +491,17 @@ async function enqueueIndex(itemId) {
       // Notify renderer so it can refresh the knowledge list status indicators
       const mainWin = BrowserWindow.getAllWindows()[0];
       if (mainWin && !mainWin.isDestroyed()) {
-        mainWin.webContents.send('knowledge:index-complete', { id, ok: result?.ok, indexed: result?.indexed, error: result?.error });
+        mainWin.webContents.send('knowledge:index-complete', {
+          id,
+          ok: result?.ok,
+          saved: result?.saved,
+          pending: result?.pending,
+          code: result?.code,
+          indexed: result?.indexed,
+          error: result?.error,
+          embeddingProvider: result?.embeddingProvider,
+          embeddingModel: result?.embeddingModel
+        });
       }
     } catch (err) {
       console.warn("RAG index error:", err?.message || err);
@@ -401,15 +514,7 @@ async function enqueueIndex(itemId) {
   indexRunning = false;
 }
 
-// Abort: signal the AI manager to cancel the current request
-let currentAbortController = null;
-ipcMain.handle('ai:abort', () => {
-  if (currentAbortController) {
-    currentAbortController.abort();
-    currentAbortController = null;
-  }
-  return { ok: true };
-});
+ipcMain.handle('ai:abort', (_event, requestId) => aiRequests.abort(requestId));
 
 // Mantener compatibilidad con canales 'ollama:*' redirigiendo a aiManager
 ipcMain.handle("ollama:status", () => aiManager.status());

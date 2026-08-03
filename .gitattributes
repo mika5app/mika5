@@ -1,0 +1,43 @@
+# MIKA5 — política de finales de línea.
+#
+# El repositorio guarda texto en LF. El árbol de trabajo recibe LF salvo en los
+# formatos que Windows exige con CRLF (PowerShell y batch), donde un LF rompe la
+# ejecución.
+#
+# Esta política NO es la que permite que las pruebas funcionen en Windows: los
+# lectores de fuentes normalizan los finales de línea en memoria antes de
+# analizar nada. .gitattributes evita que el repositorio acumule mezcla; no
+# sustituye esa normalización.
+
+* text=auto eol=lf
+
+*.js text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.sh text eol=lf
+
+# Windows los interpreta con CRLF; un LF los deja inservibles.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.icns binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.tar binary
+*.7z binary
+*.exe binary
+*.dll binary
+*.node binary

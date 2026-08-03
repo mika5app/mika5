@@ -119,6 +119,153 @@ try {
   const empty = dbApi.addMessage({ chatId: c1.id, role: 'user', content: '' });
   assertEq(empty.ok, false, 'addMessage rejects empty content');
 
+  // ============================================
+  console.log('\n=== Adjuntos visuales del mensaje ===');
+  // ============================================
+  // Antes solo se guardaba texto: la imagen adjunta llegaba al proveedor pero
+  // desaparecía de la burbuja al recargar el chat.
+  const cAttach = dbApi.createChat({ projectId: p1.id, title: 'Adjuntos' });
+  const withImage = dbApi.addMessage({
+    chatId: cAttach.id,
+    role: 'user',
+    content: 'rediseña el logo por uno más moderno',
+    model: 'qwen3.7-plus',
+    attachments: [
+      { name: 'logo.png', mediaType: 'image/png', base64: 'aW1hZ2U=', visualEntryId: 've-1' },
+      { name: 'Imagen generada', url: 'https://example.test/gen.png' }
+    ]
+  });
+  assert(withImage.ok, 'addMessage acepta adjuntos');
+  const storedRow = dbApi.getMessage(withImage.id);
+  const storedAttachments = JSON.parse(storedRow.attachments);
+  assertEq(storedAttachments.length, 2, 'los dos adjuntos persisten');
+  assertEq(storedAttachments[0].base64, 'aW1hZ2U=', 'el base64 sobrevive');
+  assertEq(storedAttachments[0].visualEntryId, 've-1', 'el visualEntryId sobrevive');
+  assertEq(storedAttachments[1].url, 'https://example.test/gen.png', 'la url https sobrevive');
+  assert(!('base64' in storedAttachments[1]), 'una imagen con url no duplica bytes');
+
+  // Los mensajes sin adjuntos siguen guardando NULL, no "[]".
+  assertEq(dbApi.getMessage(m1.id).attachments, null, 'mensaje sin adjuntos guarda NULL');
+  const emptyAttachments = dbApi.addMessage({
+    chatId: cAttach.id, role: 'user', content: 'solo texto', attachments: []
+  });
+  assertEq(dbApi.getMessage(emptyAttachments.id).attachments, null, 'array vacío guarda NULL');
+
+  // ATÓMICO: un adjunto inválido aborta el mensaje entero. Guardar el texto y
+  // perder la imagen devolviendo ok reabría la omisión visual tras recargar.
+  for (const [etiqueta, adjunto] of [
+    ['GIF', { name: 'x.gif', mediaType: 'image/gif', base64: 'aW1hZ2U=' }],
+    ['http', { name: 'inseguro', url: 'http://example.test/a.png' }],
+    ['vacío', { name: 'vacio', mediaType: 'image/png', base64: '' }],
+    ['base64 inválido', { name: 'no-base64', mediaType: 'image/png', base64: '<script>' }],
+    ['no-objeto', 'no es un objeto']
+  ]) {
+    const res = dbApi.addMessage({
+      chatId: cAttach.id, role: 'user', content: 'texto válido', attachments: [adjunto]
+    });
+    assertEq(res.ok, false, `${etiqueta}: aborta el mensaje, no se guarda a medias`);
+    assertEq(res.error, 'ATTACHMENT_INVALID', `${etiqueta}: error explícito`);
+  }
+  // El texto tampoco se guarda: la fila no llega a escribirse.
+  assertEq(dbApi.listMessages(cAttach.id).some(r => r.content === 'texto válido'), false,
+    'ningún texto huérfano quedó escrito');
+
+  // listMessages devuelve la columna para repintar al abrir el chat.
+  const listed = dbApi.listMessages(cAttach.id).find(row => row.id === withImage.id);
+  assert(listed && typeof listed.attachments === 'string', 'listMessages incluye attachments');
+
+  // Un mensaje de SOLO imagen es legítimo: la interfaz permite enviarlo sin texto.
+  const imageOnly = dbApi.addMessage({
+    chatId: cAttach.id,
+    role: 'user',
+    content: '',
+    attachments: [{ name: 'solo.png', mediaType: 'image/png', base64: 'aW1hZ2U=' }]
+  });
+  assert(imageOnly.ok, 'addMessage acepta imagen sin texto');
+  assert(dbApi.getMessage(imageOnly.id).attachments, 'la imagen sin texto persiste');
+
+  // Sin texto y sin adjunto válido sigue siendo inválido.
+  assertEq(dbApi.addMessage({ chatId: cAttach.id, role: 'user', content: '   ' }).ok, false,
+    'rechaza mensaje sin texto ni adjuntos');
+  assertEq(dbApi.addMessage({
+    chatId: cAttach.id, role: 'user', content: '',
+    attachments: [{ name: 'x.gif', mediaType: 'image/gif', base64: 'aW1hZ2U=' }]
+  }).ok, false, 'rechaza texto vacío con adjuntos todos inválidos');
+
+  // ============================================
+  console.log('\n=== Límite de tamaño de adjuntos (el main no confía en el renderer) ===');
+  // ============================================
+  // La interfaz limita a 5 MB, pero una llamada IPC directa no pasa por ella.
+  const base64OfBytes = n => Buffer.alloc(n).toString('base64');
+  const justUnder = dbApi.addMessage({
+    chatId: cAttach.id, role: 'user', content: 'justo debajo',
+    attachments: [{ name: 'ok.png', mediaType: 'image/png', base64: base64OfBytes(5 * 1024 * 1024 - 16) }]
+  });
+  assert(dbApi.getMessage(justUnder.id).attachments, 'un adjunto justo bajo 5 MB se acepta');
+
+  const justOver = dbApi.addMessage({
+    chatId: cAttach.id, role: 'user', content: 'justo encima',
+    attachments: [{ name: 'big.png', mediaType: 'image/png', base64: base64OfBytes(5 * 1024 * 1024 + 16) }]
+  });
+  assertEq(justOver.ok, false, 'un adjunto sobre 5 MB aborta el mensaje');
+  assertEq(justOver.error, 'ATTACHMENT_TOO_LARGE', 'con error explícito de tamaño');
+
+  // Texto + imagen demasiado grande: NO se guarda el texto solo.
+  assertEq(dbApi.listMessages(cAttach.id).some(r => r.content === 'justo encima'), false,
+    'el texto no sobrevive a una imagen rechazada por tamaño');
+
+  // Acumulado: cinco de 4,5 MB superan los 20 MB del mensaje → aborta, no recorta.
+  const accumulated = dbApi.addMessage({
+    chatId: cAttach.id, role: 'user', content: 'acumulado',
+    attachments: Array.from({ length: 5 }, (_, i) => ({
+      name: `p${i}.png`, mediaType: 'image/png', base64: base64OfBytes(4.5 * 1024 * 1024)
+    }))
+  });
+  assertEq(accumulated.ok, false, 'el acumulado excesivo aborta en vez de guardar un subconjunto');
+  assertEq(accumulated.error, 'ATTACHMENTS_TOTAL_TOO_LARGE', 'error de total explícito');
+  assertEq(dbApi.listMessages(cAttach.id).some(r => r.content === 'acumulado'), false,
+    'no queda un mensaje con solo 4 de las 5 imágenes');
+
+  // Cuatro de 4,5 MB (18 MB) sí caben: el límite no es sobre-restrictivo.
+  const fourFit = dbApi.addMessage({
+    chatId: cAttach.id, role: 'user', content: 'cuatro caben',
+    attachments: Array.from({ length: 4 }, (_, i) => ({
+      name: `q${i}.png`, mediaType: 'image/png', base64: base64OfBytes(4.5 * 1024 * 1024)
+    }))
+  });
+  assert(fourFit.ok, 'cuatro imágenes de 4,5 MB caben');
+  assertEq(JSON.parse(dbApi.getMessage(fourFit.id).attachments).length, 4, 'las cuatro persisten');
+
+  // Más adjuntos que el máximo por mensaje.
+  const tooMany = dbApi.addMessage({
+    chatId: cAttach.id, role: 'user', content: 'demasiados',
+    attachments: Array.from({ length: 9 }, (_, i) => ({
+      name: `r${i}.png`, mediaType: 'image/png', base64: 'aW1hZ2U='
+    }))
+  });
+  assertEq(tooMany.error, 'TOO_MANY_ATTACHMENTS', 'más de 8 adjuntos aborta');
+
+  // base64 de longitud no múltiplo de 4 es inválido.
+  const oddLength = dbApi.addMessage({
+    chatId: cAttach.id, role: 'user', content: 'longitud rara',
+    attachments: [{ name: 'x.png', mediaType: 'image/png', base64: 'aW1hZ2' }]
+  });
+  assertEq(oddLength.error, 'ATTACHMENT_INVALID',
+    'base64 con longitud no múltiplo de 4 aborta');
+
+  // Una URL https no puede rodear el límite con longitud arbitraria.
+  const hugeUrl = dbApi.addMessage({
+    chatId: cAttach.id, role: 'user', content: 'url enorme',
+    attachments: [{ name: 'u.png', url: 'https://example.test/' + 'a'.repeat(5000) }]
+  });
+  assertEq(hugeUrl.error, 'ATTACHMENT_TOO_LARGE', 'una URL de más de 4096 chars aborta');
+
+  const hugeMediaType = dbApi.addMessage({
+    chatId: cAttach.id, role: 'user', content: 'mediatype enorme',
+    attachments: [{ name: 'm.png', mediaType: 'image/' + 'x'.repeat(200), base64: 'aW1hZ2U=' }]
+  });
+  assertEq(hugeMediaType.error, 'ATTACHMENT_INVALID', 'un mediaType desmedido aborta');
+
   const count = dbApi.countMessages(c1.id);
   assertEq(count, 2, 'countMessages returns 2');
 
@@ -178,10 +325,20 @@ try {
   // ============================================
   console.log('\n=== Cascade Deletion ===');
   // ============================================
-  // Delete chat should clean up chat-scoped knowledge
+  // Delete chat should clean up chat-scoped knowledge.
+  // Ya no se consulta con listKnowledge(): un chat borrado es un alcance
+  // inválido y la API falla cerrada en vez de devolver una lista vacía
+  // indistinguible de "no había documentos".
   dbApi.deleteChat(c1.id);
-  const chatKAfter = dbApi.listKnowledge(p1.id, c1.id);
-  assertEq(chatKAfter.length, 0, 'deleteChat cleans up chat-scoped knowledge');
+  const { getDb } = require('../src/main/db');
+  const chatKAfter = getDb()
+    .prepare('SELECT COUNT(*) AS n FROM knowledge_items WHERE chat_id = ?').get(c1.id).n;
+  assertEq(chatKAfter, 0, 'deleteChat cleans up chat-scoped knowledge');
+
+  let deletedScopeError = null;
+  try { dbApi.listKnowledge(p1.id, c1.id); } catch (e) { deletedScopeError = e.code; }
+  assertEq(deletedScopeError, 'INVALID_CHAT',
+    'consultar el alcance de un chat borrado falla cerrado');
 
   // Delete project should cascade
   dbApi.deleteProject(p1.id);

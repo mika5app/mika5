@@ -1,10 +1,14 @@
 ﻿let activeProjectId = null;
 let activeChatId = null;
 let isGenerating = false;
+let activeRequestId = null;
 let chatAttachments = [];
 let replyToMessage = null; // { role, content, msgId } for WhatsApp-style reply
 const chatDrafts = new Map(); // chatId -> { attachments: [], inputText: '', replyTo: null }
 const AUTOMATIC_MODEL_ID = '__automatic__';
+// Modos de plan visual que pueden producir una imagen. Es el dominio de los planes,
+// distinto de los intents de routing que se validan en las barreras de send().
+const GENERATIVE_VISUAL_MODES = ['image-generation', 'image-edit', 'image-variation'];
 const visualContextMemory = {
   entries: [],
   lastUserImage: null,
@@ -14,6 +18,24 @@ const visualContextMemory = {
   lastVisualAnalysis: null
 };
 let pendingVisualAction = null;
+const {
+  createRequestContext,
+  shouldRenderRequestOutput,
+  resolveRequestDestination
+} = window.MIKA5RequestContext;
+const {
+  buildCloudDataScope,
+  buildCloudConsentKey,
+  consentCoversScope,
+  mergeConsentScope,
+  summarizeCloudScope,
+  normalizeStoredConsent,
+  projectScope: cloudProjectScope
+} = window.MIKA5CloudConsent;
+
+function currentRequestView() {
+  return { chatId: activeChatId, projectId: activeProjectId, providerId: currentProvider };
+}
 
 function registerVisualEvent({ chatId, role, origin, images = [], sourceVisualEntryId = null }) {
   const createdAt = Date.now();
@@ -52,11 +74,128 @@ function registerVisualImage({ chatId, role, origin, image, sourceVisualEntryId 
   return imageRef;
 }
 
+// Origen de un adjunto restaurado según quién lo envió. Un adjunto del usuario
+// vuelve a ser 'user-upload'; uno del asistente, una imagen generada.
+function restoredAttachmentOrigin(role) {
+  return role === 'assistant' ? 'image-generation' : 'user-upload';
+}
+
+/**
+ * Reconstruye una imagen persistida dentro de la memoria visual.
+ *
+ * Conserva el `visualEntryId` original: acuñar uno nuevo rompería el vínculo con
+ * las acciones visuales selladas contra esa identidad, y una acción pendiente
+ * legítima se cancelaría por `source-visual-entry`.
+ */
+function restoreVisualImage({ chatId, role, attachment, createdAt }) {
+  if (!attachment || (!attachment.base64 && !attachment.url)) return null;
+  const origin = restoredAttachmentOrigin(role);
+  const timestamp = Number(createdAt) || Date.now();
+  const entryId = attachment.visualEntryId || `visual-restored-${timestamp}-${visualContextMemory.entries.length + 1}`;
+  const imageRef = {
+    name: attachment.name || 'imagen',
+    type: 'image',
+    mediaType: attachment.mediaType || null,
+    base64: attachment.base64 || null,
+    url: attachment.url || null,
+    id: `${entryId}-image-1`,
+    visualEntryId: entryId,
+    chatId,
+    role,
+    origin,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    restored: true
+  };
+  visualContextMemory.entries.push({
+    id: entryId, chatId, role, origin, createdAt: timestamp, images: [imageRef]
+  });
+  if (origin === 'user-upload') {
+    visualContextMemory.lastUploadedImage = imageRef;
+    visualContextMemory.lastUserImage = imageRef;
+  } else {
+    visualContextMemory.lastGeneratedImage = imageRef;
+  }
+  return imageRef;
+}
+
+// Al salir de un chat su contexto visual deja de ser válido: una petición en el
+// chat nuevo no puede operar sobre la imagen del anterior.
+function resetVisualContextForChat() {
+  visualContextMemory.entries.length = 0;
+  visualContextMemory.lastUserImage = null;
+  visualContextMemory.lastUploadedImage = null;
+  visualContextMemory.lastGeneratedImage = null;
+  visualContextMemory.lastAnalyzedImage = null;
+  visualContextMemory.lastVisualAnalysis = null;
+}
+
+/**
+ * Rehidrata el contexto visual al abrir un chat.
+ *
+ * Sin esto la persistencia era solo cosmética: tras reiniciar MIKA5 la miniatura
+ * volvía a verse, pero "ahora ponlo verde" no encontraba ninguna imagen de
+ * referencia y el router degradaba a chat normal.
+ *
+ * Se recorre en orden cronológico para que `lastUserImage` y
+ * `lastGeneratedImage` queden apuntando a las MÁS RECIENTES, igual que en una
+ * sesión viva.
+ */
+function rehydrateVisualContextFromMessages(messages, chatId) {
+  resetVisualContextForChat(chatId);
+  const ordered = (Array.isArray(messages) ? [...messages] : [])
+    .sort((a, b) => (Number(a?.created_at) || 0) - (Number(b?.created_at) || 0));
+  let restored = 0;
+  for (const message of ordered) {
+    for (const attachment of parseStoredAttachments(message?.attachments)) {
+      if (restoreVisualImage({
+        chatId,
+        role: message.role,
+        attachment,
+        createdAt: message.created_at
+      })) restored++;
+    }
+  }
+  return restored;
+}
+
 function terminalImageAnswer(images) {
   if (!Array.isArray(images) || images.length === 0) {
     throw new Error('Alibaba no devolvió ninguna imagen');
   }
   return images.map(url => `![Imagen generada](${url})`).join('\n\n');
+}
+
+function sanitizeMessageForClipboard(content) {
+  let sanitized = String(content || '');
+  sanitized = sanitized.replace(
+    /!\[([^\]]*)\]\(\s*(?:https:\/\/[^)\s]+|data:image\/(?:png|jpeg|jpg|webp|bmp);base64,[^)\s]+)\s*\)/gi,
+    (_match, alt) => {
+      const label = String(alt || '').trim();
+      return label ? `[Imagen: ${label}]` : '[Imagen generada por MIKA5]';
+    }
+  );
+  return sanitized.replace(/https:\/\/[^\s<>"')\]]+/gi, (url) => (
+    /dashscope|aliyuncs\.com|OSSAccessKeyId=|Signature=|Expires=/i.test(url)
+      ? '[URL de imagen firmada omitida]'
+      : url
+  ));
+}
+
+function sanitizeRemoteErrorMessage(message) {
+  let sanitized = String(message || '');
+  sanitized = sanitized
+    .replace(/Error invoking remote method ['"]ai:(?:generate-image|chat)['"]:\s*/gi, '')
+    .replace(/TypeError:\s*fetch failed/gi, '')
+    .replace(/\b(?:UND_ERR_CONNECT_TIMEOUT|ConnectTimeoutError|UND_ERR_HEADERS_TIMEOUT|UND_ERR_BODY_TIMEOUT)\b/gi, '')
+    .replace(/attempted addresses?:[\s\S]*/gi, '')
+    .replace(/https:\/\/[^\s"'<>]+/gi, '[URL omitida]')
+    .replace(/\bsk-[A-Za-z0-9_-]+\b/g, '[API_KEY]')
+    .replace(/\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b/g, '[IP omitida]')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s:;,.-]+|[\s:;,.-]+$/g, '')
+    .trim();
+  return sanitized || 'No se pudo completar la solicitud con el proveedor actual.';
 }
 
 function registerLastVisualAnalysis({ chatId, sourceImageRef, analysisText }) {
@@ -73,60 +212,399 @@ function registerLastVisualAnalysis({ chatId, sourceImageRef, analysisText }) {
 // ============================================
 // Detectar si el modelo soporta visión
 // ============================================
+// Contrato de capacidades del proveedor activo. Se refresca desde el proceso
+// principal; nunca se infiere aquí. Mientras no haya llegado, se asume el
+// contrato vacío: bloquear de más es recuperable, enviar una imagen que el
+// adapter descarta en silencio no lo es (AUD-006).
+let providerCapabilities = null;
+
+async function refreshProviderCapabilities() {
+  try {
+    providerCapabilities = await window.mika5?.ai?.getCapabilities?.() || null;
+  } catch (_) {
+    providerCapabilities = null;
+  }
+  return providerCapabilities;
+}
+
+function providerSupportsVision() {
+  return providerCapabilities?.vision === true;
+}
+
+// Pista sincrónica para pintar la UI (habilitar el botón de adjuntar, etc.),
+// derivada de `data-vision`, que la lista de modelos escribe a partir del
+// `supportsVision` que devuelve el adapter. No hay heurística por nombre:
+// "kimi", "glm" o "claude-3" ya no autorizan nada por sí solos.
+// NO es una autorización: la decisión real la toma visionBlockReason().
 function modelSupportsVision(modelName) {
   if (!modelName) return false;
   if (modelName === AUTOMATIC_MODEL_ID) return false;
-  // Check the select option's data-vision attribute (set from server probe)
   const sel = el("modelSelect");
-  if (sel) {
-    const opt = Array.from(sel.options).find(o => o.value === modelName);
-    if (opt?.dataset.provider === 'alibaba') return opt.dataset.vision === '1';
-    if (opt && opt.dataset.vision === '1') return true;
-  }
-  // Fallback: name-based detection for models not yet probed
-  const name = modelName.toLowerCase();
-  const patterns = [
-    'vision', 'vl', 'ocr', 'img', 'clip',
-    'llava', 'bakllava', 'moondream', 'cogvlm', 'pixtral',
-    'minicpm-v', 'gemma3', 'gemma-3',
-    'gpt-4o', 'gpt-4-vision', 'gpt-4-turbo',
-    'claude-3', 'claude-3.5', 'claude-4',
-    'gemini-1.5', 'gemini-2', 'gemini',
-    'kimi', 'glm',
-  ];
-  return patterns.some(p => name.includes(p));
+  if (!sel) return false;
+  const opt = Array.from(sel.options).find(o => o.value === modelName);
+  return opt?.dataset.vision === '1';
 }
 
-function shouldWarnImageCapability(modelName) {
-  // Automatic is a router alias. Its real model/capability is resolved in send().
-  return Boolean(modelName)
-    && modelName !== AUTOMATIC_MODEL_ID
-    && !modelSupportsVision(modelName);
+/**
+ * Motivo por el que no se puede adjuntar una imagen con el modelo actual,
+ * o null si sí se puede.
+ *
+ * La resolución la hace el proceso principal con el MISMO código que la barrera
+ * de los adapters (`ai:resolve-vision` → resolveVisionSupport). El renderer no
+ * guarda allowlists ni políticas propias: si las guardara, acabarían divergiendo
+ * y la UI autorizaría algo que la red rechaza (o al revés).
+ *
+ * Fail-closed: si el IPC falla, se bloquea.
+ */
+// El proveedor viaja SIEMPRE explícito. Si se dejara que el proceso principal
+// use `this.currentProvider`, un cambio de proveedor mientras el IPC está en
+// vuelo evaluaría el modelo de OpenAI contra las capacidades de otro proveedor.
+async function visionBlockReason({ provider, model } = {}) {
+  // Automático es un alias del router: su modelo real se resuelve en send().
+  if (!model || model === AUTOMATIC_MODEL_ID) return null;
+  try {
+    const resolution = await window.mika5?.ai?.resolveVision?.({ provider, model });
+    if (!resolution) return 'No se pudo verificar si el modelo acepta imágenes. La imagen no se adjunta.';
+    return resolution.supported ? null : (resolution.message || 'Este modelo no acepta imágenes.');
+  } catch (_) {
+    return 'No se pudo verificar si el modelo acepta imágenes. La imagen no se adjunta.';
+  }
+}
+
+// Identidad de una operación de adjuntado, capturada ANTES de cualquier await.
+// Stage 0A ya fijó que una operación asíncrona conserva la identidad con la que
+// empezó; adjuntar una imagen no es excepción.
+function captureAttachmentContext() {
+  return {
+    chatId: activeChatId,
+    providerId: currentProvider,
+    model: el("modelSelect")?.value || ''
+  };
+}
+
+function attachmentContextChanged(context) {
+  return activeChatId !== context.chatId
+    || currentProvider !== context.providerId
+    || (el("modelSelect")?.value || '') !== context.model;
+}
+
+// Imágenes que el usuario intentó adjuntar y fueron rechazadas por capacidad.
+// Rechazar el adjunto no basta: si el texto sobrevive ("analiza esto") y se
+// permite enviar, el modelo contesta sin haber visto nada y la respuesta se lee
+// como si sí la hubiera visto. Eso es la misma omisión engañosa de AUD-006,
+// una pantalla más tarde. Por eso el envío se bloquea hasta resolverlo.
+let rejectedImageAttachments = [];
+let rejectedImageSeq = 0;
+
+// Identidad por CONTENIDO. Dos archivos distintos pueden llamarse `producto.png`
+// y todas las imágenes pegadas comparten nombre genérico, así que el nombre no
+// sirve. Y tiene que ser estable entre intentos: una huella aleatoria por
+// operación haría que volver a pegar la misma imagen nunca resolviera el rechazo
+// anterior, dejándolo bloqueando hasta pulsar ✕.
+// El hash unifica además ambos orígenes: el mismo contenido pegado o elegido
+// desde el disco es la misma intención.
+// Falla en cerrado si no hay WebCrypto: sin hash no hay identidad fiable, y una
+// huella ambigua es peor que ninguna — dos imágenes distintas podrían colisionar
+// y resolver el rechazo equivocado, que es el mismo fallo que esto previene.
+// Electron sirve el renderer desde un contexto seguro, así que este camino no
+// debería darse nunca en producción.
+async function imageContentFingerprint(file) {
+  if (typeof crypto === 'undefined' || !crypto.subtle) {
+    throw new Error('WEBCRYPTO_UNAVAILABLE');
+  }
+  const bytes = await file.arrayBuffer();
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return `sha256:${Array.from(new Uint8Array(digest))
+    .map(byte => byte.toString(16).padStart(2, '0'))
+    .join('')}`;
+}
+
+// Una intención de adjuntar rechazada sobrevive al cambio de modelo. Borrarla
+// automáticamente reabría AUD-006 un paso más tarde: el registro desaparecía,
+// la imagen nunca llegó a `chatAttachments`, el texto seguía ahí y "analiza
+// esto" salía sin imagen. Solo dos acciones EXPLÍCITAS la resuelven:
+// volver a adjuntar el mismo archivo con éxito, o pulsar ✕.
+function recordRejectedImage({ chatId, providerId, model, fingerprint, name, reason }) {
+  const existing = rejectedImageAttachments.find(current =>
+    current.chatId === chatId
+    && current.providerId === providerId
+    && current.model === model
+    && current.fingerprint === fingerprint
+  );
+  if (existing) {
+    existing.reason = reason;
+    return existing;
+  }
+  const recorded = {
+    id: `rej-${++rejectedImageSeq}`,
+    chatId,
+    providerId,
+    model,
+    fingerprint,
+    name,
+    reason
+  };
+  rejectedImageAttachments.push(recorded);
+  return recorded;
+}
+
+// Getter puro: leer el estado no lo destruye. Una purga escondida aquí hacía
+// imposible razonar sobre cuándo y por qué desapareció un rechazo.
+function pendingRejectedImages(chatId) {
+  return rejectedImageAttachments.filter(item => item.chatId === chatId);
+}
+
+// El rechazo se registró contra un par (proveedor, modelo) concreto. Las
+// capacidades pertenecen al par, no al modelo suelto: dos proveedores pueden
+// publicar el mismo modelId.
+function rejectionMatchesCurrentTarget(item) {
+  return item.providerId === currentProvider
+    && item.model === (el("modelSelect")?.value || '');
+}
+
+function rejectionNotice(item) {
+  return rejectionMatchesCurrentTarget(item)
+    ? item.reason
+    : `Cambió el modelo. Vuelve a adjuntar ${item.name} para analizarla, o descártala para enviar solo texto.`;
+}
+
+function clearRejectedImages(chatId = null) {
+  rejectedImageAttachments = chatId === null
+    ? []
+    : rejectedImageAttachments.filter(item => item.chatId !== chatId);
+}
+
+// Resolución explícita nº1: la misma imagen se adjuntó con éxito.
+function resolveRejectedImage(chatId, fingerprint) {
+  const before = rejectedImageAttachments.length;
+  rejectedImageAttachments = rejectedImageAttachments.filter(
+    item => !(item.chatId === chatId && item.fingerprint === fingerprint)
+  );
+  return rejectedImageAttachments.length !== before;
+}
+
+// Resolución explícita nº2: la usuaria descarta la intención. Por id, porque
+// nombre y hasta fingerprint pueden repetirse entre operaciones distintas.
+function discardRejectedImage(id) {
+  const index = rejectedImageAttachments.findIndex(item => item.id === id);
+  if (index >= 0) rejectedImageAttachments.splice(index, 1);
+  renderAttachmentPreview();
+  updateSendButtonState();
+}
+
+// Punto único al que llaman TODOS los caminos de selección de modelo. El
+// <select> se fija por código, así que 'change' no se dispara nunca y un
+// listener sobre él no serviría de nada. NO borra rechazos: solo repinta, para
+// que el aviso pase a "vuelve a adjuntar" cuando el modelo nuevo sí acepta.
+function onSelectedModelChanged() {
+  renderAttachmentPreview();
+  updateSendButtonState();
+}
+
+/**
+ * Camino ÚNICO por el que una imagen entra al chat. Lo usan el selector de
+ * archivos y el pegado desde el portapapeles; no debe existir ningún otro.
+ * Tener dos copias del flujo era lo que permitía que un punto de entrada
+ * olvidara resolver el rechazo pendiente sin que ningún test lo notara.
+ *
+ * Devuelve:
+ *   { ok: true, attachment }              adjuntada, rechazo previo resuelto
+ *   { ok: false, code: 'unsupported-type' | 'blocked' | 'aborted' | 'error' }
+ */
+async function processImageAttachment({
+  file, source = 'file', displayName, chatId, providerId, model
+}) {
+  const mediaType = supportedVisionMediaType(file);
+  if (!mediaType) return { ok: false, code: 'unsupported-type' };
+  const name = displayName || file.name || (source === 'paste' ? 'imagen pegada' : 'imagen');
+
+  // El contrato promete un resultado, no una excepción: `file.arrayBuffer()`,
+  // `crypto.subtle.digest()`, `docFileToBase64()` y `registerVisualImage()`
+  // pueden lanzar, y una promesa rechazada dejaría a los wrappers sin saber qué
+  // decirle a la usuaria.
+  try {
+    const context = { chatId, providerId, model };
+    // Huella y capacidad se resuelven en paralelo: ambas son awaits y ninguna
+    // depende de la otra.
+    const [fingerprint, blocked] = await Promise.all([
+      imageContentFingerprint(file),
+      visionBlockReason({ provider: providerId, model })
+    ]);
+    // Reverificación tras los awaits: la usuaria pudo cambiar de chat, proveedor
+    // o modelo mientras la sonda o el IPC estaban en vuelo.
+    if (attachmentContextChanged(context)) return { ok: false, code: 'aborted' };
+
+    if (blocked) {
+      const recorded = recordRejectedImage({
+        chatId, providerId, model, fingerprint, name, reason: blocked
+      });
+      return { ok: false, code: 'blocked', reason: blocked, rejected: recorded };
+    }
+
+    const base64 = await docFileToBase64(file);
+    if (attachmentContextChanged(context)) return { ok: false, code: 'aborted' };
+
+    const attachment = registerVisualImage({
+      chatId,
+      role: 'user',
+      origin: 'user-upload',
+      image: { name, type: 'image', base64, mediaType }
+    });
+    chatAttachments.push(attachment);
+    // Resolución explícita nº1, en el camino productivo: adjuntar con éxito la
+    // misma imagen satisface la intención que quedó pendiente.
+    resolveRejectedImage(chatId, fingerprint);
+    return { ok: true, attachment, fingerprint };
+  } catch (error) {
+    // Solo el tipo de error: nunca bytes, base64 ni contenido de la imagen.
+    console.warn('Image attachment processing failed:', error?.message === 'WEBCRYPTO_UNAVAILABLE'
+      ? 'WEBCRYPTO_UNAVAILABLE'
+      : (error?.name || 'Error'));
+    return { ok: false, code: 'error' };
+  }
 }
 
 (function addImageStyles() {
   const style = document.createElement('style');
-  style.textContent = '.embedded-image{margin:12px 0;border-radius:8px;overflow:hidden;border:1px solid var(--border-subtle,#1b2a55);display:inline-block;max-width:100%}.embedded-image img{max-width:100%;max-height:400px;object-fit:contain;cursor:zoom-in;transition:transform .2s}.embedded-image img:hover{transform:scale(1.02)}.msg.user .embedded-image{border-color:var(--accent,#49C2F4)}.image-modal{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.9);display:flex;align-items:center;justify-content:center;cursor:zoom-out}.image-modal img{max-width:90vw;max-height:90vh;object-fit:contain;border-radius:8px}.embedded-image-preview{max-width:120px;max-height:120px;border-radius:6px;margin:4px;border:1px solid var(--border-subtle,#1b2a55);display:inline-block;object-fit:contain;background:var(--bg-card,#101a33);padding:2px;cursor:zoom-in;transition:transform .15s}.embedded-image-preview:hover{transform:scale(1.05);border-color:var(--accent,#49C2F4)}.msg.user .embedded-image-preview{border-color:var(--accent,#49C2F4)}';
+  style.textContent = '.embedded-image{margin:12px 0;border-radius:8px;overflow:hidden;border:1px solid var(--border-subtle,#14213F);display:inline-block;max-width:100%}.embedded-image img{max-width:100%;max-height:400px;object-fit:contain;cursor:zoom-in;transition:transform .2s}.embedded-image img:hover{transform:scale(1.02)}.msg.user .embedded-image{border-color:var(--accent,#49C2F4)}.image-modal{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.9);display:flex;align-items:center;justify-content:center;cursor:zoom-out}.image-modal img{max-width:90vw;max-height:90vh;object-fit:contain;border-radius:8px}.embedded-image-preview{max-width:120px;max-height:120px;border-radius:6px;margin:4px;border:1px solid var(--border-subtle,#14213F);display:inline-block;object-fit:contain;background:var(--bg-card,#070C1A);padding:2px;cursor:zoom-in;transition:transform .15s}.embedded-image-preview:hover{transform:scale(1.05);border-color:var(--accent,#49C2F4)}.msg.user .embedded-image-preview{border-color:var(--accent,#49C2F4)}';
   document.head.appendChild(style);
+  const attachmentStyle = document.createElement('style');
+  attachmentStyle.textContent = '.msg-unsaved{margin-top:6px;font-size:11px;color:var(--danger,#e5534b);border:1px dashed var(--danger,#e5534b);border-radius:4px;padding:3px 8px;display:inline-flex;align-items:center;gap:8px}.msg-unsaved-ok{color:var(--ok,#3fb950);border-color:var(--ok,#3fb950)}.msg-unsaved-retry{font-size:11px;padding:1px 8px;border-radius:4px;border:1px solid currentColor;background:transparent;color:inherit;cursor:pointer}.msg-unsaved-retry:disabled{opacity:.6;cursor:wait}.msg-attachments{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}.msg-attachment{display:flex;flex-direction:column;align-items:center;gap:2px;max-width:132px}.msg-attachment-name{font-size:10px;opacity:.75;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:128px}';
+  document.head.appendChild(attachmentStyle);
+  const imageUxStyle = document.createElement('style');
+  imageUxStyle.textContent = '.image-viewer-frame{display:inline-flex;flex-direction:column;background:var(--bg-card,#070C1A)}.image-controls{display:flex;gap:8px;align-items:center;padding:8px;background:rgba(0,0,0,.2)}.image-action-btn{border:1px solid var(--border-subtle,#14213F);border-radius:6px;background:var(--bg-hover,#0D1630);color:var(--text-main,#fff);padding:5px 10px;cursor:pointer;font-size:12px}.image-action-btn:hover:not(:disabled){border-color:var(--accent,#49C2F4)}.image-action-btn:disabled{opacity:.6;cursor:wait}.image-modal{padding:24px;cursor:default}.image-modal-panel{position:relative;display:flex;flex-direction:column;align-items:center;gap:12px;max-width:95vw;max-height:95vh}.image-modal-panel>img{max-width:95vw;max-height:85vh}.image-modal-close{position:absolute;top:-16px;right:-16px;width:36px;height:36px;border:0;border-radius:50%;background:#fff;color:#111;font-size:24px;line-height:1;cursor:pointer}.image-modal-actions{display:flex;justify-content:center}';
+  document.head.appendChild(imageUxStyle);
 })();
 
-function openImageModal(src) {
-  const existing = document.getElementById('imageModal');
-  if (existing) { existing.remove(); return; }
+function closeImageViewer() {
+  document.getElementById('imageModal')?.remove();
+}
+
+function suggestedImageDownloadName({ model = '', name = '' } = {}) {
+  const timestamp = new Date().toISOString()
+    .replace(/[-:]/g, '')
+    .replace('T', '-')
+    .slice(0, 15);
+  const safeModel = String(model || '').replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 60);
+  if (safeModel) return `mika5-${safeModel}-${timestamp}.png`;
+  const safeName = String(name || '').replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 80);
+  return safeName || `imagen-mika5-${timestamp}.png`;
+}
+
+async function downloadImageFromSrc(src, name, button = null) {
+  if (!window.mika5?.files?.downloadImage) {
+    showToast('La descarga de imágenes no está disponible', 'error');
+    return;
+  }
+  if (button) button.disabled = true;
+  try {
+    const result = await window.mika5.files.downloadImage({ src, suggestedName: name });
+    if (result?.ok) {
+      showToast('Imagen guardada correctamente', 'success');
+    } else if (!result?.canceled) {
+      showToast(result?.error || 'No se pudo guardar la imagen', 'error');
+    }
+  } catch (_) {
+    showToast('No se pudo guardar la imagen', 'error');
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function openImageViewer(src, name) {
+  closeImageViewer();
   const modal = document.createElement('div');
   modal.id = 'imageModal';
   modal.className = 'image-modal';
-  modal.onclick = () => modal.remove();
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.setAttribute('aria-label', 'Visor de imagen');
+  modal.addEventListener('click', event => {
+    if (event.target === modal) closeImageViewer();
+  });
+
+  const panel = document.createElement('div');
+  panel.className = 'image-modal-panel';
+  panel.addEventListener('click', event => event.stopPropagation());
+
+  const closeButton = document.createElement('button');
+  closeButton.type = 'button';
+  closeButton.className = 'image-modal-close';
+  closeButton.textContent = '×';
+  closeButton.setAttribute('aria-label', 'Cerrar visor');
+  closeButton.addEventListener('click', closeImageViewer);
+
   const img = document.createElement('img');
   img.src = src;
-  modal.appendChild(img);
+  img.alt = name || 'Imagen';
+
+  const modalActions = document.createElement('div');
+  modalActions.className = 'image-modal-actions';
+  const downloadButton = document.createElement('button');
+  downloadButton.type = 'button';
+  downloadButton.className = 'image-action-btn';
+  downloadButton.textContent = 'Descargar';
+  downloadButton.addEventListener('click', () => downloadImageFromSrc(src, name, downloadButton));
+  modalActions.appendChild(downloadButton);
+
+  panel.append(closeButton, img, modalActions);
+  modal.appendChild(panel);
   document.body.appendChild(modal);
+  closeButton.focus();
+}
+
+function enhanceMessageImages(container, messageContext = {}) {
+  if (!container) return;
+  for (const img of container.querySelectorAll('img')) {
+    if (img.dataset.imageEnhanced === 'true') continue;
+    img.dataset.imageEnhanced = 'true';
+    img.dataset.zoomable = 'true';
+    img.loading = 'lazy';
+
+    const suggestedName = suggestedImageDownloadName({
+      model: messageContext.model,
+      name: img.alt
+    });
+    img.dataset.downloadName = suggestedName;
+
+    const frame = document.createElement('span');
+    frame.className = 'embedded-image image-viewer-frame';
+    img.parentNode.insertBefore(frame, img);
+    frame.appendChild(img);
+
+    const controls = document.createElement('span');
+    controls.className = 'image-controls';
+
+    const viewButton = document.createElement('button');
+    viewButton.type = 'button';
+    viewButton.className = 'image-action-btn';
+    viewButton.textContent = 'Ver grande';
+    viewButton.addEventListener('click', () => openImageViewer(img.currentSrc || img.src, suggestedName));
+
+    const downloadButton = document.createElement('button');
+    downloadButton.type = 'button';
+    downloadButton.className = 'image-action-btn';
+    downloadButton.textContent = 'Descargar';
+    downloadButton.addEventListener('click', () => {
+      downloadImageFromSrc(img.currentSrc || img.src, suggestedName, downloadButton);
+    });
+
+    controls.append(viewButton, downloadButton);
+    frame.appendChild(controls);
+  }
 }
 
 // Event delegation: click on zoomable images opens modal
 document.addEventListener('click', (e) => {
   const img = e.target.closest('img[data-zoomable]');
-  if (img) openImageModal(img.src);
+  if (!img) return;
+  e.preventDefault();
+  e.stopPropagation();
+  openImageViewer(img.currentSrc || img.src, img.dataset.downloadName || img.alt);
+});
+
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') closeImageViewer();
 });
 
 // Sistema de gestión progresiva de contexto
@@ -249,7 +727,6 @@ function setUiBusy(busy) {
 function resetViewState() {
   // Cancela cualquier trabajo pendiente / in-flight
   cancelPendingOperations();
-
   // Save draft before clearing attachments
   if (activeChatId) {
     const inputEl = el("input");
@@ -265,6 +742,10 @@ function resetViewState() {
 
   // Limpia adjuntos del chat actual
   chatAttachments = [];
+
+  // Una acción visual pendiente pertenece al chat y proyecto donde se creó: cambiar de
+  // vista la invalida. resetViewState es el punto central de openChat y selectProject.
+  pendingVisualAction = null;
 
   // Cierra pickers flotantes si existen
   try {
@@ -347,11 +828,11 @@ function mikaSelect(title, options) {
 
     const box = document.createElement('div');
     box.className = 'modal-content';
-    box.style.cssText = 'background:var(--bg-sidebar,#0f1629);border:1px solid var(--border-subtle,#1b2a55);border-radius:14px;padding:0;min-width:320px;max-width:420px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.5);animation:modalFadeIn 0.15s ease-out;overflow:hidden;';
+    box.style.cssText = 'background:var(--bg-sidebar,#000208);border:1px solid var(--border-subtle,#14213F);border-radius:14px;padding:0;min-width:320px;max-width:420px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.5);animation:modalFadeIn 0.15s ease-out;overflow:hidden;';
 
     // Header
     const header = document.createElement('div');
-    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border-subtle,#1b2a55);';
+    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border-subtle,#14213F);';
     const titleEl = document.createElement('h3');
     titleEl.style.cssText = 'margin:0;font-size:15px;font-weight:600;color:var(--text-main,#eef3ff);';
     titleEl.textContent = title || 'Seleccionar';
@@ -376,7 +857,7 @@ function mikaSelect(title, options) {
       options.forEach(opt => {
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.style.cssText = 'display:flex;align-items:center;gap:10px;width:100%;background:var(--bg-base,#070b16);border:1px solid var(--border-subtle,#1b2a55);color:var(--text-main,#eef3ff);padding:12px 14px;border-radius:8px;cursor:pointer;font-size:14px;text-align:left;transition:all 0.15s;';
+        btn.style.cssText = 'display:flex;align-items:center;gap:10px;width:100%;background:var(--bg-base,#04070F);border:1px solid var(--border-subtle,#14213F);color:var(--text-main,#eef3ff);padding:12px 14px;border-radius:8px;cursor:pointer;font-size:14px;text-align:left;transition:all 0.15s;';
 
         // Icon/color indicator
         if (opt.icon || opt.color) {
@@ -392,8 +873,8 @@ function mikaSelect(title, options) {
         labelSpan.textContent = opt.label;
         btn.appendChild(labelSpan);
 
-        btn.onmouseenter = () => { btn.style.background = 'var(--bg-hover,#152044)'; btn.style.borderColor = 'var(--accent,#2d8cff)'; };
-        btn.onmouseleave = () => { btn.style.background = 'var(--bg-base,#070b16)'; btn.style.borderColor = 'var(--border-subtle,#1b2a55)'; };
+        btn.onmouseenter = () => { btn.style.background = 'var(--bg-hover,#0D1630)'; btn.style.borderColor = 'var(--accent,#2d8cff)'; };
+        btn.onmouseleave = () => { btn.style.background = 'var(--bg-base,#04070F)'; btn.style.borderColor = 'var(--border-subtle,#14213F)'; };
         btn.onclick = () => {
           modal.remove();
           if (_mikaSelectResolve) { _mikaSelectResolve(opt.value); _mikaSelectResolve = null; }
@@ -404,13 +885,13 @@ function mikaSelect(title, options) {
 
     // Cancel button
     const footer = document.createElement('div');
-    footer.style.cssText = 'padding:8px 8px 12px;border-top:1px solid var(--border-subtle,#1b2a55);';
+    footer.style.cssText = 'padding:8px 8px 12px;border-top:1px solid var(--border-subtle,#14213F);';
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
-    cancelBtn.style.cssText = 'width:100%;background:transparent;border:1px solid var(--border-subtle,#1b2a55);color:var(--text-muted,#a9b4d0);padding:10px;border-radius:8px;cursor:pointer;font-size:13px;transition:all 0.15s;';
+    cancelBtn.style.cssText = 'width:100%;background:transparent;border:1px solid var(--border-subtle,#14213F);color:var(--text-muted,#a9b4d0);padding:10px;border-radius:8px;cursor:pointer;font-size:13px;transition:all 0.15s;';
     cancelBtn.textContent = 'Cancelar';
     cancelBtn.onmouseenter = () => { cancelBtn.style.color = 'var(--text-main,#eef3ff)'; cancelBtn.style.borderColor = 'var(--text-muted,#a9b4d0)'; };
-    cancelBtn.onmouseleave = () => { cancelBtn.style.color = 'var(--text-muted,#a9b4d0)'; cancelBtn.style.borderColor = 'var(--border-subtle,#1b2a55)'; };
+    cancelBtn.onmouseleave = () => { cancelBtn.style.color = 'var(--text-muted,#a9b4d0)'; cancelBtn.style.borderColor = 'var(--border-subtle,#14213F)'; };
     cancelBtn.onclick = () => { modal.remove(); if (_mikaSelectResolve) { _mikaSelectResolve(null); _mikaSelectResolve = null; } };
     footer.appendChild(cancelBtn);
 
@@ -522,6 +1003,7 @@ function syncModelDropdown() {
       if (opt.value) {
         window.mika5.setAppState("lastModel", opt.value).catch(() => {});
       }
+      onSelectedModelChanged();
     };
     optionsContainer.appendChild(div);
   });
@@ -559,8 +1041,18 @@ const Store = {
   async countMessages(chatId) {
     return await window.mika5.db.countMessages(chatId);
   },
-  async addMessage(chatId, role, content, replyToId, model) {
-    return await window.mika5.db.addMessage({ chatId, role, content, replyToId: replyToId || null, model: model || null });
+  async addMessage(chatId, role, content, replyToId, model, attachments) {
+    const hadAttachments = Array.isArray(attachments) && attachments.length > 0;
+    const result = await window.mika5.db.addMessage({
+      chatId, role, content,
+      replyToId: replyToId || null,
+      model: model || null,
+      attachments: hadAttachments ? attachments : null
+    });
+    // El aviso NO vive aquí: lo dan persistUserTurn / persistAssistantTurn,
+    // que son quienes conocen el turno. Duplicarlo daría dos toasts por fallo.
+    if (result && result.ok === false) console.warn('addMessage rechazado:', result.error);
+    return result;
   },
   async clearChat(chatId) {
     return await window.mika5.db.clearChat(chatId);
@@ -1244,7 +1736,9 @@ async function extractTextFromScannedPDF(arrayBuffer, model, maxPages = 20) {
           role: 'user',
           content: `Extrae TODO el texto visible de esta imagen de documento escaneado. Devuelve SOLO el texto extraído, sin comentarios ni explicaciones. Si hay tablas, represéntalas en formato texto alineado. Página ${i} de ${totalPages}.`
         }],
-        images: [base64]
+        // El canvas produce JPEG: se declara el tipo para que cualquier adapter
+        // (Ollama, OpenAI, Anthropic) pueda construir su bloque de imagen.
+        images: [{ mediaType: 'image/jpeg', base64 }]
       });
       if (result?.message?.content) {
         extractedTexts.push(result.message.content.trim());
@@ -1288,12 +1782,40 @@ function renderAttachmentPreview() {
   const container = el("attachmentPreview");
   if (!container) return;
   container.innerHTML = "";
-  if (chatAttachments.length === 0) {
+  // Las imágenes rechazadas se muestran junto a los adjuntos reales, marcadas
+  // como NO adjuntadas. Que desaparezcan sin rastro es lo que hacía creer al
+  // usuario que la imagen había viajado.
+  const rejected = pendingRejectedImages(activeChatId);
+  if (chatAttachments.length === 0 && rejected.length === 0) {
     container.style.display = "none";
     updateSendButtonState();
     return;
   }
   container.style.display = "flex";
+  rejected.forEach(item => {
+    const div = document.createElement("div");
+    div.className = "preview-item preview-item-rejected";
+    div.style.cssText = "border:1px solid var(--danger,#d33);opacity:.85;";
+    div.title = rejectionNotice(item);
+
+    const nameSpan = document.createElement("span");
+    nameSpan.style.cssText = "font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:140px;";
+    nameSpan.textContent = rejectionMatchesCurrentTarget(item)
+      ? `🚫 ${item.name} — no adjuntada`
+      : `🚫 ${item.name} — no adjuntada · vuelve a adjuntarla`;
+    div.appendChild(nameSpan);
+
+    const removeSpan = document.createElement("span");
+    removeSpan.className = "preview-remove";
+    removeSpan.textContent = "×";
+    removeSpan.title = 'Descartar y poder enviar solo texto';
+    removeSpan.onclick = (e) => {
+      e.preventDefault();
+      discardRejectedImage(item.id);
+    };
+    div.appendChild(removeSpan);
+    container.appendChild(div);
+  });
   chatAttachments.forEach((att, i) => {
     const div = document.createElement("div");
     div.className = "preview-item";
@@ -1302,14 +1824,16 @@ function renderAttachmentPreview() {
       const img = document.createElement("img");
       img.src = `data:image/png;base64,${att.base64}`;
       img.style.cssText = "width:40px;height:40px;object-fit:cover;border-radius:4px;";
-      img.alt = att.name;
+      img.alt = att.name || 'Imagen adjunta';
       div.appendChild(img);
     }
     
     const nameSpan = document.createElement("span");
     nameSpan.style.cssText = "font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:80px;";
     const docIcon = /\.(docx?|xlsx?|pptx?|pdf|rtf|odt|ods|odp|csv|tsv)$/i.test(att.name) ? '📄 ' : '';
-    nameSpan.textContent = att.type === 'image' ? '🖼️ ' + att.name : docIcon + att.name;
+    nameSpan.textContent = att.type === 'image'
+      ? `Adjunto: ${att.name || 'Imagen'}`
+      : docIcon + att.name;
     div.appendChild(nameSpan);
     
     const removeSpan = document.createElement("span");
@@ -1351,7 +1875,7 @@ function renderMarkdown(text) {
   try {
     let html = marked.parse(raw);
     if (!html) return raw.replace(/</g, "&lt;").replace(/\n/g, "<br>");
-    // Sanitize: strip dangerous tags and attributes (XSS protection)
+    // Parse first, then sanitize with the vendored DOM parser and explicit allowlist.
     html = sanitizeHtml(html);
     return html;
   } catch (e) {
@@ -1359,20 +1883,85 @@ function renderMarkdown(text) {
   }
 }
 
-// Sanitize HTML output from marked - strip dangerous elements without breaking code blocks
-function sanitizeHtml(html) {
-  // Remove script tags and their content
-  let safe = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-  // Remove iframe, object, embed tags
-  safe = safe.replace(/<\/?(?:iframe|object|embed|form|input|textarea|select|button|link|meta|base)\b[^>]*>/gi, '');
-  // Remove event handler attributes (onclick, onerror, onload, etc.)
-  safe = safe.replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
-  // Remove javascript: URLs in href/src
-  safe = safe.replace(/(href|src)\s*=\s*(['"])\s*javascript:/gi, '$1=$2#blocked:');
-  // Force links to open in new tab safely
-  safe = safe.replace(/<a\s/gi, '<a target="_blank" rel="noopener noreferrer" ');
-  return safe;
+const MARKDOWN_ALLOWED_TAGS = [
+  'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'blockquote',
+  'pre', 'code', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'a', 'img',
+  'strong', 'em', 'del', 'hr', 'br', 'span'
+];
+const MARKDOWN_ALLOWED_ATTR = [
+  'href', 'src', 'alt', 'title', 'class', 'target', 'rel', 'role', 'aria-label',
+  'loading', 'data-zoomable', 'colspan', 'rowspan'
+];
+let markdownSanitizerConfigured = false;
+
+function configureMarkdownSanitizer() {
+  if (markdownSanitizerConfigured || typeof DOMPurify === 'undefined') return;
+  DOMPurify.addHook('afterSanitizeAttributes', node => {
+    if (node.tagName === 'A') {
+      const rawHref = node.getAttribute('href');
+      try {
+        const parsed = new URL(rawHref || '', document.baseURI);
+        if (!['http:', 'https:', 'mailto:'].includes(parsed.protocol)) node.removeAttribute('href');
+      } catch (_) {
+        node.removeAttribute('href');
+      }
+      node.setAttribute('target', '_blank');
+      node.setAttribute('rel', 'noopener noreferrer');
+    }
+    if (node.tagName === 'IMG') {
+      const rawSrc = node.getAttribute('src') || '';
+      const allowedData = /^data:image\/(?:png|jpeg|webp|gif);base64,/i.test(rawSrc);
+      let allowedHttps = false;
+      try {
+        allowedHttps = new URL(rawSrc, document.baseURI).protocol === 'https:';
+      } catch (_) {}
+      if (!allowedData && !allowedHttps) node.removeAttribute('src');
+    }
+  });
+  markdownSanitizerConfigured = true;
 }
+
+// La sanitización por expresiones regulares sobre HTML es evitable: basta un
+// payload que el parser del navegador interprete distinto que el regex. Se
+// delega en DOMPurify, que parsea de verdad y aplica una allowlist explícita.
+function sanitizeHtml(html) {
+  // Fail-closed: sin sanitizador NO se devuelve HTML sin limpiar. Quien llama
+  // (renderMarkdown) degrada a texto escapado.
+  if (typeof DOMPurify === 'undefined') {
+    throw new Error('DOMPurify no está disponible');
+  }
+  configureMarkdownSanitizer();
+  return DOMPurify.sanitize(String(html || ''), {
+    ALLOWED_TAGS: MARKDOWN_ALLOWED_TAGS,
+    ALLOWED_ATTR: MARKDOWN_ALLOWED_ATTR,
+    ALLOW_DATA_ATTR: false,
+    FORBID_TAGS: [
+      'script', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'textarea',
+      'select', 'option', 'svg', 'math', 'style'
+    ],
+    FORBID_ATTR: ['style', 'srcdoc', 'formaction'],
+    ALLOW_UNKNOWN_PROTOCOLS: false
+  });
+}
+
+function safeExternalHref(value) {
+  try {
+    const parsed = new URL(String(value || ''));
+    return ['http:', 'https:', 'mailto:'].includes(parsed.protocol) && !parsed.username && !parsed.password
+      ? parsed.href
+      : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+document.addEventListener('click', event => {
+  const link = event.target.closest?.('.message-content a[href]');
+  if (!link) return;
+  event.preventDefault();
+  const href = safeExternalHref(link.getAttribute('href'));
+  if (href) window.mika5.openExternal(href);
+});
 
 function wrapTablesResponsive(container) {
   if (!container) return;
@@ -1684,7 +2273,7 @@ async function loadRuntime() {
     // Filter out embedding-only models that don't support chat
     // Keep :cloud models (kimi-k2.5:cloud, glm-5:cloud, etc.)
     models = models.filter(m => {
-      if (currentProvider === 'alibaba' && !['chat', 'vision'].includes(m.taskType)) return false;
+      if (m.taskType && !['chat', 'vision'].includes(m.taskType)) return false;
       const n = (m.name || '').toLowerCase();
       if (n.includes(':cloud')) return true; // always keep cloud models
       return !/^(nomic-embed|bge-|e5-|gte-|mxbai-embed|snowflake-arctic-embed|all-minilm)/i.test(n) 
@@ -1769,11 +2358,151 @@ async function loadProvider() {
     if (provider && provider.id) {
       currentProvider = provider.id;
       providerPrivacy = provider.privacy || (provider.privacy === 'private' ? 'private' : 'cloud');
+      // El contrato viaja con el proveedor: sin ida y vuelta extra por IPC.
+      providerCapabilities = provider.capabilities || await refreshProviderCapabilities();
       updatePrivacyUI();
     }
   } catch (e) {
     console.warn('loadProvider failed:', e);
   }
+}
+
+function cloudConsentProjectId(projectId) {
+  return projectId && projectId !== QUICK_CHAT_ID ? projectId : null;
+}
+
+async function readCloudConsent(providerId, projectId) {
+  const key = buildCloudConsentKey(providerId, cloudConsentProjectId(projectId));
+  return normalizeStoredConsent(await window.mika5.getAppState(key));
+}
+
+function requestCloudConsentChoice(providerLabel, scope, storedConsent) {
+  return new Promise(resolve => {
+    const previous = document.getElementById('cloudConsentModal');
+    if (previous) previous.remove();
+    const modal = document.createElement('div');
+    modal.id = 'cloudConsentModal';
+    modal.className = 'modal';
+    modal.style.display = 'flex';
+    const content = document.createElement('div');
+    content.className = 'modal-content';
+    content.style.maxWidth = '560px';
+    const header = document.createElement('div');
+    header.className = 'modal-header';
+    const title = document.createElement('h3');
+    title.textContent = t('cloudConsent.title', { provider: providerLabel });
+    header.appendChild(title);
+    const body = document.createElement('div');
+    body.className = 'modal-body';
+    const intro = document.createElement('p');
+    intro.textContent = t('cloudConsent.intro');
+    body.appendChild(intro);
+    const list = document.createElement('ul');
+    for (const item of summarizeCloudScope(scope)) {
+      const row = document.createElement('li');
+      const newlyRequested = !storedConsent?.categories?.[item.category];
+      const count = item.count ? ` (${item.count})` : '';
+      const safeNames = (item.names || []).slice(0, 5);
+      row.textContent = `${t(item.labelKey)}${count}${safeNames.length ? `: ${safeNames.join(', ')}` : ''}`;
+      if (newlyRequested && storedConsent) row.append(t('cloudConsent.newCategory'));
+      list.appendChild(row);
+    }
+    body.appendChild(list);
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin-top:20px;';
+    const finish = choice => {
+      modal.remove();
+      resolve(choice);
+    };
+    for (const [choice, label, className] of [
+      ['once', t('cloudConsent.once'), 'btn-icon'],
+      ['persist', t('cloudConsent.persist'), 'btn-primary'],
+      ['cancel', t('action.cancel'), 'btn-icon']
+    ]) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = className;
+      button.textContent = label;
+      button.addEventListener('click', () => finish(choice));
+      actions.appendChild(button);
+    }
+    body.appendChild(actions);
+    content.append(header, body);
+    modal.appendChild(content);
+    document.body.appendChild(modal);
+  });
+}
+
+async function ensureCloudConsent(requestContext, scope) {
+  if (requestContext.providerId === 'local' || requestContext.providerId === 'llamacpp') return true;
+  const consentProjectId = cloudConsentProjectId(requestContext.projectId);
+  const key = buildCloudConsentKey(requestContext.providerId, consentProjectId);
+  const stored = normalizeStoredConsent(await window.mika5.getAppState(key));
+  const effectiveScope = {
+    ...scope,
+    providerId: requestContext.providerId,
+    projectScope: cloudProjectScope(consentProjectId)
+  };
+  if (consentCoversScope(stored, effectiveScope)) return true;
+  const providerLabel = providerDisplayName(requestContext.providerId);
+  const choice = await requestCloudConsentChoice(providerLabel, effectiveScope, stored);
+  if (choice === 'cancel') return false;
+  if (choice === 'persist') {
+    const persisted = mergeConsentScope(stored, effectiveScope, {
+      providerId: requestContext.providerId,
+      projectScope: cloudProjectScope(consentProjectId)
+    });
+    await window.mika5.setAppState(key, JSON.stringify(persisted));
+    updatePrivacyUI();
+  }
+  return true;
+}
+
+function buildEffectiveCloudScope(requestContext, payload, metadata = {}) {
+  if (requestContext.providerId === 'local' || requestContext.providerId === 'llamacpp') {
+    return buildCloudDataScope({ message: true });
+  }
+  const messages = Array.isArray(payload?.messages) ? payload.messages : [];
+  const imageNames = Array.isArray(metadata.imageNames)
+    ? metadata.imageNames.filter(Boolean)
+    : [];
+  const ragTitles = Array.isArray(metadata.ragDocumentTitles)
+    ? [...new Set(metadata.ragDocumentTitles.filter(Boolean))]
+    : [];
+  return buildCloudDataScope({
+    message: true,
+    history: Number(metadata.historyMessageCount) > 0,
+    historyMessageCount: Number(metadata.historyMessageCount) || 0,
+    projectInstructions: Boolean(metadata.projectInstructionsIncluded),
+    textAttachments: Array.isArray(metadata.attachmentNames) && metadata.attachmentNames.length > 0,
+    attachmentNames: metadata.attachmentNames || [],
+    imageAttachments: Boolean(
+      (Array.isArray(payload?.images) && payload.images.length)
+      || (Array.isArray(payload?.sourceImages) && payload.sourceImages.length)
+    ),
+    imageNames,
+    ragContext: Boolean(metadata.ragContextIncluded && messages.some(message =>
+      message.role === 'system' && String(message.content || '').includes(metadata.ragContextMarker || '')
+    )),
+    ragDocumentTitles: ragTitles,
+    ragDocumentCount: ragTitles.length
+  });
+}
+
+function providerDisplayName(providerId) {
+  const key = `provider.${providerId}`;
+  const translated = t(key);
+  return translated === key
+    ? String(providerId || '').charAt(0).toUpperCase() + String(providerId || '').slice(1)
+    : translated;
+}
+
+async function revokeCloudConsent() {
+  if (providerPrivacy !== 'cloud') return;
+  const key = buildCloudConsentKey(currentProvider, cloudConsentProjectId(activeProjectId));
+  await window.mika5.setAppState(key, '');
+  updatePrivacyUI();
+  showToast(t('cloudConsent.revoked'), 'success');
 }
 
 function updatePrivacyUI() {
@@ -1784,10 +2513,9 @@ function updatePrivacyUI() {
   const providerName = el('currentProviderName');
   const inputBanner = el('cloudInputBanner');
   const footerEl = el('footerStatus');
+  const revokeButton = el('revokeCloudConsent');
   
-  const providerLabel = currentProvider === 'local' ? t('provider.local') 
-    : currentProvider === 'alibaba' ? 'Alibaba Cloud Model Studio'
-    : currentProvider.charAt(0).toUpperCase() + currentProvider.slice(1);
+  const providerLabel = providerDisplayName(currentProvider);
   
   if (providerPrivacy === 'private') {
     if (indicator) {
@@ -1803,6 +2531,7 @@ function updatePrivacyUI() {
     if (providerName) providerName.textContent = t('provider.local');
     if (inputBanner) inputBanner.classList.remove('visible');
     if (footerEl) footerEl.textContent = t('footer.tagline');
+    if (revokeButton) revokeButton.style.display = 'none';
   } else {
     if (indicator) {
       indicator.className = 'privacy-indicator cloud';
@@ -1823,6 +2552,15 @@ function updatePrivacyUI() {
       inputBanner.innerHTML = `⚠️ <strong>${providerLabel}:</strong> ${t('privacy.inputWarning')}`;
     }
     if (footerEl) footerEl.textContent = t('footer.cloud');
+    if (revokeButton) revokeButton.style.display = 'none';
+    const providerAtUpdate = currentProvider;
+    const projectAtUpdate = activeProjectId;
+    readCloudConsent(providerAtUpdate, projectAtUpdate).then(consent => {
+      if (consent && currentProvider === providerAtUpdate && activeProjectId === projectAtUpdate && badge) {
+        badge.textContent = t('cloudConsent.authorized');
+        if (revokeButton) revokeButton.style.display = '';
+      }
+    }).catch(() => {});
   }
 }
 
@@ -1830,6 +2568,10 @@ async function switchProvider(providerId) {
   try {
     const result = await window.mika5.ai.setProvider(providerId);
     currentProvider = providerId;
+    // El contrato del proveedor anterior no vale para el nuevo.
+    await refreshProviderCapabilities();
+    // El plan visual pendiente pertenece al proveedor anterior: no se arrastra.
+    pendingVisualAction = null;
     providerPrivacy = result.privacy;
     
     updatePrivacyUI();
@@ -1953,7 +2695,7 @@ function showProjectStylePicker(projectId, iconBtnEl, currentIcon, currentColor)
   
   const picker = document.createElement('div');
   picker.className = 'project-style-picker';
-  picker.style.cssText = 'position:absolute;left:0;top:100%;background:var(--bg-sidebar,#0f1629);border:1px solid var(--border-subtle);border-radius:10px;padding:10px;z-index:60;box-shadow:0 8px 24px rgba(0,0,0,0.4);width:200px;';
+  picker.style.cssText = 'position:absolute;left:0;top:100%;background:var(--bg-sidebar,#000208);border:1px solid var(--border-subtle);border-radius:10px;padding:10px;z-index:60;box-shadow:0 8px 24px rgba(0,0,0,0.4);width:200px;';
   
   // Color row
   const colorLabel = document.createElement('div');
@@ -1986,7 +2728,7 @@ function showProjectStylePicker(projectId, iconBtnEl, currentIcon, currentColor)
   iconGrid.style.cssText = 'display:flex;gap:4px;flex-wrap:wrap;';
   PROJECT_ICONS.forEach(icon => {
     const btn = document.createElement('span');
-    btn.style.cssText = `width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:6px;cursor:pointer;font-size:16px;background:${icon === currentIcon ? 'var(--bg-hover,#152044)' : 'transparent'};border:1px solid ${icon === currentIcon ? 'var(--accent)' : 'transparent'};`;
+    btn.style.cssText = `width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:6px;cursor:pointer;font-size:16px;background:${icon === currentIcon ? 'var(--bg-hover,#0D1630)' : 'transparent'};border:1px solid ${icon === currentIcon ? 'var(--accent)' : 'transparent'};`;
     btn.textContent = icon;
     btn.onclick = async (e) => {
       e.stopPropagation();
@@ -2212,7 +2954,12 @@ async function refreshChats() {
 
       try {
         const projects = await Store.listProjects();
-        // Exclude current project AND Quick Chat (can't move TO quick chat)
+        // QUICK_CHAT_DESTINATION_POLICY: AMBIGUOUS.
+        // El comentario histórico decía "can't move TO quick chat", pero el filtro
+        // nunca excluyó QUICK_CHAT_ID y el bloque de opciones de abajo le da
+        // etiqueta, icono y color propios — es decir, se pintaba a propósito.
+        // `updateChat` tampoco lo ha restringido nunca. Sin un requisito de
+        // producto confirmado, NO se cambia el comportamiento observable.
         const others = projects.filter((pr) => pr.id !== activeProjectId);
 
         if (others.length === 0) { 
@@ -2384,6 +3131,18 @@ async function openChatInternal(chatId, signal) {
       allMessages = messages;
     }
     conversationHistory = (allMessages || []).map((m) => ({ role: m.role, content: m.content }));
+    // La persistencia no puede ser solo cosmética: al abrir el chat sus imágenes
+    // vuelven a ser contexto visual utilizable. Se rehidrata desde el historial
+    // COMPLETO, no desde la página pintada: una imagen de una página antigua
+    // sigue siendo la referencia válida para "ahora ponlo verde".
+    //
+    // Barrera de identidad asíncrona: si mientras se cargaba este historial la
+    // usuaria abrió otro chat, escribir aquí pisaría el contexto visual del chat
+    // que ya está en pantalla con imágenes de otro. Se acota a la rehidratación
+    // para no alterar el resto del ciclo de carga (que reactiva el input).
+    if (!signal?.aborted && activeChatId === chatId) {
+      rehydrateVisualContextFromMessages(allMessages, chatId);
+    }
 
     // Render only the recent page, with "load more" button if needed
     renderMessagesSafe(messages, signal, chatHasOlderMessages);
@@ -2666,9 +3425,13 @@ async function renderKnowledgeList() {
     return;
   }
   try {
-    const items = (activeProjectId === QUICK_CHAT_ID && activeChatId)
-      ? await window.mika5.db.listKnowledge(activeProjectId, activeChatId)
-      : await window.mika5.db.listKnowledge(activeProjectId);
+    // Quick Chat: sólo los documentos del chat. Proyecto normal: los del
+    // proyecto MÁS los del chat actual (un chat movido desde Quick Chat trae los
+    // suyos, y sin esto quedaban invisibles e imborrables desde el panel).
+    const isQuickChatPanel = activeProjectId === QUICK_CHAT_ID;
+    const items = await window.mika5.db.listKnowledge(activeProjectId, activeChatId || null, {
+      includeProjectScope: !isQuickChatPanel
+    });
     if (!items || items.length === 0) {
       list.innerHTML = '<div class="context-hint">Sin archivos. Añade archivos de texto.</div>';
       return;
@@ -2677,6 +3440,7 @@ async function renderKnowledgeList() {
       const div = document.createElement("div");
       div.className = "knowledge-item";
       const STATUS_MAP = {
+        indexed:  { icon: '✓', color: '#22c55e', titleKey: 'knowledge.statusReady' },
         ready:    { icon: '✓', color: '#22c55e', titleKey: 'knowledge.statusReady' },
         error:    { icon: '✗', color: '#ef4444', titleKey: 'knowledge.statusError' },
         indexing: { icon: '⏳', color: '#eab308', titleKey: 'knowledge.statusPending' },
@@ -2763,6 +3527,333 @@ async function newChat() {
 
 let _lastRenderedModel = null; // Track last model for change indicators
 
+// Errores atómicos de la BD traducidos a algo accionable. Un turno rechazado no
+// se escribe: ni el texto ni la imagen.
+const ATTACHMENT_SAVE_ERRORS = {
+  ATTACHMENT_TOO_LARGE: 'La imagen supera el máximo permitido. El mensaje no se guardó: reduce su tamaño y reenvíalo.',
+  ATTACHMENTS_TOTAL_TOO_LARGE: 'Las imágenes juntas superan el máximo por mensaje. No se guardó nada: envíalas por separado.',
+  ATTACHMENTS_PAYLOAD_TOO_LARGE: 'El mensaje con sus imágenes es demasiado grande para guardarse.',
+  TOO_MANY_ATTACHMENTS: 'Demasiadas imágenes en un solo mensaje. No se guardó nada.',
+  ATTACHMENT_INVALID: 'Una de las imágenes no se pudo guardar y el mensaje se descartó entero para no perderla en silencio.'
+};
+
+/**
+ * Barrera transaccional del turno del usuario.
+ *
+ * La BD es el gate PREVIO a cualquier llamada externa. Antes, varios caminos
+ * hacían `await Store.addMessage(...)` y seguían aunque devolviera ok:false:
+ * el texto y los adjuntos se limpiaban, se llamaba al proveedor y el turno
+ * parecía enviado — pero al reiniciar no existía, porque nunca se guardó.
+ *
+ * Devuelve { ok: true, messageId } o { ok: false, error }.
+ * Llama a Store.addMessage exactamente una vez y es el ÚNICO sitio que avisa
+ * del fallo: Store.addMessage ya no muestra toast (habría dos por fallo).
+ */
+async function persistUserTurn({ requestContext, content, model, replyToId, attachments }) {
+  const chatId = requestContext?.chatId || activeChatId;
+  let result;
+  try {
+    result = await Store.addMessage(
+      chatId, 'user', content, replyToId || null, model || null, attachments || null
+    );
+  } catch (error) {
+    console.warn('persistUserTurn falló:', error?.name || 'Error');
+    result = { ok: false, error: 'PERSIST_FAILED' };
+  }
+  if (result?.ok) return { ok: true, messageId: result.id };
+  const error = result?.error || 'PERSIST_FAILED';
+  showToast(
+    ATTACHMENT_SAVE_ERRORS[error]
+      || 'No se pudo guardar el mensaje, así que no se envió. Tu texto y tus adjuntos siguen aquí.',
+    'error'
+  );
+  return { ok: false, error };
+}
+
+// Respuestas del asistente que se generaron pero no pudieron guardarse. Se
+// conservan durante la sesión para reintentar SOLO la escritura: el proveedor
+// ya cobró la petición y no se le vuelve a llamar.
+const unsavedAssistantMessages = [];
+let unsavedAssistantSeq = 0;
+// Promesas en vuelo por entryId. Dos clics simultáneos comparten la misma
+// promesa, así que nunca se ejecutan dos INSERT para la misma respuesta.
+const unsavedRetryInFlight = new Map();
+
+function findUnsavedEntry(entryId) {
+  return unsavedAssistantMessages.find(entry => entry.id === entryId) || null;
+}
+
+// El payload se congela al encolar: si `attachments` se mutara después (el
+// array vive en el flujo visual), el reintento escribiría algo distinto de lo
+// que se mostró.
+function freezeAttachmentsSnapshot(attachments) {
+  if (!Array.isArray(attachments) || attachments.length === 0) return null;
+  return attachments.map(item => Object.freeze({ ...item }));
+}
+
+function enqueueUnsavedAssistantMessage({
+  chatId, content, model, attachments, replyToId, renderedMsgId, error
+}) {
+  const entry = {
+    id: `unsaved-${++unsavedAssistantSeq}`,
+    chatId,
+    content,
+    model: model || null,
+    attachments: freezeAttachmentsSnapshot(attachments),
+    replyToId: replyToId || null,
+    renderedMsgId: renderedMsgId || null,
+    error,
+    attempts: 0,
+    createdAt: Date.now(),
+    status: 'pending',
+    messageId: null
+  };
+  unsavedAssistantMessages.push(entry);
+  return entry;
+}
+
+// Solo se toca el DOM si la burbuja sigue existiendo Y pertenece al chat de la
+// entrada. Un reintento que termina con otro chat en pantalla escribe igual,
+// pero no altera burbujas ajenas: al reabrir el chat la respuesta vendrá de SQLite.
+function unsavedBadgeFor(entry) {
+  if (!entry?.renderedMsgId || activeChatId !== entry.chatId) return null;
+  const bubble = el("chat")?.querySelector(`[data-msg-id="${entry.renderedMsgId}"]`);
+  return bubble?.querySelector('.msg-unsaved') || null;
+}
+
+function renderUnsavedBadgeState(entry, state) {
+  const badge = unsavedBadgeFor(entry);
+  if (!badge) return;
+  const label = badge.querySelector('.msg-unsaved-text');
+  const button = badge.querySelector('.msg-unsaved-retry');
+  if (state === 'retrying') {
+    if (label) label.textContent = '⏳ Guardando…';
+    if (button) { button.disabled = true; button.textContent = 'Guardando…'; }
+    return;
+  }
+  if (state === 'failed') {
+    if (label) label.textContent = '⚠️ No se pudo guardar';
+    if (button) { button.disabled = false; button.textContent = 'Reintentar guardado'; }
+    return;
+  }
+  if (state === 'saved') {
+    badge.classList.add('msg-unsaved-ok');
+    if (button) button.remove();
+    if (label) label.textContent = '✅ Guardado';
+    // El aviso desaparece solo: dejarlo fijo sugeriría que algo sigue mal.
+    const toRemove = badge;
+    setTimeout(() => { try { toRemove.remove(); } catch (_) {} }, 2500);
+  }
+}
+
+// Marcador con estado y control por mensaje. Todo con createElement: el
+// contenido es dinámico y no puede pasar por innerHTML.
+function markMessageAsUnsaved(entry) {
+  if (!entry?.renderedMsgId || activeChatId !== entry.chatId) return null;
+  const bubble = el("chat")?.querySelector(`[data-msg-id="${entry.renderedMsgId}"]`);
+  if (!bubble || bubble.querySelector('.msg-unsaved')) return null;
+
+  const badge = document.createElement('div');
+  badge.className = 'msg-unsaved';
+  badge.dataset.unsavedId = entry.id;
+
+  const label = document.createElement('span');
+  label.className = 'msg-unsaved-text';
+  label.textContent = '⚠️ No guardado — se perderá al reiniciar';
+  badge.appendChild(label);
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'msg-unsaved-retry';
+  button.textContent = 'Reintentar guardado';
+  button.setAttribute('aria-label', 'Reintentar guardar esta respuesta');
+  button.addEventListener('click', () => {
+    // El propio reintento deshabilita el botón; además comparte promesa en vuelo.
+    retryUnsavedAssistantMessage(entry.id);
+  });
+  badge.appendChild(button);
+
+  bubble.appendChild(badge);
+  return badge;
+}
+
+/**
+ * Persistencia del turno del asistente. A diferencia del usuario, aquí el
+ * proveedor YA respondió: la respuesta se muestra igual, pero marcada como no
+ * guardada para no afirmar que sobrevivirá al reinicio.
+ */
+async function persistAssistantTurn({
+  chatId, content, model, attachments, replyToId, renderedMsgId
+}) {
+  let result;
+  try {
+    result = await Store.addMessage(
+      chatId, 'assistant', content, replyToId || null, model || null, attachments || null
+    );
+  } catch (error) {
+    console.warn('persistAssistantTurn falló:', error?.name || 'Error');
+    result = { ok: false, error: 'PERSIST_FAILED' };
+  }
+  if (result?.ok) return { ok: true, messageId: result.id };
+  const error = result?.error || 'PERSIST_FAILED';
+  const entry = enqueueUnsavedAssistantMessage({
+    chatId, content, model, attachments, replyToId, renderedMsgId, error
+  });
+  markMessageAsUnsaved(entry);
+  showToast(
+    `${ATTACHMENT_SAVE_ERRORS[error] || 'No se pudo guardar la respuesta.'} `
+    + 'La respuesta sigue visible pero no se guardó.',
+    'error'
+  );
+  return { ok: false, error, entryId: entry.id };
+}
+
+/**
+ * Reintenta SOLO la escritura de una respuesta concreta. Nunca vuelve a llamar
+ * al proveedor: la respuesta ya se generó y se pagó.
+ *
+ * Idempotente: si ya hay un intento en vuelo para ese id, devuelve la MISMA
+ * promesa en vez de lanzar un segundo INSERT. Si la entrada ya no está en la
+ * cola, devuelve un resultado estable sin escribir.
+ *
+ * La entrada nunca se saca de la cola antes de escribir: solo se elimina tras
+ * un éxito confirmado. Una excepción no puede perderla.
+ */
+function retryUnsavedAssistantMessage(entryId) {
+  const inFlight = unsavedRetryInFlight.get(entryId);
+  if (inFlight) return inFlight;
+
+  const entry = findUnsavedEntry(entryId);
+  if (!entry) return Promise.resolve({ ok: true, alreadyResolved: true });
+
+  const attempt = (async () => {
+    entry.status = 'retrying';
+    entry.attempts += 1;
+    renderUnsavedBadgeState(entry, 'retrying');
+    let result;
+    try {
+      result = await Store.addMessage(
+        entry.chatId, 'assistant', entry.content, entry.replyToId,
+        entry.model, entry.attachments
+      );
+    } catch (error) {
+      // Una excepción deja la entrada intacta y reintentable.
+      console.warn('retryUnsavedAssistantMessage lanzó:', error?.name || 'Error');
+      result = { ok: false, error: 'PERSIST_THREW' };
+    }
+    if (result?.ok) {
+      entry.status = 'saved';
+      entry.messageId = result.id || null;
+      const index = unsavedAssistantMessages.indexOf(entry);
+      if (index >= 0) unsavedAssistantMessages.splice(index, 1);
+      renderUnsavedBadgeState(entry, 'saved');
+      return { ok: true, entryId, messageId: entry.messageId };
+    }
+    entry.status = 'pending';
+    entry.error = result?.error || 'PERSIST_FAILED';
+    renderUnsavedBadgeState(entry, 'failed');
+    return { ok: false, entryId, error: entry.error, attempts: entry.attempts };
+  })().finally(() => {
+    unsavedRetryInFlight.delete(entryId);
+  });
+
+  unsavedRetryInFlight.set(entryId, attempt);
+  return attempt;
+}
+
+/**
+ * Reintenta todas las pendientes de forma AISLADA: el fallo o la excepción de
+ * una no impide procesar las demás.
+ */
+async function retryAllUnsavedAssistantMessages() {
+  const ids = unsavedAssistantMessages.map(entry => entry.id);
+  let saved = 0;
+  let stillFailing = 0;
+  for (const id of ids) {
+    let result;
+    try {
+      result = await retryUnsavedAssistantMessage(id);
+    } catch (_) {
+      result = { ok: false };
+    }
+    if (result?.ok) saved++;
+    else stillFailing++;
+  }
+  return { attempted: ids.length, saved, stillFailing };
+}
+
+// Forma mínima con la que un adjunto viaja a la BD y vuelve para repintarse.
+// Se toma un snapshot ANTES de vaciar chatAttachments: después ya no existe.
+function snapshotMessageAttachments(attachments) {
+  return (Array.isArray(attachments) ? attachments : [])
+    .filter(item => item && item.type === 'image')
+    .map(item => ({
+      name: item.name || 'imagen',
+      mediaType: item.mediaType || null,
+      base64: item.base64 || null,
+      url: item.url || null,
+      visualEntryId: item.visualEntryId || null
+    }));
+}
+
+// SQLite devuelve la columna como texto; en memoria ya es un array.
+function parseStoredAttachments(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== 'string' || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function attachmentPreviewSrc(attachment) {
+  if (attachment?.url) return attachment.url;
+  if (!attachment?.base64) return null;
+  // El mediaType viene de una lista cerrada validada en db.js; aun así se
+  // normaliza aquí para no construir un data: con un tipo arbitrario.
+  const mediaType = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp']
+    .includes(String(attachment.mediaType || '').toLowerCase())
+    ? attachment.mediaType
+    : 'image/png';
+  return `data:${mediaType};base64,${attachment.base64}`;
+}
+
+// Miniaturas dentro de la burbuja. Todo con createElement: nada de innerHTML
+// con datos que vienen de un archivo del usuario o de la BD.
+function appendMessageAttachments(bubble, attachments) {
+  const items = (Array.isArray(attachments) ? attachments : [])
+    .map(item => ({ ...item, src: attachmentPreviewSrc(item) }))
+    .filter(item => item.src);
+  if (!items.length) return null;
+
+  const gallery = document.createElement('div');
+  gallery.className = 'msg-attachments';
+  for (const item of items) {
+    const figure = document.createElement('div');
+    figure.className = 'msg-attachment';
+    if (item.visualEntryId) figure.dataset.visualEntryId = item.visualEntryId;
+
+    const img = document.createElement('img');
+    img.className = 'embedded-image-preview';
+    img.src = item.src;
+    img.alt = item.name || 'Imagen adjunta';
+    img.title = item.name || 'Imagen adjunta';
+    img.addEventListener('click', () => openImageViewer(item.src, item.name));
+    figure.appendChild(img);
+
+    const caption = document.createElement('span');
+    caption.className = 'msg-attachment-name';
+    caption.textContent = item.name || 'Imagen adjunta';
+    figure.appendChild(caption);
+
+    gallery.appendChild(figure);
+  }
+  bubble.appendChild(gallery);
+  return gallery;
+}
+
 function appendMsg(msg, target) {
   const role = msg.role;
   const content = msg.content || "";
@@ -2788,7 +3879,7 @@ function appendMsg(msg, target) {
   if (msg._replyTo) {
     const quote = document.createElement("div");
     quote.className = "msg-reply-quote";
-    quote.innerHTML = `<div class="reply-role">${escapeHtml(msg._replyTo.role === 'user' ? 'Usuario' : 'Asistente')}</div><div class="reply-text">${escapeHtml((msg._replyTo.content || '').slice(0, 120))}</div>`;
+    quote.innerHTML = `<div class="reply-role">${escapeHtml(msg._replyTo.role === 'user' ? 'Usuario' : 'Asistente')}</div><div class="reply-text">${escapeHtml(msg._replyTo.content || '')}</div>`;
     if (msg._replyTo.msgId) {
       quote.addEventListener("click", () => scrollToMessage(msg._replyTo.msgId));
     }
@@ -2798,40 +3889,19 @@ function appendMsg(msg, target) {
   const contentEl = document.createElement("div");
   contentEl.className = "msg-content";
 
-  // Collapse very long messages (e.g. pasted documents) with expand toggle
-  const MSG_COLLAPSE_CHARS = 2000;
-  const isLong = content.length > MSG_COLLAPSE_CHARS;
-  const renderContent = isLong ? content.slice(0, MSG_COLLAPSE_CHARS) : content;
-
   try {
-    contentEl.innerHTML = renderMarkdown(renderContent);
+    contentEl.innerHTML = renderMarkdown(content);
     wrapTablesResponsive(contentEl);
-    if (isLong) {
-      contentEl.insertAdjacentHTML('beforeend',
-        '<span class="msg-truncated-indicator">… (vista previa)</span>');
-      const expandBtn = document.createElement("button");
-      expandBtn.className = "btn-save-message msg-expand-btn";
-      expandBtn.textContent = "Mostrar completo";
-      expandBtn.addEventListener("click", () => {
-        try {
-          contentEl.innerHTML = renderMarkdown(content);
-          wrapTablesResponsive(contentEl);
-          highlightCodeBlocks(contentEl);
-          addCopyButtonsToCodeBlocks(contentEl);
-        } catch (e) {
-          contentEl.textContent = content;
-        }
-        expandBtn.remove();
-      });
-      contentEl.appendChild(expandBtn);
-    }
     highlightCodeBlocks(contentEl);
     addCopyButtonsToCodeBlocks(contentEl);
+    enhanceMessageImages(contentEl, { role, model: msgModel, msgId });
   } catch (e) {
     console.warn('Markdown render error:', e.message);
-    contentEl.textContent = renderContent;
+    contentEl.textContent = content;
   }
   div.appendChild(contentEl);
+  // Al recargar el chat, `attachments` llega como TEXT desde SQLite.
+  appendMessageAttachments(div, parseStoredAttachments(msg.attachments ?? msg.images));
 
   // Actions for ALL messages (copy)
   const actions = document.createElement("div");
@@ -2842,7 +3912,7 @@ function appendMsg(msg, target) {
   copyBtn.textContent = t('action.copy');
   copyBtn.type = "button";
   copyBtn.addEventListener("click", () => {
-    navigator.clipboard.writeText(content).then(
+    navigator.clipboard.writeText(sanitizeMessageForClipboard(content)).then(
       () => showToast(t('toast.copied'), "success"),
       () => showToast("Error", "error")
     );
@@ -2917,6 +3987,9 @@ function appendMsg(msg, target) {
       if (chatEl) chatEl.scrollTop = chatEl.scrollHeight;
     }
   }
+  // Devuelve el id para poder marcar la burbuja como "No guardado" si la
+  // persistencia de esa respuesta falla después.
+  return msgId;
 }
 
 function appendGeneratingPlaceholder() {
@@ -2944,7 +4017,7 @@ function setReplyTo(msg) {
   const preview = el("replyPreview");
   if (!preview) return;
   el("replyPreviewRole").textContent = msg.role === 'user' ? 'Usuario' : 'Asistente';
-  el("replyPreviewText").textContent = (msg.content || '').slice(0, 150);
+  el("replyPreviewText").textContent = msg.content || '';
   preview.style.display = "flex";
   try { el("input").focus(); } catch (_) {}
 }
@@ -3063,7 +4136,13 @@ function navigateSearch(idx) {
   if (countEl) countEl.textContent = `${searchCurrentIdx + 1}/${searchMatches.length}`;
 }
 
-async function appendControlledIntentResponse(userText, assistantText, model, imageAttachments = []) {
+async function appendControlledIntentResponse(
+  userText,
+  assistantText,
+  model,
+  imageAttachments = [],
+  requestContext = null
+) {
   if (!activeProjectId) {
     showToast(assistantText, 'warning');
     return;
@@ -3076,14 +4155,39 @@ async function appendControlledIntentResponse(userText, assistantText, model, im
     }
     await openChat(created.id);
   }
+  const context = requestContext || createRequestContext({
+    chatId: activeChatId,
+    projectId: activeProjectId,
+    providerId: currentProvider,
+    selectedModel: model
+  });
   const attachmentNames = imageAttachments.map(attachment => attachment.name).filter(Boolean);
   const storedUserText = attachmentNames.length
     ? `${userText}\n\n[Adjuntos: ${attachmentNames.join(', ')}]`
     : userText;
-  appendMsg({ role: 'user', content: userText || '[Imagen adjunta]' });
-  await Store.addMessage(activeChatId, 'user', storedUserText || '[Imagen adjunta]', null, model);
-  appendMsg({ role: 'assistant', content: assistantText, model });
-  await Store.addMessage(activeChatId, 'assistant', assistantText, null, model);
+  const controlledAttachments = snapshotMessageAttachments(imageAttachments);
+  // Aquí no hay proveedor que llamar, pero el turno tampoco puede pintarse ni
+  // limpiar el input si la BD lo rechaza.
+  const persistedControlled = await persistUserTurn({
+    requestContext: context,
+    content: storedUserText || '[Imagen adjunta]',
+    model,
+    attachments: controlledAttachments
+  });
+  if (!persistedControlled.ok) return;
+
+  if (shouldRenderRequestOutput(context, currentRequestView())) {
+    appendMsg({
+      role: 'user', content: userText || '[Imagen adjunta]', attachments: controlledAttachments
+    });
+  }
+  let controlledAssistantId = null;
+  if (shouldRenderRequestOutput(context, currentRequestView())) {
+    controlledAssistantId = appendMsg({ role: 'assistant', content: assistantText, model });
+  }
+  await persistAssistantTurn({
+    chatId: context.chatId, content: assistantText, model, renderedMsgId: controlledAssistantId
+  });
   el("input").value = "";
   el("input").style.height = 'auto';
   chatAttachments = [];
@@ -3112,60 +4216,328 @@ function buildImageGenerationPromptFromVisualPlan(plan) {
   return lines.join('\n');
 }
 
+const ROUTING_INSTRUCTION_MAX_CHARS = 500;
+
+// slice() opera sobre code units y partiría un par surrogate (emojis, caracteres
+// astrales) dejando un string inválido: se corta por caracteres completos.
+function truncateByCharacters(text, maxChars) {
+  const characters = Array.from(text);
+  if (characters.length <= maxChars) return text;
+  return characters.slice(0, maxChars).join('').trim();
+}
+
+// Una línea de contenido pegado (código, log, stack trace, JSON, config) describe
+// datos, no la intención del usuario, así que no debe decidir la herramienta.
+function isPastedContentLine(line) {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  if (/^(?: {4,}|\t)/.test(line)) return true;
+  if (/^(?:at\s+\S|Traceback\b|File\s+")/.test(trimmed)) return true;
+  if (/^[A-Za-z_$][\w$.]*(?:Error|Exception)\b\s*:/.test(trimmed)) return true;
+  if (/^[{}[\]()<>]/.test(trimmed) || /[{};]$/.test(trimmed)) return true;
+  if (/^[A-Z][A-Z0-9_]{2,}\s*[:=]/.test(trimmed)) return true;
+  if (/^(?:[-*+]\s*)?["']?[\w.$-]+["']?\s*[:=]\s*["'{[\d]/.test(trimmed)) return true;
+  if (/^(?:\d{4}-\d{2}-\d{2}|\d{1,2}:\d{2}:\d{2})/.test(trimmed)) return true;
+  if (/^(?:\/\/|#|\/\*|\*\s|--|\+\+\+|---)/.test(trimmed)) return true;
+  if (/^(?:function|const|let|var|class|import|export|return|if|for|while|switch|def|async|await|public|private)\b/.test(trimmed)) return true;
+  const symbols = (trimmed.match(/[{}()[\];=<>|&$#@`_\\/]/g) || []).length;
+  return symbols / trimmed.length > 0.15;
+}
+
+// Instrucción de routing separada del contenido. La intención del usuario puede
+// estar en cualquier parte del mensaje (antes, después o entre logs), así que se
+// conserva toda la prosa del mensaje y se descartan código, logs y stack traces.
+// Si la prosa excede el límite se preservan principio y final, porque la petición
+// real suele cerrar el mensaje. El texto completo se sigue enviando al modelo y se
+// guarda íntegro en la base de datos.
+function extractRoutingInstruction(text) {
+  const raw = String(text || '').trim();
+  if (Array.from(raw).length <= ROUTING_INSTRUCTION_MAX_CHARS) return raw;
+  const withoutCodeFences = raw.replace(/```[\s\S]*?(?:```|$)/g, '\n');
+  const prose = withoutCodeFences
+    .split('\n')
+    .filter(line => line.trim() && !isPastedContentLine(line))
+    .join('\n')
+    .trim();
+  if (!prose) {
+    // Mensaje sin prosa identificable: se usa el primer párrafo como último recurso.
+    const firstParagraph = withoutCodeFences.split(/\n\s*\n/)[0].trim() || raw;
+    return truncateByCharacters(firstParagraph, ROUTING_INSTRUCTION_MAX_CHARS);
+  }
+  const proseCharacters = Array.from(prose);
+  if (proseCharacters.length <= ROUTING_INSTRUCTION_MAX_CHARS) return prose;
+  // El presupuesto descuenta el separador para no exceder nunca el límite.
+  const budget = ROUTING_INSTRUCTION_MAX_CHARS - 1;
+  const head = proseCharacters.slice(0, Math.floor(budget / 2)).join('').trim();
+  const tail = proseCharacters.slice(-Math.ceil(budget / 2)).join('').trim();
+  return `${head}\n${tail}`;
+}
+
+const OUTPUT_LIMIT_NOTICE = 'Esta respuesta alcanzó el límite de salida del modelo. Escribe «continúa» para completar la respuesta.';
+
+// Una respuesta cortada por el límite de salida del modelo se conserva íntegra: solo se
+// añade un aviso debajo. No se reintenta, no se sustituye el texto por un error y no se
+// duplica el contenido, que ya quedó guardado tal como llegó.
+async function appendOutputLimitNotice(finishReason, requestContext) {
+  // Se lee el campo NORMALIZADO del contrato, no el dialecto de cada proveedor.
+  // Antes se comparaba contra 'max_tokens', que solo emite Alibaba: en los otros
+  // seis proveedores este aviso no llegaba a dispararse nunca aunque el modelo
+  // hubiera truncado la respuesta.
+  if (finishReason !== 'length' || !requestContext) return false;
+  const destination = resolveRequestDestination(requestContext);
+  showToast('La respuesta alcanzó el límite de salida del modelo.', 'info');
+  if (shouldRenderRequestOutput(requestContext, currentRequestView())) {
+    appendMsg({ role: 'assistant', content: OUTPUT_LIMIT_NOTICE, model: AUTOMATIC_MODEL_ID });
+  }
+  await Store.addMessage(destination.chatId, 'assistant', OUTPUT_LIMIT_NOTICE, null, AUTOMATIC_MODEL_ID);
+  return true;
+}
+
+// Fábrica única de acciones visuales pendientes: garantiza que toda acción quede
+// sellada con la identidad de su contexto (chat, proyecto, proveedor e imagen fuente).
+function createPendingVisualAction({
+  type, model, visionModel, visualExecution, plan, visualContext, options, generationPrompt
+}) {
+  const sourceImage = plan?.sourceImage || visualContext?.imageRef || null;
+  return {
+    type,
+    provider: currentProvider,
+    projectId: activeProjectId,
+    chatId: activeChatId,
+    model,
+    visionModel,
+    visualExecution,
+    plan,
+    visualContext,
+    sourceImage,
+    sourceVisualEntryId: sourceImage?.visualEntryId ?? null,
+    options,
+    generationPrompt,
+    createdAt: Date.now()
+  };
+}
+
+// Una acción pendiente solo puede ejecutarse en el contexto exacto donde se creó.
+// Devuelve el motivo del desajuste, o null si la identidad coincide.
+function pendingVisualActionIdentityMismatch(pending) {
+  if (!pending) return 'missing-pending';
+  if (pending.provider !== currentProvider) return 'provider';
+  if (pending.projectId !== activeProjectId) return 'project';
+  if (pending.chatId !== activeChatId) return 'chat';
+  const expectedSourceImage = pending.plan?.sourceImage || pending.visualContext?.imageRef || null;
+  if (!expectedSourceImage || !pending.sourceImage) return 'source-image-missing';
+  if (!expectedSourceImage.base64 && !expectedSourceImage.url) return 'source-image-empty';
+  if ((pending.sourceVisualEntryId ?? null) !== (expectedSourceImage.visualEntryId ?? null)) {
+    return 'source-visual-entry';
+  }
+  const sameSourceImage = pending.sourceImage === expectedSourceImage
+    || ((pending.sourceImage.base64 ?? null) === (expectedSourceImage.base64 ?? null)
+      && (pending.sourceImage.url ?? null) === (expectedSourceImage.url ?? null));
+  if (!sameSourceImage) return 'source-image-mismatch';
+  return null;
+}
+
+// Registra la petición generativa que el guard de routing mixto degradó, para que la
+// usuaria pueda confirmarla sin repetir la instrucción. No genera nada por sí sola.
+async function offerConflictAlternative(route, selectedModel, requestContext) {
+  const alternative = route?.conflictAlternative;
+  if (!alternative || !requestContext) return;
+  if (!GENERATIVE_VISUAL_MODES.includes(alternative.plan?.mode)) return;
+  if (alternative.validation?.valid !== true || !alternative.model) return;
+  pendingVisualAction = createPendingVisualAction({
+    type: alternative.intent,
+    model: alternative.model,
+    visionModel: route.capabilities?.defaultVisionModel
+      || (selectedModel === AUTOMATIC_MODEL_ID ? null : selectedModel),
+    visualExecution: alternative.visualExecution,
+    plan: alternative.plan,
+    visualContext: alternative.visualExecution?.visualContext || route.visualContext,
+    options: ['analizar', 'generar'],
+    generationPrompt: alternative.generationPrompt
+  });
+  pendingVisualAction.provider = requestContext.providerId;
+  pendingVisualAction.projectId = requestContext.projectId;
+  pendingVisualAction.chatId = requestContext.chatId;
+  const operations = alternative.plan?.operations?.length
+    ? ` (${alternative.plan.operations.join(', ')})`
+    : '';
+  const offer = `Detecté también una petición de edición sobre la imagen${operations}. Responde 2 para aplicarla, o sigue preguntando.`;
+  if (shouldRenderRequestOutput(requestContext, currentRequestView())) {
+    appendMsg({ role: 'assistant', content: offer, model: AUTOMATIC_MODEL_ID });
+  }
+  await Store.addMessage(requestContext.chatId, 'assistant', offer, null, AUTOMATIC_MODEL_ID);
+}
+
+// Relleno conversacional admitido alrededor de una confirmación. Lista corta y
+// explícita: nada de aquí puede convertir una petición nueva en confirmación.
+const PENDING_REPLY_LEAD = '(?:si\\s+|ok\\s+|vale\\s+|dale\\s+|venga\\s+|por favor\\s+)*';
+const PENDING_REPLY_TAIL = '(?:\\s+por favor|\\s+gracias)*';
+
+// Confirmaciones de ANÁLISIS.
+const PENDING_ANALYZE_PATTERNS = [
+  '1',
+  'opcion 1',
+  '(?:solo\\s+|quiero\\s+|puedes\\s+|prefiero\\s+)?analiza(?:r|rla|rlo|la|lo)?(?:\\s+(?:la|esta|esa)\\s+(?:imagen|foto))?'
+];
+
+// Confirmaciones de GENERACIÓN / EDICIÓN.
+const PENDING_GENERATE_PATTERNS = [
+  '2',
+  'opcion 2',
+  // generar / genera / crear / crea  (+ "una nueva versión", "otra imagen", …)
+  '(?:quiero\\s+|puedes\\s+)?(?:genera|crea)(?:r|me)?(?:\\s+(?:una|otra|la|el)(?:\\s+nueva?)?\\s+(?:version|imagen|foto|logo))?',
+  // editar / edita / editarla
+  '(?:quiero\\s+|puedes\\s+)?edita(?:r|rla|rlo|la|lo)?(?:\\s+(?:la|esta)\\s+(?:imagen|foto))?',
+  // aplícalo / aplicar los cambios
+  'aplica(?:r|lo|la)?(?:\\s+(?:los|las)\\s+cambios)?',
+  // hazlo / hacelo
+  'ha(?:z|ce)(?:lo|la)?'
+];
+
+function buildPendingReplyMatcher(patterns) {
+  return new RegExp(`^${PENDING_REPLY_LEAD}(?:${patterns.join('|')})${PENDING_REPLY_TAIL}$`);
+}
+
+const PENDING_ANALYZE_RE = buildPendingReplyMatcher(PENDING_ANALYZE_PATTERNS);
+const PENDING_GENERATE_RE = buildPendingReplyMatcher(PENDING_GENERATE_PATTERNS);
+
+/**
+ * Interpreta la respuesta a "¿analizar o generar?".
+ * Devuelve 'analyze' | 'generate' | null.
+ *
+ * Antes solo se aceptaban cuatro cadenas exactas (2 | opcion 2 | generar |
+ * genera). Una confirmación natural como "generar una nueva versión" no
+ * coincidía: la acción pendiente se cancelaba y la frase se reenrutaba como
+ * petición nueva, perdiendo la instrucción original ("rediseña el logo por uno
+ * más moderno") y produciendo una imagen casi idéntica.
+ *
+ * Los patrones están ANCLADOS a la cadena completa, así que una petición que
+ * solo contenga la palabra "generar" no se confunde con una confirmación.
+ */
+function parsePendingVisualActionReply(text) {
+  const normalized = String(text || '').toLowerCase().normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalized) return null;
+  if (PENDING_ANALYZE_RE.test(normalized)) return 'analyze';
+  if (PENDING_GENERATE_RE.test(normalized)) return 'generate';
+  return null;
+}
+
 async function handlePendingVisualActionReply(text) {
   if (!pendingVisualAction) return false;
-  const normalized = String(text || '').toLowerCase().normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '').replace(/[^\p{L}\p{N}\s]/gu, ' ').trim();
-  const analyze = /^(1|opcion 1|analizar|analiza)$/.test(normalized);
-  const generate = /^(2|opcion 2|generar|genera)$/.test(normalized);
+  const intent = parsePendingVisualActionReply(text);
+  const analyze = intent === 'analyze';
+  const generate = intent === 'generate';
+  // Solo una respuesta exacta ejecuta la acción pendiente. Cualquier otro mensaje
+  // la cancela y sigue el routing normal: una solicitud nueva nunca se secuestra
+  // ni actualiza el plan anterior.
   if (!analyze && !generate) {
-    const clarification = /\b(color|fondo|logo|texto|contenido|moderno|grande|pequeno|azul|rojo|verde|gris|blanco|negro)\b/.test(normalized);
-    if (clarification) {
-      pendingVisualAction.plan.constraints = [
-        ...(pendingVisualAction.plan.constraints || []),
-        `additional-instruction: ${normalized}`
-      ];
-      pendingVisualAction.generationPrompt = null;
-      await appendControlledIntentResponse(
-        text,
-        'Aclaración guardada. Responde 1 para analizar la referencia o 2 para generar una nueva imagen con el plan actualizado.',
-        AUTOMATIC_MODEL_ID
-      );
-      return true;
-    }
     pendingVisualAction = null;
     return false;
   }
 
+  // La acción NO se consume aquí. Antes se ponía a null nada más entrar, así que
+  // un fallo de persistencia la destruía: "generar una nueva versión" se perdía y
+  // el siguiente mensaje se trataba como solicitud nueva. Solo se consume tras
+  // guardar el turno de confirmación y arrancar la ejecución.
   const pending = pendingVisualAction;
-  pendingVisualAction = null;
+  // La confirmación solo vale en el chat, proyecto, proveedor e imagen donde nació la
+  // acción. Si algo no coincide se cancela y se consume la respuesta, para que un "2"
+  // huérfano no se envíe como chat normal ni ejecute nada.
+  const identityMismatch = pendingVisualActionIdentityMismatch(pending);
+  if (identityMismatch) {
+    pendingVisualAction = null;
+    console.warn('Acción visual pendiente cancelada por identidad:', identityMismatch);
+    showToast(
+      'La acción visual pendiente pertenece a otro chat, proyecto o imagen y fue cancelada.',
+      'warning'
+    );
+    return true;
+  }
   if (!activeProjectId) {
-    pendingVisualAction = pending;
     showToast('Selecciona un proyecto para ejecutar la acción visual.', 'warning');
     return true;
   }
   if (!activeChatId) {
     const created = await withTimeout(Store.createChat(activeProjectId, "Chat"), 8000, 'crear chat inicial');
     if (!created?.ok) {
-      pendingVisualAction = pending;
       showToast('No se pudo crear el chat.', 'error');
       return true;
     }
     await openChat(created.id);
   }
-  appendMsg({ role: 'user', content: text });
-  await Store.addMessage(activeChatId, 'user', text, null, AUTOMATIC_MODEL_ID);
+  const requestContext = createRequestContext({
+    chatId: activeChatId,
+    projectId: activeProjectId,
+    providerId: currentProvider,
+    selectedModel: pending.model || pending.visionModel || AUTOMATIC_MODEL_ID
+  });
+  const pendingImages = pending.sourceImage ? [pending.sourceImage] : [];
+  const pendingPayload = {
+    requestId: requestContext.requestId,
+    model: pending.model || pending.visionModel,
+    messages: [{ role: 'user', content: text }],
+    sourceImages: pendingImages
+  };
+  const cloudScope = buildEffectiveCloudScope(requestContext, pendingPayload, {
+    imageNames: pendingImages.map(image => image.name || t('cloudConsent.sourceImage'))
+  });
+  if (!await ensureCloudConsent(requestContext, cloudScope)) return true;
+  // A) Snapshot; B) gate de persistencia.
+  const pendingAttachments = snapshotMessageAttachments(
+    pendingImages.map(image => ({ ...image, type: 'image' }))
+  );
+  const persistedPending = await persistUserTurn({
+    requestContext,
+    content: text,
+    model: AUTOMATIC_MODEL_ID,
+    attachments: pendingAttachments
+  });
+  // D) Sin persistencia la acción sigue viva: se puede reintentar con su
+  //    sourceImage y su generationPrompt intactos.
+  if (!persistedPending.ok) return true;
+
+  // C) Consumo de la acción + efectos visibles + llamada al proveedor.
+  pendingVisualAction = null;
+  activeRequestId = requestContext.requestId;
+  appendMsg({ role: 'user', content: text, attachments: pendingAttachments });
   el("input").value = "";
   el("input").style.height = 'auto';
   isGenerating = true;
   appendGeneratingPlaceholder();
   try {
+    if (pending.provider && pending.provider !== currentProvider) {
+      throw new Error('La acción visual pertenece a otro proveedor. Vuelve a seleccionar el proveedor original.');
+    }
     if (generate) {
+      // Espeja la barrera de executeGenerateImageToolUse: una acción pendiente que no
+      // sea generativa nunca puede generar, ni siquiera confirmada por la usuaria.
+      if (!GENERATIVE_VISUAL_MODES.includes(pending.plan?.mode)) {
+        throw new Error('La acción pendiente no es una tarea generativa');
+      }
       const prompt = pending.generationPrompt || buildImageGenerationPromptFromVisualPlan(pending.plan);
-      const generated = await window.mika5.ai.generateImage({ model: 'wan2.7-image', prompt });
+      const generationModel = pending.model || pending.visualExecution?.model || null;
+      if (!generationModel) {
+        throw new Error('El proveedor actual no tiene un modelo de imagen configurado');
+      }
+      const sourceImage =
+        pending.plan?.sourceImage
+        || pending.visualContext?.imageRef
+        || null;
+      const generated = await window.mika5.ai.generateImage({
+        requestId: requestContext.requestId,
+        model: generationModel,
+        prompt,
+        sourceImages: sourceImage ? [sourceImage] : []
+      });
       const answer = terminalImageAnswer(generated.images);
-      registerVisualImage({
-        chatId: activeChatId,
+      // registerVisualImage solo toca memoria efímera: sin persistir el imageRef
+      // la imagen generada desaparecía del chat al reiniciar.
+      const generatedRef = registerVisualImage({
+        chatId: requestContext.chatId,
         role: 'assistant',
         origin: pending.plan?.mode === 'image-edit' ? 'image-edit' : 'image-generation',
         sourceVisualEntryId: pending.visualContext?.imageRef?.visualEntryId || null,
@@ -3175,14 +4547,27 @@ async function handlePendingVisualActionReply(text) {
           name: 'Imagen generada'
         }
       });
+      const generatedAttachments = snapshotMessageAttachments([generatedRef]);
       removeGeneratingPlaceholder();
-      appendMsg({ role: 'assistant', content: answer, model: 'wan2.7-image' });
-      await Store.addMessage(activeChatId, 'assistant', answer, null, 'wan2.7-image');
+      let renderedId = null;
+      if (shouldRenderRequestOutput(requestContext, currentRequestView())) {
+        renderedId = appendMsg({
+          role: 'assistant', content: answer, model: generationModel,
+          attachments: generatedAttachments
+        });
+      }
+      await persistAssistantTurn({
+        chatId: requestContext.chatId, content: answer, model: generationModel,
+        attachments: generatedAttachments, renderedMsgId: renderedId
+      });
     } else {
       const imageRef = pending.visualContext?.imageRef;
       if (!imageRef) throw new Error('No hay una imagen de referencia disponible para analizar');
+      const visionModel = pending.visionModel || null;
+      if (!visionModel) throw new Error('El proveedor actual no tiene un modelo de visión configurado');
       const out = await window.mika5.ai.chat({
-        model: 'qwen3.7-plus',
+        requestId: requestContext.requestId,
+        model: visionModel,
         messages: [{
           role: 'user',
           content: 'Analiza la imagen de referencia. Describe su contenido y los elementos relevantes para la edición solicitada, sin afirmar que puedes editarla.'
@@ -3192,25 +4577,28 @@ async function handlePendingVisualActionReply(text) {
       const answer = safeAssistantContent(out?.message?.content || '');
       if (!answer) throw new Error('Respuesta vacía');
       registerVisualEvent({
-        chatId: activeChatId,
+        chatId: requestContext.chatId,
         role: 'assistant',
         origin: 'vision-analysis',
         sourceVisualEntryId: imageRef.visualEntryId || null
       });
       visualContextMemory.lastAnalyzedImage = imageRef;
       registerLastVisualAnalysis({
-        chatId: activeChatId,
+        chatId: requestContext.chatId,
         sourceImageRef: imageRef,
         analysisText: answer
       });
       removeGeneratingPlaceholder();
-      appendMsg({ role: 'assistant', content: answer, model: 'qwen3.7-plus' });
-      await Store.addMessage(activeChatId, 'assistant', answer, null, 'qwen3.7-plus');
+      if (shouldRenderRequestOutput(requestContext, currentRequestView())) {
+        appendMsg({ role: 'assistant', content: answer, model: visionModel });
+      }
+      await Store.addMessage(requestContext.chatId, 'assistant', answer, null, visionModel);
     }
   } catch (error) {
     removeGeneratingPlaceholder();
-    showToast('No se pudo ejecutar la acción visual: ' + (error?.message || error), 'error');
+    showToast('No se pudo ejecutar la acción visual: ' + sanitizeRemoteErrorMessage(error?.message || error), 'error');
   } finally {
+    if (activeRequestId === requestContext.requestId) activeRequestId = null;
     isGenerating = false;
     updateSendButtonState();
   }
@@ -3226,11 +4614,47 @@ async function send() {
   const text = el("input").value.trim();
   const hasAttachments = chatAttachments.length > 0;
   if (!text && !hasAttachments) return;
-  if (currentProvider === 'alibaba' && pendingVisualAction) {
+  // Barrera de envío: hay imágenes que el usuario quiso adjuntar y MIKA5 rechazó.
+  // Enviar ahora produciría una respuesta de solo texto que se lee como si la
+  // imagen se hubiera analizado. El texto NO se borra: el usuario cambia de
+  // modelo y vuelve a adjuntar.
+  const rejected = pendingRejectedImages(activeChatId);
+  if (rejected.length) {
+    const names = rejected.map(item => item.name).join(', ');
+    showToast(
+      `No se envía: ${names} no se pudo adjuntar. ${rejectionNotice(rejected[0])} `
+      + 'Vuelve a adjuntarla con un modelo con visión, o pulsa ✕ sobre ella para enviar solo texto.',
+      'error'
+    );
+    return;
+  }
+  const originProviderId = currentProvider;
+  const originProjectId = activeProjectId;
+  if (!originProjectId) {
+    showToast("Selecciona un proyecto primero.", "error");
+    return;
+  }
+  let originChatId = activeChatId;
+  if (!originChatId) {
+    const created = await withTimeout(Store.createChat(originProjectId, "Chat"), 8000, 'crear chat inicial');
+    if (!created?.ok) {
+      showToast("No se pudo crear el chat.", "error");
+      return;
+    }
+    originChatId = created.id;
+    await openChat(originChatId);
+  }
+  const requestContextFor = selectedModel => createRequestContext({
+    chatId: originChatId,
+    projectId: originProjectId,
+    providerId: originProviderId,
+    selectedModel
+  });
+  if (pendingVisualAction) {
     const handled = await handlePendingVisualActionReply(text);
     if (handled) return;
   }
-  if (currentProvider === 'alibaba') {
+  {
     const selectedOption = Array.from(el('modelSelect').options).find(option => option.value === model);
     if (selectedOption?.dataset.taskType === 'image-generation') {
       showToast('Este modelo se usa desde Crear imagen, no desde chat.', 'warning');
@@ -3258,17 +4682,21 @@ async function send() {
   let routedIntent = 'normal-chat';
   let resolvedVisualContext = null;
   let activeVisualRoute = null;
-  if (currentProvider === 'alibaba') {
+  const routingInstruction = extractRoutingInstruction(text);
+  // extractRoutingInstruction devuelve el texto recortado: comparar contra el
+  // texto crudo daría falsos negativos por espacios al inicio o al final.
+  const routingUsesFullText = routingInstruction === text.trim();
+  {
     try {
       const route = await window.mika5.ai.routeIntent({
-        text,
-        chatId: activeChatId,
+        text: routingInstruction,
+        chatId: originChatId,
         attachments: imageAttachments.map(attachment => ({
           type: 'image',
           mediaType: attachment.mediaType,
           base64: attachment.base64,
           name: attachment.name,
-          chatId: activeChatId
+          chatId: originChatId
         })),
         lastUserImage: visualContextMemory.lastUserImage,
         lastUploadedImage: visualContextMemory.lastUploadedImage,
@@ -3281,38 +4709,83 @@ async function send() {
       resolvedVisualContext = route.visualContext;
       activeVisualRoute = route;
       if (route.action === 'error') {
-        await appendControlledIntentResponse(text, route.message, model, imageAttachments);
+        await appendControlledIntentResponse(text, route.message,
+          model,
+          imageAttachments,
+          requestContextFor(model)
+        );
         return;
       }
       if (route.action === 'unsupported') {
         if (route.options && route.plan && route.validation?.shouldOfferFallback) {
-          pendingVisualAction = {
+          pendingVisualAction = createPendingVisualAction({
             type: route.intent,
+            model: route.model,
+            visionModel: route.capabilities?.defaultVisionModel || (model === AUTOMATIC_MODEL_ID ? null : model),
+            visualExecution: route.visualExecution,
             plan: route.plan,
             visualContext: route.visualContext,
             options: route.options,
             generationPrompt: route.generationPrompt
-          };
+          });
         }
-        await appendControlledIntentResponse(text, route.message, model, imageAttachments);
+        await appendControlledIntentResponse(text, route.message,
+          model,
+          imageAttachments,
+          requestContextFor(model)
+        );
         return;
       }
+      // Barrera de último recurso sobre la ruta directa de generación: una solicitud
+      // que mezcla análisis y generación nunca ejecuta generateImage desde aquí.
+      // Degrada con gracia hacia chat, sin registrar imagen ni guardar Markdown.
+      if (route.action === 'generate-image' && route.detailed?.intentConflicts?.analysisAndGeneration) {
+        console.error('Bloqueo de routing mixto: análisis y generación en la misma solicitud:', route.detailed.intent);
+        showToast('La solicitud mezcla análisis y generación: se responde con análisis, sin generar imagen.', 'warning');
+        route.action = 'chat';
+        route.intent = route.visualContext?.hasVisualContext ? 'vision-analysis' : 'normal-chat';
+        route.model = route.capabilities?.defaultVisionModel
+          || (model === AUTOMATIC_MODEL_ID ? null : model);
+        routedIntent = route.intent;
+      }
       if (route.action === 'generate-image') {
-        if (!activeProjectId) {
-          showToast("Selecciona un proyecto primero.", "error");
-          return;
-        }
-        if (!activeChatId) {
-          const created = await withTimeout(Store.createChat(activeProjectId, "Chat"), 8000, 'crear chat inicial');
-          if (!created?.ok) {
-            showToast("No se pudo crear el chat.", "error");
-            return;
-          }
-          await openChat(created.id);
-        }
+        const requestContext = requestContextFor(route.model);
         const userPrompt = text || 'Crea una imagen';
-        appendMsg({ role: 'user', content: userPrompt });
-        await Store.addMessage(activeChatId, 'user', userPrompt, null, route.model);
+        const visualExecution = route.visualExecution;
+        const sourceImage =
+          visualExecution?.plan?.sourceImage
+          || route.visualContext?.imageRef
+          || null;
+        const generationPayload = {
+          requestId: requestContext.requestId,
+          model: route.model,
+          prompt: visualExecution?.generationPrompt || route.modelPrompt || userPrompt,
+          sourceImages: sourceImage ? [sourceImage] : []
+        };
+        const cloudScope = buildEffectiveCloudScope(requestContext, generationPayload, {
+          attachmentNames: textAttachments.map(item => item.name),
+          imageNames: generationPayload.sourceImages.map(image =>
+            image.name || t('cloudConsent.sourceImage'))
+        });
+        if (!await ensureCloudConsent(requestContext, cloudScope)) return;
+        // A) Snapshot; B) persistir antes de nada externo.
+        const generativeAttachments = snapshotMessageAttachments(
+          generationPayload.sourceImages.map(image => ({ ...image, type: 'image' }))
+        );
+        const persistedGenerative = await persistUserTurn({
+          requestContext,
+          content: userPrompt,
+          model: route.model,
+          attachments: generativeAttachments
+        });
+        // D) Sin persistencia no hay generateImage ni mensaje fantasma.
+        if (!persistedGenerative.ok) return;
+
+        // C) Efectos visibles y llamada solo tras el éxito.
+        activeRequestId = requestContext.requestId;
+        if (shouldRenderRequestOutput(requestContext, currentRequestView())) {
+          appendMsg({ role: 'user', content: userPrompt, attachments: generativeAttachments });
+        }
         el("input").value = "";
         el("input").style.height = 'auto';
         chatAttachments = [];
@@ -3320,19 +4793,15 @@ async function send() {
         isGenerating = true;
         appendGeneratingPlaceholder();
         try {
-          const visualExecution = route.visualExecution;
           if (['image-edit', 'image-variation'].includes(routedIntent)
             && visualExecution?.validation?.valid !== true) {
             throw new Error('No existe un plan visual seguro para generar la nueva imagen');
           }
-          const generated = await window.mika5.ai.generateImage({
-            model: route.model,
-            prompt: visualExecution?.generationPrompt || route.modelPrompt || userPrompt
-          });
+          const generated = await window.mika5.ai.generateImage(generationPayload);
           const answer = terminalImageAnswer(generated.images);
           const sourceVisualEntryId = route.visualContext?.imageRef?.visualEntryId || null;
-          registerVisualImage({
-            chatId: activeChatId,
+          const generatedRef = registerVisualImage({
+            chatId: requestContext.chatId,
             role: 'assistant',
             origin: routedIntent === 'image-edit'
               ? 'image-edit'
@@ -3344,12 +4813,22 @@ async function send() {
               name: 'Imagen generada'
             }
           });
+          const generatedAttachments = snapshotMessageAttachments([generatedRef]);
           removeGeneratingPlaceholder();
-          appendMsg({ role: 'assistant', content: answer, model: route.model });
-          await Store.addMessage(activeChatId, 'assistant', answer, null, route.model);
+          let renderedId = null;
+          if (shouldRenderRequestOutput(requestContext, currentRequestView())) {
+            renderedId = appendMsg({
+              role: 'assistant', content: answer, model: route.model,
+              attachments: generatedAttachments
+            });
+          }
+          await persistAssistantTurn({
+            chatId: requestContext.chatId, content: answer, model: route.model,
+            attachments: generatedAttachments, renderedMsgId: renderedId
+          });
         } catch (error) {
           removeGeneratingPlaceholder();
-          const safeReason = String(error?.message || error).replace(/\bsk-[A-Za-z0-9_-]+\b/g, '[API_KEY]');
+          const safeReason = sanitizeRemoteErrorMessage(error?.message || error);
           showToast(
             routedIntent === 'image-variation'
               ? 'No se pudo generar la nueva imagen: ' + safeReason
@@ -3357,6 +4836,7 @@ async function send() {
             'error'
           );
         } finally {
+          if (activeRequestId === requestContext.requestId) activeRequestId = null;
           isGenerating = false;
           updateSendButtonState();
         }
@@ -3367,8 +4847,15 @@ async function send() {
         if (!routedImages.length && route.visualContext?.imageRef) {
           routedImages = [route.visualContext.imageRef];
         }
-        contentToSend = route.modelPrompt || contentToSend;
-        showToast('Usando qwen3.7-plus para analizar imágenes.', 'info');
+        // El prompt del plan se deriva de la instrucción de routing: solo puede
+        // reemplazar el contenido cuando no se truncó nada, para que el modelo
+        // siga recibiendo el código o reporte completo.
+        if (routingUsesFullText) {
+          contentToSend = route.modelPrompt || contentToSend;
+        }
+        if (originProviderId === 'alibaba') {
+          showToast('Usando qwen3.7-plus para analizar imágenes.', 'info');
+        }
       }
     } catch (error) {
       showToast('No se pudo determinar la capacidad: ' + (error?.message || error), 'error');
@@ -3376,7 +4863,7 @@ async function send() {
     }
   }
   window.mika5.setAppState("lastModel", el("modelSelect").value).catch(() => {});
-  if (currentProvider === 'alibaba' && routedImages.length && !modelSupportsVision(model)) {
+  if (originProviderId === 'alibaba' && routedImages.length && !modelSupportsVision(model)) {
     const suggested = 'qwen3.7-plus';
     const suggestedOption = Array.from(el('modelSelect').options).find(option => option.value === suggested);
     if (suggestedOption) {
@@ -3420,23 +4907,7 @@ async function send() {
       : `${imagePreviews}${overflow}`;
   }
 
-  if (!activeProjectId) {
-    showToast("Selecciona un proyecto primero.", "error");
-    return;
-  }
-  if (!activeChatId) {
-    const res = await withTimeout(Store.createChat(activeProjectId, "Chat"), 8000, 'crear chat inicial');
-    if (!res || !res.ok) {
-      showToast("No se pudo crear el chat.", "error");
-      return;
-    }
-    await openChat(res.id);
-  }
-
-  el("input").value = "";
-  el("input").style.height = 'auto';
-  chatAttachments = [];
-  renderAttachmentPreview();
+  const requestContext = requestContextFor(model);
 
   // Save lightweight version to DB (no base64 images — they bloat DB and cause layout issues on reload)
   let dbContent = contentToSend;
@@ -3449,7 +4920,6 @@ async function send() {
 
   // Capture reply context before clearing
   const currentReply = replyToMessage ? { ...replyToMessage } : null;
-  clearReplyTo();
 
   // If replying, prepend quote context to what the AI sees and to what gets saved
   if (currentReply) {
@@ -3459,54 +4929,42 @@ async function send() {
     dbContent = replyPrefix + dbContent;
   }
 
-  // Render rich version with thumbnails in current session only
-  appendMsg({ role: "user", content: displayContent, _replyTo: currentReply });
-  await Store.addMessage(activeChatId, "user", dbContent, currentReply?.msgId || null, model);
-
-  isGenerating = true;
   let wasCanceled = false;
   const sendBtn = el("btnSend");
   const stopBtn = el("btnStop");
-  
-  if (sendBtn) sendBtn.style.display = "none";
-  if (stopBtn) {
-    stopBtn.style.display = "";
-    stopBtn.disabled = false;
-    stopBtn.onclick = () => {
-      wasCanceled = true;
-      showToast(t('toast.generationStopped') || 'Generation stopped', 'info');
-      // Signal abort to main process
-      try { window.mika5.ai.abort(); } catch(_) {}
-      removeGeneratingPlaceholder();
-      isGenerating = false;
-      if (sendBtn) { sendBtn.style.display = ""; sendBtn.disabled = false; }
-      if (stopBtn) stopBtn.style.display = "none";
-      updateSendButtonState();
-    };
-  }
-  appendGeneratingPlaceholder();
 
   try {
-    const msgs = await Store.listMessages(activeChatId);
+    const msgs = await Store.listMessages(requestContext.chatId);
 
     // === KNOWLEDGE CONTEXT: Always inject document content ===
     let ragContext = null;
     let knowledgeListContext = null;
+    let ragDocumentTitles = [];
+    let projectInstructionsIncluded = false;
 
     // Load chunk text directly from DB (no embeddings, no Ollama, no disk I/O)
     try {
-      const kProjId = activeProjectId === QUICK_CHAT_ID ? null : activeProjectId;
-      const kChatId = activeProjectId === QUICK_CHAT_ID ? activeChatId : null;
-      if (kProjId || kChatId) {
+      // El alcance SIEMPRE lleva proyecto + chat actual. Antes se mandaba uno u
+      // otro: con sólo el proyecto se colaban los documentos privados de otros
+      // chats, y con sólo el chat se perdía el conocimiento del proyecto.
+      // El proyecto y el chat salen del requestContext: es el alcance de ESTA
+      // solicitud, no el que la interfaz tenga abierto al llegar la respuesta.
+      const isQuickChatScope = requestContext.projectId === QUICK_CHAT_ID;
+      const kProjId = requestContext.projectId || null;
+      const kChatId = requestContext.chatId || null;
+      if (kProjId) {
         // Use cached provider privacy (set by loadProvider) — no IPC needed
         const maxRagChars = (typeof providerPrivacy !== 'undefined' && providerPrivacy === 'private') ? 12000 : 24000;
 
         // Server-side truncation: only returns chunks up to maxRagChars
         // Use complete mode for project-level context to avoid round-robin bias
-        const mode = kProjId !== null ? 'complete' : 'selective';
-        const chunks = await window.mika5.rag.listChunksRaw(kProjId, kChatId, maxRagChars, mode);
+        const mode = isQuickChatScope ? 'selective' : 'complete';
+        // Quick Chat no tiene conocimiento de proyecto: sólo el del chat actual.
+        const scopeOpts = { includeProjectScope: !isQuickChatScope };
+        const chunks = await window.mika5.rag.listChunksRaw(kProjId, kChatId, maxRagChars, mode, scopeOpts);
         if (chunks && chunks.length > 0) {
           const titles = [...new Set(chunks.map(c => c.title))];
+          ragDocumentTitles = titles.filter(Boolean);
           knowledgeListContext = `Documentos en la base de conocimiento del proyecto (${titles.length}):\n${titles.map(t => '- ' + t).join('\n')}`;
 
           const contextText = chunks.map(c =>
@@ -3519,11 +4977,14 @@ async function send() {
       console.error('[KNOWLEDGE] CRITICAL: Failed to load chunks:', chunkErr);
       // Last resort: try loading knowledge item list only (titles without content)
       try {
-        const kProjId2 = activeProjectId === QUICK_CHAT_ID ? null : activeProjectId;
-        const kChatId2 = activeProjectId === QUICK_CHAT_ID ? activeChatId : null;
-        if (kProjId2 || kChatId2) {
-          const items = await window.mika5.db.listKnowledge(kProjId2, kChatId2);
-          const readyItems = (items || []).filter(i => i.index_status === 'ready');
+        const isQuickChatScope2 = requestContext.projectId === QUICK_CHAT_ID;
+        const kProjId2 = requestContext.projectId || null;
+        const kChatId2 = requestContext.chatId || null;
+        if (kProjId2) {
+          const items = await window.mika5.db.listKnowledge(kProjId2, kChatId2, {
+            includeProjectScope: !isQuickChatScope2
+          });
+          const readyItems = (items || []).filter(i => i.index_status === 'ready' || i.index_status === 'indexed');
           if (readyItems.length) {
             knowledgeListContext = `Documentos en la base de conocimiento (${readyItems.length}):\n${readyItems.map(i => '- ' + i.title).join('\n')}\n(El contenido no pudo ser cargado. Informa al usuario que reinicie la aplicación.)`;
           }
@@ -3535,13 +4996,7 @@ async function send() {
     // and doesn't depend on Ollama loading the embedding model
 
     const baseMessages = msgs.map((m) => ({ role: m.role, content: m.content }));
-    // Replace last user message with full content (DB has lightweight version without file text)
-    if (baseMessages.length > 0 && contentToSend) {
-      const lastIdx = baseMessages.length - 1;
-      if (baseMessages[lastIdx].role === 'user') {
-        baseMessages[lastIdx] = { role: 'user', content: contentToSend };
-      }
-    }
+    baseMessages.push({ role: 'user', content: contentToSend });
     conversationHistory = baseMessages;
 
     // === Gestión progresiva de contexto (mensajes) ===
@@ -3581,18 +5036,24 @@ async function send() {
     const systemParts = [];
 
     // Part 1: Project/chat instructions
-    if (activeProjectId && activeProjectId !== QUICK_CHAT_ID) {
+    if (requestContext.projectId && requestContext.projectId !== QUICK_CHAT_ID) {
       try {
-        const projectPrompt = await window.mika5.db.getProjectContext(activeProjectId);
-        if (projectPrompt && projectPrompt.trim()) systemParts.push(projectPrompt.trim());
+        const projectPrompt = await window.mika5.db.getProjectContext(requestContext.projectId);
+        if (projectPrompt && projectPrompt.trim()) {
+          systemParts.push(projectPrompt.trim());
+          projectInstructionsIncluded = true;
+        }
       } catch (e) {
         console.warn("Project context error:", e);
         showToast(t('toast.contextError') || 'Could not load project instructions', 'warning');
       }
-    } else if (activeProjectId === QUICK_CHAT_ID && activeChatId) {
+    } else if (requestContext.projectId === QUICK_CHAT_ID && requestContext.chatId) {
       try {
-        const chatPrompt = await window.mika5.db.getChatContext(activeChatId);
-        if (chatPrompt && chatPrompt.trim()) systemParts.push(chatPrompt.trim());
+        const chatPrompt = await window.mika5.db.getChatContext(requestContext.chatId);
+        if (chatPrompt && chatPrompt.trim()) {
+          systemParts.push(chatPrompt.trim());
+          projectInstructionsIncluded = true;
+        }
       } catch (e) {
         console.warn("Chat context error:", e);
         showToast(t('toast.contextError') || 'Could not load chat instructions', 'warning');
@@ -3612,26 +5073,87 @@ async function send() {
     const finalMessages = [...systemMessages, ...trimmedMessages];
 
     // Add images to the last user message if present (Ollama vision format)
-    const payload = { model, messages: finalMessages };
+    const payload = { requestId: requestContext.requestId, model, messages: finalMessages };
     if (activeVisualRoute?.visualExecution) {
       payload.visualExecution = activeVisualRoute.visualExecution;
     }
     if (routedImages.length > 0) {
-      if (modelSupportsVision(model)) {
-        payload.images = currentProvider === 'alibaba'
-          ? routedImages.map(a => ({ base64: a.base64, mediaType: a.mediaType, url: a.url }))
-          : routedImages.map(a => a.base64);
-      } else {
-        // Model doesn't support vision — warn user, send text-only with image names
-        const imgNames = imageAttachments.map(a => a.name).join(', ');
-        showToast(`El modelo "${model}" no soporta imágenes. Se envió solo el texto.`, 'warning');
-        // Append image names to the last user message so AI knows images were intended
-        const lastMsg = payload.messages[payload.messages.length - 1];
-        if (lastMsg && lastMsg.role === 'user') {
-          lastMsg.content = (lastMsg.content || '') + `\n\n[El usuario adjuntó imágenes (${imgNames}) pero el modelo no soporta visión]`;
-        }
+      // Última barrera antes de la red, resuelta por el proceso principal con el
+      // mismo código que la de los adapters. Antes este camino degradaba a
+      // "enviar solo el texto" con un aviso: el modelo contestaba sin haber visto
+      // la imagen y la respuesta se leía como si sí la hubiera analizado.
+      const blocked = await visionBlockReason({ provider: originProviderId, model });
+      if (blocked) {
+        showToast(
+          `No se envía: ${blocked} La imagen sigue adjunta — cambia a un modelo con visión para analizarla.`,
+          'error'
+        );
+        return;
       }
+      // Forma descriptiva para todos los proveedores. `local.chat` la reduce al
+      // base64 pelado que espera Ollama; los adapters cloud necesitan el mediaType.
+      payload.images = routedImages.map(a => ({
+        base64: a.base64,
+        mediaType: a.mediaType,
+        url: a.url
+      }));
     }
+
+    const cloudScope = buildEffectiveCloudScope(requestContext, payload, {
+      historyMessageCount: msgs.length,
+      projectInstructionsIncluded,
+      attachmentNames: textAttachments.map(item => item.name),
+      imageNames: routedImages.map(image => image.name || t('cloudConsent.sourceImage')),
+      ragContextIncluded: Boolean(ragContext),
+      ragContextMarker: ragContext || '',
+      ragDocumentTitles
+    });
+    if (!await ensureCloudConsent(requestContext, cloudScope)) return;
+
+    // A) Snapshot. Nada se limpia todavía: si la BD rechaza el turno, el texto
+    //    y los adjuntos tienen que seguir donde estaban.
+    const userAttachments = snapshotMessageAttachments(routedImages);
+
+    // B) La BD es el gate previo a la red.
+    const persisted = await persistUserTurn({
+      requestContext,
+      content: dbContent,
+      model: requestContext.selectedModel,
+      replyToId: currentReply?.msgId || null,
+      attachments: userAttachments
+    });
+    // D) Fallo: ni proveedor, ni placeholder, ni limpieza, ni burbuja enviada.
+    if (!persisted.ok) return;
+
+    // C) Solo tras persistir: efectos visibles y llamada al proveedor.
+    activeRequestId = requestContext.requestId;
+    el("input").value = "";
+    el("input").style.height = 'auto';
+    chatAttachments = [];
+    renderAttachmentPreview();
+    clearReplyTo();
+    if (shouldRenderRequestOutput(requestContext, currentRequestView())) {
+      appendMsg({
+        role: "user", content: displayContent, _replyTo: currentReply, attachments: userAttachments
+      });
+    }
+    isGenerating = true;
+    if (sendBtn) sendBtn.style.display = "none";
+    if (stopBtn) {
+      stopBtn.style.display = "";
+      stopBtn.disabled = false;
+      stopBtn.onclick = () => {
+        wasCanceled = true;
+        showToast(t('toast.generationStopped'), 'info');
+        try { window.mika5.ai.abort(requestContext.requestId); } catch (_) {}
+        removeGeneratingPlaceholder();
+        isGenerating = false;
+        if (sendBtn) { sendBtn.style.display = ""; sendBtn.disabled = false; }
+        if (stopBtn) stopBtn.style.display = "none";
+        updateSendButtonState();
+      };
+    }
+    appendGeneratingPlaceholder();
 
     try {
       if (wasCanceled) throw new Error('Canceled');
@@ -3640,49 +5162,88 @@ async function send() {
       if (!out || !out.message) throw new Error('Respuesta vacía');
       let answer = safeAssistantContent(out.message.content);
       let answerModel = model;
+      let terminalImageRef = null;
       if (out.terminalType === 'image') {
-        answer = terminalImageAnswer(out.images);
-        answerModel = activeVisualRoute?.visualExecution?.model || 'wan2.7-image';
-        registerVisualImage({
-          chatId: activeChatId,
-          role: 'assistant',
-          origin: activeVisualRoute?.visualExecution?.plan?.mode === 'image-edit'
-            ? 'image-edit'
-            : activeVisualRoute?.visualExecution?.plan?.mode === 'image-variation'
-              ? 'image-variation'
-              : 'image-generation',
-          sourceVisualEntryId: activeVisualRoute?.visualExecution?.visualContext?.imageRef?.visualEntryId || null,
-          image: { type: 'image', url: out.images[0], name: 'Imagen generada' }
-        });
+        // Una respuesta de análisis o de chat nunca puede materializarse como imagen,
+        // aunque el contenido analizado mencione herramientas o modelos visuales.
+        // El bloqueo degrada con gracia: la capa de presentación no lanza. Se conserva
+        // el texto que devolvió el modelo y no se registra ni se guarda ninguna imagen.
+        const allowedTerminalImageIntents = new Set(['image-generation', 'image-edit', 'image-variation']);
+        if (!allowedTerminalImageIntents.has(routedIntent)) {
+          console.error('Bloqueo de seguridad: imagen terminal en un intent no generativo:', routedIntent);
+          showToast('Se bloqueó una imagen inesperada: la solicitud actual era de análisis o chat.', 'warning');
+          if (!answer) {
+            answer = 'Se bloqueó una imagen inesperada porque la solicitud actual era de análisis o chat.';
+          }
+        } else {
+          const terminalModel = activeVisualRoute?.visualExecution?.model || model || 'modelo-desconocido';
+          if (terminalModel === 'modelo-desconocido') {
+            console.warn('No se pudo identificar el modelo que generó la imagen terminal.');
+          }
+          answer = terminalImageAnswer(out.images);
+          answerModel = terminalModel;
+          terminalImageRef = registerVisualImage({
+            chatId: requestContext.chatId,
+            role: 'assistant',
+            origin: activeVisualRoute?.visualExecution?.plan?.mode === 'image-edit'
+              ? 'image-edit'
+              : activeVisualRoute?.visualExecution?.plan?.mode === 'image-variation'
+                ? 'image-variation'
+                : 'image-generation',
+            sourceVisualEntryId: activeVisualRoute?.visualExecution?.visualContext?.imageRef?.visualEntryId || null,
+            image: { type: 'image', url: out.images[0], name: 'Imagen generada' }
+          });
+        }
       }
       if (routedIntent === 'vision-analysis' && resolvedVisualContext?.imageRef) {
         registerVisualEvent({
-          chatId: activeChatId,
+          chatId: requestContext.chatId,
           role: 'assistant',
           origin: 'vision-analysis',
           sourceVisualEntryId: resolvedVisualContext.imageRef.visualEntryId || null
         });
         visualContextMemory.lastAnalyzedImage = resolvedVisualContext.imageRef;
         registerLastVisualAnalysis({
-          chatId: activeChatId,
+          chatId: requestContext.chatId,
           sourceImageRef: resolvedVisualContext.imageRef,
           analysisText: answer
         });
       }
-      appendMsg({ role: "assistant", content: answer, model: answerModel });
-      await Store.addMessage(activeChatId, "assistant", answer, null, answerModel);
+      // Una imagen terminal llegada por chat también se persiste como adjunto.
+      const assistantAttachments = terminalImageRef
+        ? snapshotMessageAttachments([terminalImageRef])
+        : null;
+      let renderedAssistantId = null;
+      if (shouldRenderRequestOutput(requestContext, currentRequestView())) {
+        renderedAssistantId = appendMsg({
+          role: "assistant", content: answer, model: answerModel, attachments: assistantAttachments
+        });
+      }
+      await persistAssistantTurn({
+        chatId: requestContext.chatId, content: answer, model: answerModel,
+        attachments: assistantAttachments, renderedMsgId: renderedAssistantId
+      });
+
+      // La respuesta ya está guardada íntegra: si el modelo la cortó por su límite de
+      // salida, solo se avisa debajo para que la usuaria pueda pedir la continuación.
+      await appendOutputLimitNotice(out.finishReason, requestContext);
+
+      // El guard de routing mixto degradó la ruta generativa, pero la petición no se
+      // pierde: queda ofrecida como acción pendiente que solo se ejecuta si la usuaria
+      // la confirma. Aquí no se genera nada ni se registra ninguna imagen.
+      await offerConflictAlternative(activeVisualRoute, model, requestContext);
 
       // Auto-rename chat based on user's first message
       try {
-        const allMsgs = await Store.listMessages(activeChatId);
-        const chatList = await Store.listChats(activeProjectId);
-        const thisChat = chatList.find(c => c.id === activeChatId);
+        const allMsgs = await Store.listMessages(requestContext.chatId);
+        const chatList = await Store.listChats(requestContext.projectId);
+        const thisChat = chatList.find(c => c.id === requestContext.chatId);
         if (thisChat && (thisChat.title === 'Chat' || thisChat.title === 'New Chat') && allMsgs.length <= 3) {
           const firstUserMsg = allMsgs.find(m => m.role === 'user');
           if (firstUserMsg) {
             const autoTitle = firstUserMsg.content.replace(/\s+/g, ' ').trim().substring(0, 40);
             if (autoTitle) {
-              await Store.updateChat(activeChatId, { title: autoTitle + (firstUserMsg.content.length > 40 ? '...' : '') });
+              await Store.updateChat(requestContext.chatId, { title: autoTitle + (firstUserMsg.content.length > 40 ? '...' : '') });
             }
           }
         }
@@ -3691,10 +5252,10 @@ async function send() {
       if (wasCanceled) {
         // Don't show error for user-initiated cancel
       } else {
-        console.error('Chat error:', e);
         let msg = e?.message || 'Error desconocido';
         
-        if (currentProvider === 'local') {
+        if (requestContext.providerId === 'local') {
+          console.error('Chat error:', e);
           if (/ECONNREFUSED/i.test(msg)) {
             msg = t('toast.ollamaNotRunning') || 'Ollama no está ejecutándose. Inicia con: ollama serve';
           } else if (/GGML_ASSERT/i.test(msg)) {
@@ -3702,17 +5263,24 @@ async function send() {
           } else if (/500.*Internal Server Error/i.test(msg) || /HTTP 500/i.test(msg)) {
             msg = 'El modelo devolvió error 500. Si usas un modelo :cloud, el servidor remoto puede estar caído. Prueba otro modelo.';
           }
-        } else if (/401|Unauthorized/i.test(msg)) {
-          msg = t('toast.invalidApiKey');
+        } else {
+          msg = sanitizeRemoteErrorMessage(msg);
+          if (/401|Unauthorized/i.test(msg)) {
+            msg = t('toast.invalidApiKey');
+          }
+          console.warn('Cloud provider request failed:', msg);
         }
         
-        appendMsg({ role: "assistant", content: `**Error:** ${msg}` });
-        showToast(msg, 'error');
+        if (shouldRenderRequestOutput(requestContext, currentRequestView())) {
+          appendMsg({ role: "assistant", content: `**Error:** ${msg}` });
+          showToast(msg, 'error');
+        }
       }
     }
 
     await refreshChats();
   } finally {
+    if (activeRequestId === requestContext.requestId) activeRequestId = null;
     removeGeneratingPlaceholder();
     isGenerating = false;
     if (sendBtn) { sendBtn.style.display = ""; sendBtn.disabled = false; }
@@ -4237,6 +5805,7 @@ function selectModel(name) {
   if (name) {
     window.mika5.setAppState("lastModel", name).catch(() => {});
   }
+  onSelectedModelChanged();
 }
 
 function toggleSidebar() {
@@ -4374,23 +5943,29 @@ function wire() {
 
         try {
           if (isImageFile(file)) {
-            const mediaType = supportedVisionMediaType(file);
-            if (!mediaType) {
-              showToast(`${file.name}: formato de imagen no compatible. Usa PNG, JPEG o WebP.`, 'warning');
+            // Identidad capturada ANTES de cualquier await.
+            const attachContext = captureAttachmentContext();
+            const outcome = await processImageAttachment({
+              file,
+              source: 'file',
+              chatId: attachContext.chatId,
+              providerId: attachContext.providerId,
+              model: attachContext.model
+            });
+            if (!outcome.ok) {
+              if (outcome.code === 'unsupported-type') {
+                showToast(`${file.name}: formato de imagen no compatible. Usa PNG, JPEG o WebP.`, 'warning');
+              } else if (outcome.code === 'blocked') {
+                showToast(`${file.name}: ${outcome.reason}`, 'error');
+                renderAttachmentPreview();
+                updateSendButtonState();
+              } else if (outcome.code === 'error') {
+                showToast(`${file.name}: no se pudo procesar la imagen. No se adjuntó.`, 'error');
+              }
+              // 'aborted' es silencioso: la usuaria ya cambió de contexto.
+              // El texto y el resto de adjuntos se conservan en todos los casos.
               continue;
             }
-            const currentModel = el("modelSelect")?.value || '';
-            if (shouldWarnImageCapability(currentModel)) {
-              showToast(`Advertencia: "${currentModel}" no soporta imágenes. Considera usar un modelo con visión (llava, gemma3, etc.)`, 'warning');
-            }
-            const base64 = await docFileToBase64(file);
-            const attachment = registerVisualImage({
-              chatId: activeChatId,
-              role: 'user',
-              origin: 'user-upload',
-              image: { name: file.name, type: 'image', base64, mediaType }
-            });
-            chatAttachments.push(attachment);
             attached++;
           } else if (isDocumentFile(file)) {
             try {
@@ -4452,24 +6027,30 @@ function wire() {
           continue;
         }
         try {
-          const mediaType = supportedVisionMediaType(file);
-          if (!mediaType) {
-            showToast('Formato de imagen no compatible. Usa PNG, JPEG o WebP.', 'warning');
+          const attachContext = captureAttachmentContext();
+          const ext = file.type.split('/')[1] || 'png';
+          // Mismo camino que el selector de archivos: la huella es del contenido,
+          // así que volver a pegar la misma imagen resuelve el rechazo anterior.
+          const outcome = await processImageAttachment({
+            file,
+            source: 'paste',
+            displayName: `pasted-image.${ext}`,
+            chatId: attachContext.chatId,
+            providerId: attachContext.providerId,
+            model: attachContext.model
+          });
+          if (!outcome.ok) {
+            if (outcome.code === 'unsupported-type') {
+              showToast('Formato de imagen no compatible. Usa PNG, JPEG o WebP.', 'warning');
+            } else if (outcome.code === 'blocked') {
+              showToast(`Imagen pegada: ${outcome.reason}`, 'error');
+              renderAttachmentPreview();
+              updateSendButtonState();
+            } else if (outcome.code === 'error') {
+              showToast('No se pudo procesar la imagen pegada. No se adjuntó.', 'error');
+            }
             continue;
           }
-          const currentModel = el("modelSelect")?.value || '';
-          if (shouldWarnImageCapability(currentModel)) {
-            showToast(`Advertencia: "${currentModel}" no soporta imágenes. Considera usar un modelo con visión.`, 'warning');
-          }
-          const base64 = await docFileToBase64(file);
-          const ext = file.type.split('/')[1] || 'png';
-          const attachment = registerVisualImage({
-            chatId: activeChatId,
-            role: 'user',
-            origin: 'user-upload',
-            image: { name: `pasted-image.${ext}`, type: 'image', base64, mediaType }
-          });
-          chatAttachments.push(attachment);
           renderAttachmentPreview();
         } catch (err) {
           showToast('Error pasting image', "error");
@@ -4811,6 +6392,7 @@ async function saveAlibabaSimpleConfig(quiet = false) {
     await window.mika5.ai.setProvider('alibaba');
     currentProvider = 'alibaba';
     providerPrivacy = 'cloud';
+    await refreshProviderCapabilities();
     let keyResult = null;
     if (key) {
       keyResult = await window.mika5.ai.setApiKey('alibaba', key);
@@ -4914,12 +6496,27 @@ async function generateAlibabaImage() {
   }
   const saved = await saveAlibabaSimpleConfig(true);
   if (!saved) return;
+  const requestContext = createRequestContext({
+    chatId: activeChatId || 'alibaba-config',
+    projectId: activeProjectId,
+    providerId: 'alibaba',
+    selectedModel: model
+  });
+  const generationPayload = {
+    requestId: requestContext.requestId,
+    model,
+    prompt,
+    sourceImages: []
+  };
+  const cloudScope = buildEffectiveCloudScope(requestContext, generationPayload);
+  if (!await ensureCloudConsent(requestContext, cloudScope)) return;
+  activeRequestId = requestContext.requestId;
   const button = el('alibabaGenerateImageButton');
   const results = el('alibabaImageResults');
   if (button) button.disabled = true;
   if (results) results.textContent = 'Generando imagen…';
   try {
-    const response = await window.mika5.ai.generateImage({ model, prompt });
+    const response = await window.mika5.ai.generateImage(generationPayload);
     if (results) {
       results.innerHTML = '';
       for (const url of response.images || []) {
@@ -4929,11 +6526,13 @@ async function generateAlibabaImage() {
         img.style.cssText = 'max-width:100%;border-radius:10px;margin-top:10px;';
         results.appendChild(img);
       }
+      enhanceMessageImages(results, { role: 'assistant', model });
     }
   } catch (error) {
     if (results) results.textContent = '';
-    showToast('No se pudo crear la imagen: ' + (error?.message || error), 'error');
+    showToast('No se pudo crear la imagen: ' + sanitizeRemoteErrorMessage(error?.message || error), 'error');
   } finally {
+    if (activeRequestId === requestContext.requestId) activeRequestId = null;
     if (button) button.disabled = false;
   }
 }
@@ -5046,10 +6645,15 @@ async function saveApiKey(provider) {
       renderKnowledgeList();
       if (data.ok && data.indexed > 0) {
         showToast(t('toast.knowledgeIndexed') || `Document indexed (${data.indexed} chunks)`, 'success');
+      } else if (!data.ok && data.saved && data.pending) {
+        const pendingMessage = data.code === 'EMBEDDING_MODEL_NOT_CONFIGURED'
+          ? 'Documento guardado. Configura un modelo local de embeddings para habilitar búsqueda semántica.'
+          : 'Documento guardado. Indexación pendiente: falta el modelo local de embeddings.';
+        showToast(pendingMessage, 'warning');
       } else if (!data.ok && data.error) {
         const err = data.error || '';
         if (err.includes('EMBED') || err.includes('INVALID_EMBED') || err.includes('nomic') || err.includes('Connection refused') || err.includes('ECONNREFUSED')) {
-          showToast(t('toast.knowledgeIndexErrorEmbed'), 'error');
+          showToast('Documento guardado. Indexación pendiente: falta el modelo local de embeddings.', 'warning');
         } else {
           showToast(`${t('toast.knowledgeIndexError')}: ${err.slice(0, 150)}`, 'error');
         }

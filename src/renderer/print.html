@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <!-- img-src no admite ningun origen de red, a proposito. Las imagenes
+       remotas las descarga el proceso principal y llegan aqui como data:.
+       Esta ventana no hace ninguna peticion saliente. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'; img-src 'self' data:; script-src 'self'; style-src 'self'">
+  <title>MIKA5 Print</title>
+  <link rel="stylesheet" href="./print.css">
+</head>
+<body>
+  <main id="print-root"></main>
+  <script src="./vendor/purify.min.js"></script>
+  <script src="./print.js"></script>
+</body>
+</html>

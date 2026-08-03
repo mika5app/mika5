@@ -58,7 +58,11 @@ SUBAGENTS.md
 SUBAGENTS_SUMMARY.md
 
 # Claude Code local config
+.claude/settings.json
 .claude/settings.local.json
 .claude/agents/
 .claude/commands/
 .claude/skills/
+
+# Logs de los gates (npm run test:all)
+.gate-logs/

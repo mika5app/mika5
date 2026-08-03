@@ -1,0 +1,7 @@
+Name: DOMPurify
+Version: 3.4.12
+Exact package: dompurify-3.4.12.tgz
+Bundle source in package: package/dist/purify.min.js
+License declared by package.json: (MPL-2.0 OR Apache-2.0)
+License file copied: package/LICENSE
+Incorporated: 2026-07-30

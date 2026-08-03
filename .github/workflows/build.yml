@@ -75,18 +75,75 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run core tests
-        run: npm test
+  quality-gates:
+    name: Quality gates (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
 
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Electron abre una BrowserWindow en electron-security y en la suite de
+      # integración del renderer, así que en Linux necesita display virtual.
+      # En Windows el runner ya tiene sesión gráfica.
       - name: Install virtual display for Electron tests
+        if: runner.os == 'Linux'
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends xvfb
 
-      - name: Run database tests
-        run: xvfb-run -a npx electron --no-sandbox test/db.test.js
+      - name: Run complete gate battery (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          MIKA5_ELECTRON_ARGS: --no-sandbox
+        run: xvfb-run -a npm run test:all
 
+      # Sin normalizar finales de línea a propósito: el checkout de Windows
+      # materializa CRLF y la batería tiene que pasar tal cual.
+      - name: Run complete gate battery (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: npm run test:all
+
+      # Sin esto, un gate en rojo sólo deja las 20 últimas líneas que imprime
+      # el script: 40 fallos se diagnostican a ciegas. Los logs completos viven
+      # en .gate-logs/ y desaparecen con el runner.
+      - name: Upload gate logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-logs-${{ matrix.os }}
+          path: .gate-logs/
+          retention-days: 7
+          if-no-files-found: warn
+          # .gate-logs empieza por punto y upload-artifact lo trata como oculto.
+          include-hidden-files: true
+
+      - name: Check whitespace errors
+        shell: bash
+        run: git diff --check
   prepare-release:
     name: Prepare public draft release
-    needs: validate
+    needs:
+      - validate
+      - quality-gates
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     timeout-minutes: 10

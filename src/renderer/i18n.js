@@ -38,6 +38,22 @@ const MIKA5_TRANSLATIONS = {
     'action.pull': 'Pull',
     'action.downloading': 'Descargando…',
 
+    'cloudConsent.title': 'Estás usando {provider}, un proveedor cloud',
+    'cloudConsent.intro': 'Los siguientes datos saldrán de este dispositivo:',
+    'cloudConsent.category.message': 'Mensaje actual',
+    'cloudConsent.category.history': 'Historial de conversación',
+    'cloudConsent.category.projectInstructions': 'Instrucciones o prompt del proyecto',
+    'cloudConsent.category.textAttachments': 'Archivos de texto adjuntos',
+    'cloudConsent.category.imageAttachments': 'Imágenes adjuntas',
+    'cloudConsent.category.ragContext': 'Contexto RAG o documentos locales recuperados',
+    'cloudConsent.newCategory': ' · categoría nueva',
+    'cloudConsent.once': 'Continuar esta vez',
+    'cloudConsent.persist': 'Permitir para este proveedor y proyecto',
+    'cloudConsent.revoke': 'Revocar permiso cloud',
+    'cloudConsent.revoked': 'Permiso cloud revocado. El próximo envío volverá a informar.',
+    'cloudConsent.authorized': '☁️ Cloud activo · envío local autorizado para este proveedor y proyecto',
+    'cloudConsent.sourceImage': 'Imagen de origen',
+
     // Modals
     'modal.renameProject': 'Renombrar proyecto',
     'modal.renameChat': 'Renombrar chat',
@@ -55,7 +71,7 @@ const MIKA5_TRANSLATIONS = {
     'modal.exportSelect': 'Selecciona el formato de exportación:',
     'modal.privacyTitle': 'Privacidad en MIKA5',
     'modal.privacyLocal': 'Todos los datos se procesan en tu equipo. Ningún mensaje sale de tu PC. 100% privado.',
-    'modal.privacyCloud': 'Los mensajes se envían a servidores externos del proveedor seleccionado. MIKA5 sanitiza PII básica (emails, teléfonos, IDs) antes de enviar.',
+    'modal.privacyCloud': 'Los datos informados se envían íntegros al proveedor cloud después de tu autorización. La redacción voluntaria y visible está pendiente.',
     'modal.privacyKeys': 'Se almacenan cifradas (AES-256-GCM) en la base de datos local. Nunca se transmiten a terceros más allá del proveedor.',
 
     // Toasts
@@ -139,6 +155,8 @@ const MIKA5_TRANSLATIONS = {
     'provider.groqDesc': 'Llama/Mistral ultrarrápido.',
     'provider.moonshot': 'Moonshot (Kimi)',
     'provider.moonshotDesc': 'Contexto 256k tokens.',
+    'provider.alibaba': 'Alibaba Cloud Model Studio',
+    'provider.llamacpp': 'llama.cpp (Local)',
     'provider.cloudWarning': '⚠️ Cloud activo: Mensajes a servidores externos.',
     'provider.moreInfo': 'Más info',
 
@@ -179,6 +197,22 @@ const MIKA5_TRANSLATIONS = {
     'action.pull': 'Pull',
     'action.downloading': 'Downloading…',
 
+    'cloudConsent.title': 'You are using {provider}, a cloud provider',
+    'cloudConsent.intro': 'The following data will leave this device:',
+    'cloudConsent.category.message': 'Current message',
+    'cloudConsent.category.history': 'Conversation history',
+    'cloudConsent.category.projectInstructions': 'Project instructions or prompt',
+    'cloudConsent.category.textAttachments': 'Attached text files',
+    'cloudConsent.category.imageAttachments': 'Attached images',
+    'cloudConsent.category.ragContext': 'RAG context or retrieved local documents',
+    'cloudConsent.newCategory': ' · new category',
+    'cloudConsent.once': 'Continue this time',
+    'cloudConsent.persist': 'Allow for this provider and project',
+    'cloudConsent.revoke': 'Revoke cloud permission',
+    'cloudConsent.revoked': 'Cloud permission revoked. The next send will ask again.',
+    'cloudConsent.authorized': '☁️ Cloud active · local sending authorized for this provider and project',
+    'cloudConsent.sourceImage': 'Source image',
+
     'modal.renameProject': 'Rename project',
     'modal.renameChat': 'Rename chat',
     'modal.deleteProject': 'Delete project',
@@ -195,7 +229,7 @@ const MIKA5_TRANSLATIONS = {
     'modal.exportSelect': 'Select export format:',
     'modal.privacyTitle': 'Privacy in MIKA5',
     'modal.privacyLocal': 'All data is processed on your machine. No message ever leaves your PC. 100% private.',
-    'modal.privacyCloud': 'Messages are sent to external servers of the selected provider. MIKA5 sanitizes basic PII (emails, phones, IDs) before sending.',
+    'modal.privacyCloud': 'The disclosed data is sent unchanged to the cloud provider after your authorization. Voluntary, visible redaction is pending.',
     'modal.privacyKeys': 'Stored encrypted (AES-256-GCM) in the local database. Never transmitted to third parties beyond the provider.',
 
     'toast.projectCreated': 'Project created.',
@@ -273,6 +307,8 @@ const MIKA5_TRANSLATIONS = {
     'provider.groqDesc': 'Ultrafast Llama/Mistral.',
     'provider.moonshot': 'Moonshot (Kimi)',
     'provider.moonshotDesc': '256k token context.',
+    'provider.alibaba': 'Alibaba Cloud Model Studio',
+    'provider.llamacpp': 'llama.cpp (Local)',
     'provider.cloudWarning': '⚠️ Cloud active: Messages sent to external servers.',
     'provider.moreInfo': 'More info',
 
