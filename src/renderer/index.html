@@ -28,7 +28,20 @@
             --glass-border: rgba(255, 255, 255, 0.08);
             --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
             --shadow-md: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-            
+
+            /* Tokens semánticos del shell (barra superior, aviso cloud, activo) */
+            --surface-header: #060B18;
+            --surface-elevated: #0A1124;
+            --text-secondary: #a9b4d0;
+            --active-surface: #16264F;
+            --active-indicator: #49C2F4;
+            --warning-surface: rgba(251, 146, 60, 0.10);
+            --warning-border: rgba(245, 192, 138, 0.55);
+            --warning-text: #F5C08A;
+            /* El acento general no llega a 3:1 sobre la barra clara: el anillo de
+               foco necesita su propio token para no depender de la marca. */
+            --focus-ring: #49C2F4;
+
             /* Nuevos valores para mejor experiencia */
             --sidebar-width: 280px;
             --transition-speed: 0.3s;
@@ -48,6 +61,17 @@
             --light-accent: #0ea5e9;
             --light-accent-hover: #0284c7;
             --light-accent-glow: rgba(14, 165, 233, 0.25);
+
+            /* Tokens semánticos del shell en claro */
+            --light-surface-header: #f8fafc;
+            --light-surface-elevated: #ffffff;
+            --light-text-secondary: #475569;
+            --light-active-surface: #D6E4F5;
+            --light-active-indicator: #0369a1;
+            --light-warning-surface: rgba(234, 88, 12, 0.10);
+            --light-warning-border: rgba(194, 65, 12, 0.8);
+            --light-warning-text: #8A4B08;
+            --light-focus-ring: #0369a1;
         }
 
         .light-theme {
@@ -61,6 +85,15 @@
             --accent: var(--light-accent);
             --accent-hover: var(--light-accent-hover);
             --accent-glow: var(--light-accent-glow);
+            --surface-header: var(--light-surface-header);
+            --surface-elevated: var(--light-surface-elevated);
+            --text-secondary: var(--light-text-secondary);
+            --active-surface: var(--light-active-surface);
+            --active-indicator: var(--light-active-indicator);
+            --warning-surface: var(--light-warning-surface);
+            --warning-border: var(--light-warning-border);
+            --warning-text: var(--light-warning-text);
+            --focus-ring: var(--light-focus-ring);
         }
 
         * {
@@ -262,24 +295,36 @@
             padding: 10px var(--spacing-md);
             border-radius: 8px;
             cursor: pointer;
-            color: var(--text-muted);
+            color: var(--text-secondary);
             font-size: 14px;
             transition: background 0.15s;
             display: flex;
             align-items: center;
             justify-content: space-between;
             margin: 0 var(--spacing-sm);
+            position: relative;
         }
 
-        .item:hover {
+        .item:hover:not(.active) {
             background: var(--bg-hover);
             color: var(--text-main);
         }
 
+        /* Activo: superficie + barra de acento + peso tipográfico. Tres señales,
+           para no depender sólo del color. Sin transición: la lista se repinta
+           entera en cada apertura de chat y la animación se leería como parpadeo. */
         .item.active {
-            background: rgba(255, 255, 255, 0.08);
+            background: var(--active-surface);
             color: var(--text-main);
-            font-weight: 500;
+            font-weight: 600;
+            box-shadow: inset 3px 0 0 0 var(--active-indicator);
+            transition: none;
+        }
+
+        .item.item-placeholder {
+            opacity: 0.7;
+            cursor: default;
+            font-style: italic;
         }
 
         .item-preview {
@@ -326,28 +371,32 @@
             border-bottom: 1px solid var(--border-subtle);
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: var(--spacing-sm);
             padding: 8px var(--spacing-lg);
-            background: var(--bg-sidebar);
+            background: var(--surface-header);
             backdrop-filter: blur(12px);
             z-index: 10;
-            height: 52px;
+            /* Altura mínima, no fija: con altura fija el contenido se corta. */
+            min-height: 52px;
             position: relative;
         }
 
+        /* Zona elástica: es la única que puede encoger sin recortar controles. */
         .header-section {
             display: flex;
             align-items: center;
             gap: 8px;
-            flex: 1 1 0;
+            flex: 1 1 auto;
             min-width: 0;
         }
 
+        /* Los controles ceden espacio antes de desbordar; ninguno bloquea el layout. */
         .header-toolbar {
             display: flex;
             align-items: center;
-            gap: 4px;
-            flex-shrink: 0;
+            gap: 6px;
+            flex: 0 1 auto;
+            min-width: 0;
         }
 
         #activeTitle {
@@ -362,7 +411,8 @@
         .model-selector {
             position: relative;
             user-select: none;
-            flex-shrink: 0;
+            flex: 0 1 auto;
+            min-width: 0;
         }
 
         .model-trigger #currentModel {
@@ -370,15 +420,145 @@
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
-            max-width: 14ch;
+            max-width: 18ch;
         }
 
-        .privacy-indicator, .provider-selector, .status-pill {
-            flex-shrink: 0;
+        /* Proveedor y privacidad: legibles, pero subordinados al selector de modelo.
+           Ambos truncan con puntos suspensivos antes que desbordar la barra. */
+        .privacy-indicator, .provider-selector {
+            flex: 0 1 auto;
+            min-width: 0;
+        }
+
+        #currentProviderName {
+            display: inline-block;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 16ch;
+            vertical-align: middle;
         }
 
         .model-options {
             z-index: 1100;
+        }
+
+        /* --- Más acciones --- */
+        .more-actions {
+            position: relative;
+            flex: 0 0 auto;
+        }
+
+        .more-actions-trigger {
+            border: 1px solid var(--border-subtle);
+            position: relative;
+        }
+
+        .more-actions-trigger[aria-expanded="true"] {
+            background: var(--bg-hover);
+            color: var(--text-main);
+        }
+
+        /* El estado del runtime deja de ocupar sitio en la barra, pero sigue
+           siendo visible de un vistazo como punto en el disparador. */
+        .more-actions-trigger[data-runtime]::after {
+            content: "";
+            position: absolute;
+            top: 3px;
+            right: 3px;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            border: 1px solid var(--surface-header);
+        }
+        .more-actions-trigger[data-runtime="ok"]::after { background: #4ade80; }
+        .more-actions-trigger[data-runtime="offline"]::after { background: #f87171; }
+
+        .more-actions-menu {
+            position: absolute;
+            top: calc(100% + 6px);
+            right: 0;
+            min-width: 250px;
+            background: var(--surface-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: 10px;
+            padding: 6px;
+            /* Por encima del selector de modelos (z-index 1100): nunca se solapan
+               visualmente porque además se cierran entre sí al abrirse. */
+            z-index: 1200;
+            box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            max-height: min(70vh, 460px);
+            overflow-y: auto;
+        }
+
+        .more-actions-menu[hidden] {
+            display: none;
+        }
+
+        .more-actions-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+            padding: 8px 10px;
+            border-radius: 8px;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 13px;
+            text-align: left;
+            cursor: pointer;
+            justify-content: flex-start;
+        }
+
+        .more-actions-item:hover:not(:disabled),
+        .more-actions-item:focus-visible {
+            background: var(--bg-hover);
+            color: var(--text-main);
+        }
+
+        .more-actions-item:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+
+        .more-actions-item svg {
+            flex-shrink: 0;
+        }
+
+        .more-actions-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 6px 10px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .more-actions-divider {
+            height: 1px;
+            background: var(--border-subtle);
+            margin: 4px 2px;
+        }
+
+        .more-actions-menu :focus-visible,
+        .more-actions-trigger:focus-visible {
+            outline: 2px solid var(--focus-ring);
+            outline-offset: 2px;
+        }
+
+        /* Barra compacta: por debajo de ~900px la suma de los anchos mínimos no
+           cabe y las etiquetas acababan pisándose. Iconos y truncado conservan el
+           significado; el texto completo sigue disponible en el tooltip. */
+        @media (max-width: 900px) {
+            .model-trigger #currentModel { max-width: 10ch; }
+            #currentProviderName { max-width: 9ch; }
+            .privacy-badge { max-width: 10ch; }
+            #themeLabel { display: none; }
         }
 
         .mobile-toggle {
@@ -401,6 +581,9 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
+            min-width: 0;
+            max-width: 100%;
+            overflow: hidden;
             background: var(--bg-card);
             color: var(--text-main);
             font-size: 14px;
@@ -460,11 +643,10 @@
             color: var(--accent);
         }
 
-        .light-theme .item.active {
-            background: rgba(0, 0, 0, 0.08);
-        }
-        .light-theme .main-header {
-            background: rgba(255, 255, 255, 0.9);
+        /* El activo y la barra ya se resuelven por token semántico en ambos temas:
+           no se repite aquí ningún valor propio del modo oscuro. */
+        .light-theme .more-actions-menu {
+            box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
         }
         .light-theme .mobile-toggle {
             color: var(--text-main);
@@ -965,9 +1147,9 @@
             }
 
             .main-header {
-                padding: 0 var(--spacing-md);
+                padding: 6px var(--spacing-md);
                 gap: var(--spacing-sm);
-                height: 48px;
+                min-height: 48px;
             }
 
             .model-selector {
@@ -1003,8 +1185,8 @@
 
         @media (max-width: 480px) {
             .main-header {
-                padding: 0 var(--spacing-sm);
-                height: 44px;
+                padding: 6px var(--spacing-sm);
+                min-height: 44px;
             }
 
             .messages-container {
@@ -1722,8 +1904,8 @@
         <!-- Main Content -->
         <div class="main-content">
             <div class="main-header">
-                <!-- Row 1: Sidebar toggle + title + model selector + privacy -->
-                <div class="header-section" style="flex:1 1 auto;min-width:0;">
+                <!-- Zona elástica: identidad del contexto abierto. -->
+                <div class="header-section">
                     <button class="mobile-toggle" id="mobileSidebarToggle" aria-label="Alternar panel lateral">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <line x1="3" y1="12" x2="21" y2="12"></line>
@@ -1731,9 +1913,12 @@
                             <line x1="3" y1="18" x2="21" y2="18"></line>
                         </svg>
                     </button>
-                    
+
                     <span id="activeTitle">Selecciona un proyecto</span>
-                    
+                </div>
+
+                <!-- Controles principales: modelo, proveedor, privacidad, tema y menú. -->
+                <div class="header-toolbar">
                     <div class="model-selector">
                         <div class="model-trigger" id="modelTrigger" aria-haspopup="listbox" aria-expanded="false">
                             <span id="currentModel">Cargando modelos...</span>
@@ -1743,18 +1928,9 @@
                         </div>
                         <div class="model-options" id="modelOptions" role="listbox"></div>
                     </div>
-                    
+
                     <select id="modelSelect" aria-label="Selecciona un modelo"></select>
 
-                    <!-- Indicador de Privacidad -->
-                    <div id="privacyIndicator" class="privacy-indicator private">
-                        <span id="privacyBadge" class="privacy-badge private">🔒 Privado</span>
-                        <button id="revokeCloudConsent" class="btn-icon" type="button" style="display:none;margin-left:8px;" onclick="revokeCloudConsent()" data-i18n="cloudConsent.revoke">Revocar permiso cloud</button>
-                    </div>
-                </div>
-
-                <!-- Row 2: Actions toolbar -->
-                <div class="header-toolbar">
                     <!-- Provider selector (compact) -->
                     <div class="provider-selector">
                         <button class="provider-trigger" id="providerTrigger" onclick="event.stopPropagation();(function(){const o=document.getElementById('providerOptions'); o.style.display = (o.style.display==='none' || !o.style.display) ? 'block' : 'none';})()">
@@ -1818,52 +1994,97 @@
                         </div>
                     </div>
 
-                    <!-- Botón Configurar API Key -->
-                    <button id="btnConfigApiKey" class="btn-icon" style="display: none;" onclick="(typeof showApiKeyModal==='function')?showApiKeyModal():null" title="Configurar API Key">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
-                        </svg>
-                    </button>
+                    <!-- Indicador de Privacidad (compacto) -->
+                    <div id="privacyIndicator" class="privacy-indicator private">
+                        <span id="privacyBadge" class="privacy-badge private">🔒 Privado</span>
+                    </div>
 
-                    <span id="rtStatus" class="status-pill status-loading" title="Estado de Ollama">
-                        <span class="loading-pulse">●</span> Conectando...
-                    </span>
                     <button type="button" class="theme-toggle" id="themeToggle" aria-label="Cambiar tema">
                         <span id="themeIcon">🌙</span>
                         <span id="themeLabel">Claro</span>
                     </button>
-                    <button class="btn-icon" id="btnPull" type="button" aria-label="Abrir biblioteca de modelos" title="Descargar modelo">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                            <polyline points="7 10 12 15 17 10"></polyline>
-                            <line x1="12" y1="15" x2="12" y2="3"></line>
-                        </svg>
-                    </button>
-                    <button class="btn-icon" id="btnPullLocal" type="button" disabled title="Pull modelo local" aria-label="Pull modelo">Pull</button>
-                    <button class="btn-primary btn-sm" type="button" id="btnSaveChatDoc" disabled aria-label="Guardar chat">📄 Guardar</button>
-                    <button class="btn-icon" type="button" id="btnExportChat" disabled aria-label="Exportar chat" title="Exportar chat">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                            <polyline points="14 2 14 8 20 8"></polyline>
-                            <line x1="16" y1="13" x2="8" y2="13"></line>
-                            <line x1="16" y1="17" x2="8" y2="17"></line>
-                        </svg>
-                    </button>
-                    <button class="btn-icon" type="button" id="btnContextToggle" aria-label="Contexto del proyecto" title="Contexto del proyecto">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M12 20h9"></path>
-                            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
-                        </svg>
-                    </button>
-                    <button class="btn-icon" type="button" id="btnLangToggle" aria-label="Language" title="Cambiar idioma / Change language" style="font-size:12px;font-weight:600;min-width:28px;">
-                        ES
-                    </button>
-                </div>
 
-                <!-- Cloud Warning (flotante) -->
-                <div id="cloudWarning" class="cloud-warning" style="display: none;">
-                    ⚠️ <strong>Cloud activo:</strong> Mensajes a servidores externos. 
-                    <a href="#" onclick="(typeof showPrivacyInfo==='function')?showPrivacyInfo():false;return false;">Más info</a>
+                    <!-- Más acciones: todo lo secundario deja de competir por la barra. -->
+                    <div class="more-actions">
+                        <button type="button" class="btn-icon more-actions-trigger" id="btnMoreActions"
+                                aria-haspopup="true" aria-expanded="false" aria-controls="moreActionsMenu"
+                                aria-label="Más acciones" title="Más acciones">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="5" cy="12" r="1.6"></circle>
+                                <circle cx="12" cy="12" r="1.6"></circle>
+                                <circle cx="19" cy="12" r="1.6"></circle>
+                            </svg>
+                        </button>
+
+                        <div class="more-actions-menu" id="moreActionsMenu" role="menu" aria-label="Más acciones" hidden>
+                            <div class="more-actions-row" role="none">
+                                <span class="more-actions-row-label" id="rtStatusLabel">Runtime</span>
+                                <span id="rtStatus" class="status-pill status-loading" title="Estado de Ollama">
+                                    <span class="loading-pulse">●</span> Conectando...
+                                </span>
+                            </div>
+
+                            <div class="more-actions-divider" role="none"></div>
+
+                            <button id="btnConfigApiKey" class="btn-icon more-actions-item" role="menuitem" type="button" style="display: none;" onclick="(typeof showApiKeyModal==='function')?showApiKeyModal():null" title="Configurar API Key" aria-label="Configurar API Key">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+                                </svg>
+                                <span class="more-actions-item-label">Configurar API Key</span>
+                            </button>
+
+                            <button id="revokeCloudConsent" class="btn-icon more-actions-item" role="menuitem" type="button" style="display:none;" onclick="revokeCloudConsent()" data-i18n="cloudConsent.revoke" aria-label="Revocar permiso cloud">
+                                <span aria-hidden="true">🚫</span>
+                                <span class="more-actions-item-label">Revocar permiso cloud</span>
+                            </button>
+
+                            <button class="btn-icon more-actions-item" id="btnPull" role="menuitem" type="button" aria-label="Abrir biblioteca de modelos" title="Descargar modelo">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                    <polyline points="7 10 12 15 17 10"></polyline>
+                                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                                </svg>
+                                <span class="more-actions-item-label" id="btnPullLabel">Biblioteca de modelos</span>
+                            </button>
+
+                            <div class="more-actions-row" role="none">
+                                <span class="more-actions-row-label">Modelo local</span>
+                                <button class="btn-icon" id="btnPullLocal" role="menuitem" type="button" disabled title="Pull modelo local" aria-label="Pull modelo">Pull</button>
+                            </div>
+
+                            <div class="more-actions-divider" role="none"></div>
+
+                            <button class="btn-icon more-actions-item" type="button" id="btnSaveChatDoc" role="menuitem" disabled aria-label="Guardar chat">
+                                <span aria-hidden="true">📄</span>
+                                <span class="more-actions-item-label">Guardar chat</span>
+                            </button>
+
+                            <button class="btn-icon more-actions-item" type="button" id="btnExportChat" role="menuitem" disabled aria-label="Exportar chat" title="Exportar chat">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                    <polyline points="14 2 14 8 20 8"></polyline>
+                                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                                </svg>
+                                <span class="more-actions-item-label">Exportar chat</span>
+                            </button>
+
+                            <button class="btn-icon more-actions-item" type="button" id="btnContextToggle" role="menuitem" aria-label="Contexto del proyecto" title="Contexto del proyecto">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M12 20h9"></path>
+                                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                                </svg>
+                                <span class="more-actions-item-label">Contexto del proyecto</span>
+                            </button>
+
+                            <div class="more-actions-divider" role="none"></div>
+
+                            <div class="more-actions-row" role="none">
+                                <span class="more-actions-row-label">Idioma / Language</span>
+                                <button class="btn-icon" type="button" id="btnLangToggle" role="menuitem" aria-label="Language" title="Cambiar idioma / Change language" style="font-size:12px;font-weight:600;min-width:28px;">ES</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
             
@@ -1901,8 +2122,12 @@
                 </div>
                 
                 <div class="input-area">
-                    <div class="cloud-input-banner" id="cloudInputBanner">
-                        ⚠️ <strong>Modo nube:</strong> este mensaje se enviará a servidores externos. No compartas contraseñas ni datos sensibles.
+                    <!-- Única superficie detallada del aviso cloud. El contenido lo
+                         construye updatePrivacyUI() con nodos separados por i18n. -->
+                    <div class="cloud-input-banner" id="cloudInputBanner" role="status">
+                        <span class="cloud-input-banner-body" id="cloudInputBannerBody"></span>
+                        <button type="button" class="cloud-input-banner-dismiss" id="cloudBannerDismiss"
+                                aria-label="Ocultar aviso" title="Ocultar aviso">×</button>
                     </div>
                     <div class="attachment-preview" id="attachmentPreview" style="display: none;">
                         <!-- Previsualizaciones de archivos adjuntos -->

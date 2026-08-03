@@ -2226,13 +2226,17 @@ async function loadRuntime() {
   }
 
   const statusEl = el("rtStatus");
-  if (st.ok || currentProvider === 'alibaba') {
+  const runtimeOk = st.ok || currentProvider === 'alibaba';
+  if (runtimeOk) {
     statusEl.textContent = t('status.connected');
     statusEl.className = "status-pill status-ok";
   } else {
     statusEl.textContent = t('status.disconnected');
     statusEl.className = "status-pill status-offline";
   }
+  // El detalle vive dentro del menú; el punto del disparador conserva la señal.
+  const moreActionsTrigger = el("btnMoreActions");
+  if (moreActionsTrigger) moreActionsTrigger.dataset.runtime = runtimeOk ? 'ok' : 'offline';
 
   el("modelSelect").innerHTML = "";
   if (st.ok) {
@@ -2501,32 +2505,131 @@ async function revokeCloudConsent() {
   if (providerPrivacy !== 'cloud') return;
   const key = buildCloudConsentKey(currentProvider, cloudConsentProjectId(activeProjectId));
   await window.mika5.setAppState(key, '');
+  // Ocultar el aviso nunca puede sobrevivir a la retirada del permiso: el
+  // estado de seguridad cambió, así que el banner vuelve a mostrarse.
+  await clearCloudBannerDismissal(currentProvider, activeProjectId).catch(() => {});
   updatePrivacyUI();
   showToast(t('cloudConsent.revoked'), 'success');
+}
+
+// --- Aviso cloud: una sola superficie detallada, con cierre recordado ---
+//
+// El cierre es decorativo. No toca el consentimiento, no oculta el indicador de
+// privacidad y no evita el modal: sólo silencia el banner para el proveedor y el
+// proyecto actuales mientras el estado de seguridad no cambie.
+const CLOUD_BANNER_SCHEMA_VERSION = 1;
+
+function cloudBannerStateKey(providerId, projectId) {
+  if (!providerId) throw new Error('providerId requerido');
+  return `ui:cloudBanner:v${CLOUD_BANNER_SCHEMA_VERSION}:${providerId}:${cloudProjectScope(cloudConsentProjectId(projectId))}`;
+}
+
+// Huella del estado de seguridad. Si cambian las categorías autorizadas, la
+// huella cambia y el aviso reaparece aunque se hubiera cerrado antes.
+function cloudConsentFingerprint(consent) {
+  if (!consent || !consent.categories) return 'sin-consentimiento';
+  const granted = Object.keys(consent.categories)
+    .filter(category => consent.categories[category])
+    .sort();
+  return granted.length ? granted.join('+') : 'sin-categorias';
+}
+
+async function readCloudBannerDismissal(providerId, projectId) {
+  try {
+    const raw = await window.mika5.getAppState(cloudBannerStateKey(providerId, projectId));
+    if (!raw) return null;
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (parsed?.schemaVersion !== CLOUD_BANNER_SCHEMA_VERSION) return null;
+    if (!parsed.fingerprint) return null;
+    return { fingerprint: String(parsed.fingerprint), dismissedAt: String(parsed.dismissedAt || '') };
+  } catch (_) {
+    return null;
+  }
+}
+
+async function clearCloudBannerDismissal(providerId, projectId) {
+  if (!providerId) return;
+  await window.mika5.setAppState(cloudBannerStateKey(providerId, projectId), '');
+}
+
+async function dismissCloudInputBanner() {
+  if (providerPrivacy !== 'cloud') return;
+  const providerAtDismiss = currentProvider;
+  const projectAtDismiss = activeProjectId;
+  const consent = await readCloudConsent(providerAtDismiss, projectAtDismiss).catch(() => null);
+  await window.mika5.setAppState(
+    cloudBannerStateKey(providerAtDismiss, projectAtDismiss),
+    JSON.stringify({
+      schemaVersion: CLOUD_BANNER_SCHEMA_VERSION,
+      fingerprint: cloudConsentFingerprint(consent),
+      dismissedAt: new Date().toISOString()
+    })
+  );
+  const banner = el('cloudInputBanner');
+  if (banner && currentProvider === providerAtDismiss && activeProjectId === projectAtDismiss) {
+    banner.classList.remove('visible');
+  }
+}
+
+// Nodos separados con textContent: el aviso no depende de que una traducción
+// contenga ':' ni de inyectar HTML con el nombre del proveedor.
+function renderCloudInputBanner(providerLabel) {
+  const body = el('cloudInputBannerBody');
+  if (!body) return;
+  body.textContent = '';
+  const icon = document.createElement('span');
+  icon.setAttribute('aria-hidden', 'true');
+  icon.textContent = '⚠️ ';
+  const provider = document.createElement('span');
+  provider.className = 'cloud-input-banner-provider';
+  provider.textContent = t('cloudBanner.provider', { provider: providerLabel });
+  const detail = document.createElement('span');
+  detail.textContent = ' ' + t('privacy.inputWarning');
+  body.appendChild(icon);
+  body.appendChild(provider);
+  body.appendChild(detail);
+  const dismiss = el('cloudBannerDismiss');
+  if (dismiss) {
+    dismiss.setAttribute('aria-label', t('cloudBanner.dismiss'));
+    dismiss.title = t('cloudBanner.dismiss');
+  }
+}
+
+// El icono del indicador es estructural: vive aquí, no dentro de la traducción.
+// Antes se concatenaba un prefijo en JS sobre un texto i18n que ya traía emoji y
+// se veían dos iconos. Una sola fuente de verdad: icono en el DOM, texto en i18n.
+function renderPrivacyBadge(badge, state, label) {
+  if (!badge) return;
+  badge.textContent = '';
+  const icon = document.createElement('span');
+  icon.className = 'privacy-badge-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  icon.textContent = state === 'private' ? '🔒' : '☁️';
+  const text = document.createElement('span');
+  text.className = 'privacy-badge-text';
+  text.textContent = label;
+  badge.appendChild(icon);
+  badge.appendChild(text);
+  badge.className = 'privacy-badge ' + state;
 }
 
 function updatePrivacyUI() {
   const indicator = el('privacyIndicator');
   const badge = el('privacyBadge');
-  const warning = el('cloudWarning');
   const apiKeyBtn = el('btnConfigApiKey');
   const providerName = el('currentProviderName');
   const inputBanner = el('cloudInputBanner');
   const footerEl = el('footerStatus');
   const revokeButton = el('revokeCloudConsent');
-  
+
   const providerLabel = providerDisplayName(currentProvider);
-  
+
   if (providerPrivacy === 'private') {
     if (indicator) {
       indicator.className = 'privacy-indicator private';
       indicator.setAttribute('data-tooltip', t('privacy.tooltipPrivate'));
     }
-    if (badge) {
-      badge.innerHTML = '🟢 🔒 ' + t('privacy.private');
-      badge.className = 'privacy-badge private';
-    }
-    if (warning) warning.style.display = 'none';
+    renderPrivacyBadge(badge, 'private', t('privacy.private'));
     if (apiKeyBtn) apiKeyBtn.style.display = 'none';
     if (providerName) providerName.textContent = t('provider.local');
     if (inputBanner) inputBanner.classList.remove('visible');
@@ -2537,29 +2640,33 @@ function updatePrivacyUI() {
       indicator.className = 'privacy-indicator cloud';
       indicator.setAttribute('data-tooltip', t('privacy.tooltipCloud'));
     }
-    if (badge) {
-      badge.innerHTML = '🟠 ☁️ ' + t('privacy.cloud');
-      badge.className = 'privacy-badge cloud';
-    }
-    if (warning) {
-      warning.style.display = '';
-      warning.innerHTML = `⚠️ <strong>${t('provider.cloudWarning').split(':')[0]}:</strong> ${t('provider.cloudWarning').split(':').slice(1).join(':')} <a href="#" onclick="(typeof showPrivacyInfo==='function')?showPrivacyInfo():false;return false;">${t('provider.moreInfo')}</a>`;
-    }
+    renderPrivacyBadge(badge, 'cloud', t('privacy.cloud'));
     if (apiKeyBtn) apiKeyBtn.style.display = '';
     if (providerName) providerName.textContent = providerLabel;
-    if (inputBanner) {
-      inputBanner.classList.add('visible');
-      inputBanner.innerHTML = `⚠️ <strong>${providerLabel}:</strong> ${t('privacy.inputWarning')}`;
-    }
-    if (footerEl) footerEl.textContent = t('footer.cloud');
+    // El pie deja de repetir el aviso: sólo identifica el modo activo.
+    if (footerEl) footerEl.textContent = t('footer.cloudCompact', { provider: providerLabel });
     if (revokeButton) revokeButton.style.display = 'none';
+    if (inputBanner) {
+      renderCloudInputBanner(providerLabel);
+      // Visible por defecto: si la lectura del estado falla, se avisa igual.
+      inputBanner.classList.add('visible');
+    }
     const providerAtUpdate = currentProvider;
     const projectAtUpdate = activeProjectId;
-    readCloudConsent(providerAtUpdate, projectAtUpdate).then(consent => {
-      if (consent && currentProvider === providerAtUpdate && activeProjectId === projectAtUpdate && badge) {
-        badge.textContent = t('cloudConsent.authorized');
+    Promise.all([
+      readCloudConsent(providerAtUpdate, projectAtUpdate),
+      readCloudBannerDismissal(providerAtUpdate, projectAtUpdate)
+    ]).then(([consent, dismissal]) => {
+      if (currentProvider !== providerAtUpdate || activeProjectId !== projectAtUpdate) return;
+      if (consent && badge) {
+        // El indicador es compacto: la frase completa vive en el tooltip, no
+        // dentro de una píldora que empujaría al resto de la barra.
+        renderPrivacyBadge(badge, 'cloud', t('cloudConsent.authorizedBadge'));
+        if (indicator) indicator.setAttribute('data-tooltip', t('cloudConsent.authorized'));
         if (revokeButton) revokeButton.style.display = '';
       }
+      const silenced = Boolean(dismissal) && dismissal.fingerprint === cloudConsentFingerprint(consent);
+      if (inputBanner && silenced) inputBanner.classList.remove('visible');
     }).catch(() => {});
   }
 }
@@ -2628,7 +2735,12 @@ async function loadProjects() {
     if (!isQC) userIdx++;
 
     const div = document.createElement("div");
-    div.className = "item project-item" + (p.id === activeProjectId ? " active" : "");
+    div.dataset.projectId = p.id;
+    const isActiveProject = p.id === activeProjectId;
+    div.className = "item project-item" + (isActiveProject ? " active" : "");
+    // aria-current viaja con .active: el estado activo no queda sólo en el color.
+    if (isActiveProject) div.setAttribute("aria-current", "true");
+    else div.removeAttribute("aria-current");
 
     const iconBtn = document.createElement("span");
     iconBtn.className = "project-icon-btn";
@@ -2749,6 +2861,20 @@ function showProjectStylePicker(projectId, iconBtnEl, currentIcon, currentColor)
   }, 10);
 }
 
+// Seleccionar un proyecto no repintaba la lista: el proyecto abierto se quedaba
+// sin marcar hasta que algo llamara a loadProjects(). Se marca en el sitio, sin
+// releer proyectos por IPC.
+function markActiveProject(projectId) {
+  const list = el("projectList");
+  if (!list) return;
+  for (const node of Array.from(list.children)) {
+    const isActive = node.dataset.projectId === projectId;
+    node.classList.toggle("active", isActive);
+    if (isActive) node.setAttribute("aria-current", "true");
+    else node.removeAttribute("aria-current");
+  }
+}
+
 async function selectProject(projectId, name) {
   if (!projectId) { console.warn('[selectProject] Ignored: missing projectId'); return; }
   return safeViewChange(async (signal) => {
@@ -2759,6 +2885,7 @@ async function selectProject(projectId, name) {
     activeProjectId = projectId;
     activeChatId = null;
     chatAttachments = [];
+    markActiveProject(projectId);
 
     const chatEl = el("chat");
     if (chatEl) {
@@ -2871,9 +2998,10 @@ async function refreshChats() {
   const chats = await withTimeout(Store.listChats(activeProjectId), 8000, 'cargar lista de chats');
 
   if (chats.length === 0) {
+    // Marcador, no elemento seleccionable: nunca puede quedar activo.
     const empty = document.createElement("div");
-    empty.className = "item";
-    empty.style.opacity = "0.7";
+    empty.className = "item item-placeholder";
+    empty.setAttribute("aria-disabled", "true");
     empty.textContent = "Sin chats todavía";
     list.appendChild(empty);
     return;
@@ -2881,7 +3009,10 @@ async function refreshChats() {
 
   for (const c of chats) {
     const div = document.createElement("div");
-    div.className = "item" + (c.id === activeChatId ? " active" : "");
+    const isActiveChat = c.id === activeChatId;
+    div.className = "item" + (isActiveChat ? " active" : "");
+    if (isActiveChat) div.setAttribute("aria-current", "true");
+    else div.removeAttribute("aria-current");
     div.style.display = "flex";
     div.style.alignItems = "center";
     div.style.gap = "6px";
@@ -3494,6 +3625,11 @@ function applyTranslations() {
   if (sendBtn && !isGenerating) {
     const svgContent = sendBtn.querySelector('svg')?.outerHTML || '';
     sendBtn.innerHTML = svgContent + ' ' + t('action.send');
+  }
+  const moreActionsBtn = el('btnMoreActions');
+  if (moreActionsBtn) {
+    moreActionsBtn.setAttribute('aria-label', t('header.moreActions'));
+    moreActionsBtn.title = t('header.moreActions');
   }
 }
 
@@ -5816,10 +5952,122 @@ function toggleSidebar() {
   window.mika5.setAppState("sidebar_collapsed", isOpen ? "" : "1").catch(() => {});
 }
 
+// --- Menú "Más acciones" ---
+//
+// Los controles secundarios ya no compiten por la barra. Conservan sus IDs, sus
+// handlers y su estado disabled: el menú sólo cambia dónde viven.
+function moreActionsItems(menu) {
+  return Array.from(menu.querySelectorAll('[role="menuitem"]'))
+    .filter(item => !item.disabled && item.style.display !== 'none');
+}
+
+function closeMoreActionsMenu({ restoreFocus = false } = {}) {
+  const trigger = el('btnMoreActions');
+  const menu = el('moreActionsMenu');
+  if (!trigger || !menu) return;
+  menu.hidden = true;
+  trigger.setAttribute('aria-expanded', 'false');
+  if (restoreFocus) { try { trigger.focus(); } catch (_) {} }
+}
+
+function openMoreActionsMenu({ focusFirst = false } = {}) {
+  const trigger = el('btnMoreActions');
+  const menu = el('moreActionsMenu');
+  if (!trigger || !menu) return;
+  // Nunca dos superficies desplegadas a la vez: no pueden solaparse.
+  const modelOptions = el('modelOptions');
+  if (modelOptions) modelOptions.classList.remove('open');
+  const modelTrigger = el('modelTrigger');
+  if (modelTrigger) modelTrigger.setAttribute('aria-expanded', 'false');
+  const providerOptions = el('providerOptions');
+  if (providerOptions) providerOptions.style.display = 'none';
+
+  menu.hidden = false;
+  trigger.setAttribute('aria-expanded', 'true');
+  if (focusFirst) {
+    const items = moreActionsItems(menu);
+    if (items.length) { try { items[0].focus(); } catch (_) {} }
+  }
+}
+
+function wireMoreActionsMenu() {
+  const trigger = el('btnMoreActions');
+  const menu = el('moreActionsMenu');
+  if (!trigger || !menu) return;
+
+  const isOpen = () => trigger.getAttribute('aria-expanded') === 'true';
+
+  // Abrir es sólo abrir: el click no se propaga a ningún elemento del menú.
+  trigger.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (isOpen()) closeMoreActionsMenu();
+    else openMoreActionsMenu();
+  });
+
+  trigger.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      openMoreActionsMenu({ focusFirst: e.key === 'ArrowDown' });
+    } else if (e.key === 'Escape' && isOpen()) {
+      e.preventDefault();
+      closeMoreActionsMenu({ restoreFocus: true });
+    }
+  });
+
+  menu.addEventListener('keydown', (e) => {
+    const items = moreActionsItems(menu);
+    const current = items.indexOf(document.activeElement);
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeMoreActionsMenu({ restoreFocus: true });
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (items.length) items[(current + 1 + items.length) % items.length].focus();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (items.length) items[(current - 1 + items.length) % items.length].focus();
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      if (items.length) items[0].focus();
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      if (items.length) items[items.length - 1].focus();
+    } else if (e.key === 'Tab') {
+      closeMoreActionsMenu();
+    }
+  });
+
+  // Ejecutar una acción cierra el menú; el handler propio del botón sigue intacto.
+  menu.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (e.target.closest('[role="menuitem"]')) closeMoreActionsMenu();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!isOpen()) return;
+    if (e.target.closest('#moreActionsMenu, #btnMoreActions')) return;
+    closeMoreActionsMenu();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && isOpen()) closeMoreActionsMenu({ restoreFocus: true });
+  });
+}
+
 function wire() {
   el("btnCreateProject").onclick = createProject;
   const projInput = el("projectName");
   if (projInput) projInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); createProject(); } });
+
+  wireMoreActionsMenu();
+
+  const cloudBannerDismiss = el("cloudBannerDismiss");
+  if (cloudBannerDismiss) {
+    cloudBannerDismiss.addEventListener("click", () => {
+      dismissCloudInputBanner().catch(e => console.warn('dismissCloudInputBanner:', e));
+    });
+  }
 
   // Language toggle
   const langBtn = el("btnLangToggle");
@@ -5830,6 +6078,8 @@ function wire() {
       setLanguage(newLang);
       langBtn.textContent = newLang === 'en' ? 'EN' : 'ES';
       applyTranslations();
+      // El pie y el aviso cloud son texto traducido y con estado: se repintan.
+      updatePrivacyUI();
     };
   }
   el("btnNewChat").onclick = newChat;

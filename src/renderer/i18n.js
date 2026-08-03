@@ -9,8 +9,8 @@ const MIKA5_TRANSLATIONS = {
     'status.connected': '✓ Conectado',
     'status.disconnected': '✗ Desconectado',
     'status.connecting': '● Conectando...',
-    'privacy.private': '🔒 Privado',
-    'privacy.cloud': '☁️ Cloud',
+    'privacy.private': 'Privado',
+    'privacy.cloud': 'Cloud',
     'privacy.tooltipPrivate': 'Modo Privado: Tus datos nunca salen de esta computadora',
     'privacy.tooltipCloud': 'Modo Online: Los datos se envían a servidores externos',
     'privacy.inputWarning': 'Este mensaje se enviará a servidores externos. No compartas contraseñas ni datos sensibles.',
@@ -51,7 +51,8 @@ const MIKA5_TRANSLATIONS = {
     'cloudConsent.persist': 'Permitir para este proveedor y proyecto',
     'cloudConsent.revoke': 'Revocar permiso cloud',
     'cloudConsent.revoked': 'Permiso cloud revocado. El próximo envío volverá a informar.',
-    'cloudConsent.authorized': '☁️ Cloud activo · envío local autorizado para este proveedor y proyecto',
+    'cloudConsent.authorized': 'Cloud activo · envío local autorizado para este proveedor y proyecto',
+    'cloudConsent.authorizedBadge': 'Cloud autorizado',
     'cloudConsent.sourceImage': 'Imagen de origen',
 
     // Modals
@@ -145,6 +146,16 @@ const MIKA5_TRANSLATIONS = {
     // Footer
     'footer.tagline': 'Ollama Local AI • Privado y Seguro • 100% en tu PC',
     'footer.cloud':   'Cloud AI • Tus datos salen de tu PC • Usa con precaución',
+    // El pie identifica el modo; el aviso detallado vive sólo en el banner.
+    'footer.cloudCompact': 'Modo nube • {provider}',
+
+    // Barra superior
+    'header.moreActions': 'Más acciones',
+
+    // Aviso cloud (banner único). Cada pieza es un nodo propio: nada se corta
+    // por ':' ni se inyecta como HTML.
+    'cloudBanner.provider': 'Modo nube · {provider}',
+    'cloudBanner.dismiss': 'Ocultar aviso',
 
     // Providers
     'provider.local': 'Ollama (Local)',
@@ -170,8 +181,8 @@ const MIKA5_TRANSLATIONS = {
     'status.connected': '✓ Connected',
     'status.disconnected': '✗ Disconnected',
     'status.connecting': '● Connecting...',
-    'privacy.private': '🔒 Private',
-    'privacy.cloud': '☁️ Cloud',
+    'privacy.private': 'Private',
+    'privacy.cloud': 'Cloud',
     'privacy.tooltipPrivate': 'Private Mode: Your data never leaves this computer',
     'privacy.tooltipCloud': 'Online Mode: Data is sent to external servers',
     'privacy.inputWarning': 'This message will be sent to external servers. Do not share passwords or sensitive data.',
@@ -210,7 +221,8 @@ const MIKA5_TRANSLATIONS = {
     'cloudConsent.persist': 'Allow for this provider and project',
     'cloudConsent.revoke': 'Revoke cloud permission',
     'cloudConsent.revoked': 'Cloud permission revoked. The next send will ask again.',
-    'cloudConsent.authorized': '☁️ Cloud active · local sending authorized for this provider and project',
+    'cloudConsent.authorized': 'Cloud active · local sending authorized for this provider and project',
+    'cloudConsent.authorizedBadge': 'Cloud authorized',
     'cloudConsent.sourceImage': 'Source image',
 
     'modal.renameProject': 'Rename project',
@@ -298,6 +310,12 @@ const MIKA5_TRANSLATIONS = {
 
     'footer.tagline': 'Ollama Local AI • Private & Secure • 100% on your PC',
     'footer.cloud':   'Cloud AI • Your data leaves your PC • Use with caution',
+    'footer.cloudCompact': 'Cloud mode • {provider}',
+
+    'header.moreActions': 'More actions',
+
+    'cloudBanner.provider': 'Cloud mode · {provider}',
+    'cloudBanner.dismiss': 'Dismiss notice',
 
     'provider.local': 'Ollama (Local)',
     'provider.localDesc': 'Local models. Your data never leaves your PC.',
