@@ -1228,6 +1228,11 @@ async function probeOllamaVision(modelName) {
   }
 }
 
+// Un fallo al pedir el catálogo puede significar dos cosas muy distintas: que
+// el servidor no responde, o que responde y rechaza la credencial. Distinguirlo
+// es lo que permite decir «clave inválida» en vez de «proveedor caído».
+const ERROR_DE_CREDENCIAL = /\b(401|403)\b|unauthorized|forbidden|api[\s_-]?key|invalid[\s_-]?(key|token|credential)|authentication/i;
+
 const PROVIDERS = {
   // MODO LOCAL - 100% Privado (delegado a ollama.js robusto)
   local: {
@@ -2365,7 +2370,100 @@ class AIProviderManager {
       message: this.apiKeys[this.currentProvider] ? 'API Key configurada' : 'API Key requerida'
     };
   }
-  
+
+  /**
+   * Disponibilidad de un proveedor, separada en estados que hasta ahora
+   * viajaban colapsados en un único `ok`.
+   *
+   * `status()` respondía `ok: !!apiKey` para todo proveedor cloud, y el
+   * renderer poblaba el selector de modelos con ese booleano. Eso mezclaba
+   * cuatro preguntas distintas: si el proveedor está configurado, si su
+   * servidor responde, si la credencial fue aceptada y si hay catálogo. La
+   * consecuencia visible era que un proveedor con clave inválida se anunciaba
+   * como disponible, y que un runtime que no pide credencial no podía estarlo.
+   *
+   * Los estados se derivan de rasgos DECLARADOS por cada adaptador, no de su
+   * identificador: `requiresKey` dice si hace falta credencial y la presencia
+   * de `status()` dice si el adaptador sabe sondear su propio endpoint. Un
+   * proveedor nuevo obtiene el comportamiento correcto sin tocar esta función
+   * ni añadir un caso especial.
+   *
+   *   configured       tiene lo que necesita para intentarlo
+   *   reachable        su endpoint respondió (null si nadie puede saberlo)
+   *   authenticated    la credencial fue aceptada (null si no se usa ninguna)
+   *   modelsAvailable  cuántos modelos utilizables ofrece
+   *   ready            se puede usar ahora mismo
+   *
+   * `models` viaja en la respuesta para que quien la pide no repita la misma
+   * consulta al catálogo.
+   */
+  async getAvailability(providerId = this.currentProvider) {
+    const config = PROVIDERS[providerId];
+    if (!config) {
+      return {
+        providerId, configured: false, reachable: null, authenticated: null,
+        modelsAvailable: 0, models: [], ready: false, detail: 'PROVEEDOR_DESCONOCIDO'
+      };
+    }
+
+    const configured = !config.requiresKey || Boolean(this.apiKeys[providerId]);
+    let reachable = null;
+    let authenticated = null;
+    let detail = null;
+
+    // Alcanzabilidad: sólo la conoce el adaptador que sabe sondear su endpoint.
+    // Para los que no traen sonda queda indeterminada hasta consultar el
+    // catálogo, y una indeterminación nunca bloquea por sí sola.
+    if (typeof config.status === 'function') {
+      const sonda = await Promise.resolve()
+        .then(() => config.status())
+        .catch(error => ({ ok: false, error: String(error?.message || error) }));
+      reachable = Boolean(sonda && sonda.ok);
+      if (!reachable) detail = (sonda && (sonda.error || sonda.message)) || 'SERVIDOR_INACCESIBLE';
+    }
+
+    const salida = (extra) => ({
+      providerId, configured, reachable, authenticated,
+      modelsAvailable: 0, models: [], ready: false, detail, ...extra
+    });
+
+    // Sin credencial no se consulta nada: pedir el catálogo sólo produciría un
+    // rechazo previsible y una petición de red inútil.
+    if (!configured) return salida({ detail: detail || 'CREDENCIAL_REQUERIDA' });
+    if (reachable === false) return salida({});
+
+    let models = [];
+    try {
+      const respuesta = await config.listModels(
+        this.apiKeys[providerId],
+        this.providerConfigs[providerId]
+      );
+      models = Array.isArray(respuesta) ? respuesta : ((respuesta && respuesta.models) || []);
+      if (reachable === null) reachable = true;
+      authenticated = config.requiresKey ? true : null;
+    } catch (error) {
+      const mensaje = String(error?.message || error);
+      if (ERROR_DE_CREDENCIAL.test(mensaje)) {
+        // El servidor contestó: está vivo, pero rechazó la credencial.
+        return salida({ reachable: true, authenticated: false, detail: 'CREDENCIAL_RECHAZADA' });
+      }
+      return salida({ reachable: false, detail: mensaje.slice(0, 200) });
+    }
+
+    if (models.length === 0 && !detail) detail = 'CATALOGO_VACIO';
+
+    return {
+      providerId,
+      configured,
+      reachable,
+      authenticated,
+      modelsAvailable: models.length,
+      models,
+      ready: configured && reachable !== false && authenticated !== false && models.length > 0,
+      detail
+    };
+  }
+
   getAllProviders() {
     return Object.entries(PROVIDERS).map(([id, config]) => ({
       id,

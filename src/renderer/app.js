@@ -2274,16 +2274,25 @@ async function saveCurrentConversation(messages = conversationHistory) {
 }
 
 async function loadRuntime() {
-  // Intentar obtener estado y modelos desde el proveedor AI actual
-  let st;
+  // Disponibilidad del proveedor activo, con los estados separados. Antes esto
+  // era `status()`, que para todo proveedor cloud devolvía `ok: !!apiKey`: la
+  // píldora podía anunciar «Conectado» mientras el selector quedaba vacío y
+  // deshabilitado, y un runtime sin credencial no podía estar disponible nunca.
+  let disp;
   try {
-    st = await window.mika5.ai.status();
+    disp = await window.mika5.ai.getAvailability();
   } catch (e) {
-    st = { ok: false, message: e?.message || String(e) };
+    disp = {
+      configured: false, reachable: false, authenticated: null,
+      modelsAvailable: 0, models: [], ready: false, detail: e?.message || String(e)
+    };
   }
 
   const statusEl = el("rtStatus");
-  const runtimeOk = st.ok || currentProvider === 'alibaba';
+  // La píldora informa de conectividad, no de si se puede usar: un proveedor
+  // alcanzable al que le falta la clave está conectado y no listo, y decir lo
+  // contrario era justo la incoherencia que se arrastraba.
+  const runtimeOk = disp.reachable !== false;
   if (runtimeOk) {
     statusEl.textContent = t('status.connected');
     statusEl.className = "status-pill status-ok";
@@ -2296,13 +2305,10 @@ async function loadRuntime() {
   if (moreActionsTrigger) moreActionsTrigger.dataset.runtime = runtimeOk ? 'ok' : 'offline';
 
   el("modelSelect").innerHTML = "";
-  if (st.ok) {
-    let modelsRes = null;
-    try {
-      modelsRes = await window.mika5.ai.listModels();
-    } catch (e) {
-      modelsRes = null;
-    }
+  if (disp.configured && disp.reachable !== false && disp.authenticated !== false) {
+    // El catálogo ya viene con la disponibilidad: pedirlo otra vez repetiría la
+    // misma consulta al proveedor.
+    const modelsRes = { models: disp.models || [] };
 
     // Normalizar la respuesta a un array de objetos { name, size, sizeFormatted, capabilities, speed }
     let models = [];
@@ -2377,9 +2383,13 @@ async function loadRuntime() {
       }
     }
   } else {
+    // Con los estados separados el motivo deja de ser un misterio: antes las
+    // tres situaciones se leían igual, «Proveedor no disponible».
     const opt = document.createElement("option");
     opt.value = "";
-    opt.textContent = "Proveedor no disponible";
+    if (!disp.configured) opt.textContent = "Falta la API Key de este proveedor";
+    else if (disp.authenticated === false) opt.textContent = "API Key rechazada por el proveedor";
+    else opt.textContent = "Proveedor no disponible";
     el("modelSelect").appendChild(opt);
     el("modelSelect").disabled = true;
     const pullLocal = el("btnPullLocal");
