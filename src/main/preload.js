@@ -80,5 +80,9 @@ contextBridge.exposeInMainWorld("mika5", {
   setAppState: (key, value) => ipcRenderer.invoke("appState:set", key, value),
   openExternal: (url) => ipcRenderer.invoke("openExternal", url),
   saveFile: (payload) => ipcRenderer.invoke("app:saveFile", payload),
-  printToPDF: (payload) => ipcRenderer.invoke("app:printToPDF", payload)
+  printToPDF: (payload) => ipcRenderer.invoke("app:printToPDF", payload),
+  app: {
+    quit: () => ipcRenderer.invoke("app:quit"),
+    getVersion: () => ipcRenderer.invoke("app:getVersion")
+  }
 });

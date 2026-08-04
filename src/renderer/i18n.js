@@ -193,6 +193,15 @@ const MIKA5_TRANSLATIONS = {
     'provider.cloudWarning': '⚠️ Cloud activo: Mensajes a servidores externos.',
     'provider.moreInfo': 'Más info',
 
+    // Salida de la aplicación y versión instalada
+    'app.versionLabel': 'Versión instalada',
+    'app.versionDev': 'desarrollo',
+    'app.quitApp': 'Salir de MIKA5',
+    'app.quitTitle': 'Salir de MIKA5',
+    'app.quitMessage': 'Se cerrará la aplicación. Tus proyectos, chats, documentos y claves guardadas seguirán intactos.',
+    'app.quitConfirm': 'Salir',
+    'app.quitFailed': 'No se pudo salir',
+
     // Language
     'lang.label': 'Idioma',
     'lang.es': 'Español',
@@ -371,6 +380,15 @@ const MIKA5_TRANSLATIONS = {
     'provider.llamacpp': 'llama.cpp (Local)',
     'provider.cloudWarning': '⚠️ Cloud active: Messages sent to external servers.',
     'provider.moreInfo': 'More info',
+
+    // Quitting the app and installed version
+    'app.versionLabel': 'Installed version',
+    'app.versionDev': 'development',
+    'app.quitApp': 'Quit MIKA5',
+    'app.quitTitle': 'Quit MIKA5',
+    'app.quitMessage': 'The app will close. Your projects, chats, documents and stored keys stay intact.',
+    'app.quitConfirm': 'Quit',
+    'app.quitFailed': 'Could not quit',
 
     'lang.label': 'Language',
     'lang.es': 'Español',

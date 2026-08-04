@@ -2335,6 +2335,28 @@
                                 <span class="more-actions-row-label">Idioma / Language</span>
                                 <button class="btn-icon" type="button" id="btnLangToggle" role="menuitem" aria-label="Language" title="Cambiar idioma / Change language" style="font-size:12px;font-weight:600;min-width:28px;">ES</button>
                             </div>
+
+                            <div class="more-actions-divider" role="none"></div>
+
+                            <!-- MIKA5 no tiene cuentas ni sesión remota: la
+                                 acción sale de la aplicación, no cierra una
+                                 sesión, y no borra nada. Fuera de macOS la barra
+                                 de menú está oculta, así que sin esto la única
+                                 salida visible era la X de la ventana. La
+                                 versión instalada se muestra aquí porque es el
+                                 único dato de versión que la aplicación conoce
+                                 de sí misma: no hay comprobación de
+                                 actualizaciones. -->
+                            <div class="more-actions-row" role="none">
+                                <span class="more-actions-row-label" id="appVersionLabel">Versión instalada</span>
+                                <span id="appVersionValue" class="more-actions-row-label">—</span>
+                            </div>
+
+                            <button class="btn-icon more-actions-item" type="button" id="btnQuitApp" role="menuitem"
+                                    aria-label="Salir de MIKA5">
+                                <span aria-hidden="true">🚪</span>
+                                <span class="more-actions-item-label" id="btnQuitAppLabel">Salir de MIKA5</span>
+                            </button>
                         </div>
                     </div>
                 </div>

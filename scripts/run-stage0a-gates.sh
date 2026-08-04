@@ -12,7 +12,9 @@
 # Cobertura. `npm-test` encadena, en un solo proceso, las suites de node:
 #   rag · vision · alibaba · provider-capabilities · request-context
 #   provider-cancellation · cloud-consent · network-security · knowledge-cli
-# Los demás necesitan Electron y corren por separado. Ninguna suite se cuenta
+# Los demás necesitan Electron y corren por separado: db · knowledge-scope ·
+# electron-security · electron-renderer-integration · image-download ·
+# print-pdf · provider-selector. Ninguna suite se cuenta
 # dos veces como evidencia: knowledge-cli llega vía npm-test y no se repite
 # como gate independiente.
 #
@@ -40,6 +42,7 @@ NAMES=(
   "electron-renderer-integration"
   "image-download-electron"
   "print-pdf-electron"
+  "provider-selector"
 )
 CMDS=(
   "npm test"
@@ -49,6 +52,7 @@ CMDS=(
   "node scripts/run-electron-test.js test/electron-renderer-integration.test.js $ELECTRON_ARGS"
   "node scripts/run-electron-test.js test/image-download-electron.test.js $ELECTRON_ARGS"
   "node scripts/run-electron-test.js test/print-pdf-electron.test.js $ELECTRON_ARGS"
+  "node scripts/run-electron-test.js test/provider-selector.test.js $ELECTRON_ARGS"
 )
 
 FAILED=0

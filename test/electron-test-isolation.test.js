@@ -220,7 +220,7 @@ const bloqueCmds = gateScript.slice(gateScript.indexOf('CMDS=('), gateScript.ind
 // aparecer es un --user-data-dir en los comandos que se ejecutan.
 check(!/--user-data-dir/.test(bloqueCmds), 'ningún comando del gate fija un user-data-dir propio');
 const comandosElectron = (bloqueCmds.match(/scripts\/run-electron-test\.js/g) || []).length;
-check(comandosElectron === 6, `los seis gates de Electron pasan por el lanzador (${comandosElectron})`);
+check(comandosElectron === 7, `los siete gates de Electron pasan por el lanzador (${comandosElectron})`);
 // El comentario puede partirse en varias líneas: se comprueba el contenido, no
 // una frase exacta.
 const comentarioArgs = gateScript
@@ -236,8 +236,8 @@ check(/MIKA5_ELECTRON_ARGS/.test(comentarioArgs)
 const bloqueNames = gateScript.slice(gateScript.indexOf('NAMES=('), gateScript.indexOf(')', gateScript.indexOf('NAMES=(')));
 const nombresDeclarados = (bloqueNames.match(/"[^"]+"/g) || []).length;
 const comandosDeclarados = (bloqueCmds.match(/"[^"]+"/g) || []).length;
-check(nombresDeclarados === 7 && comandosDeclarados === 7,
-  `el gate canónico sigue siendo 7/7 (${nombresDeclarados} nombres, ${comandosDeclarados} comandos)`);
+check(nombresDeclarados === 8 && comandosDeclarados === 8,
+  `el gate canónico sigue siendo 8/8 (${nombresDeclarados} nombres, ${comandosDeclarados} comandos)`);
 
 check(fs.existsSync(path.join(ROOT, 'scripts/run-electron-test.js')),
   'el lanzador existe en la ruta que declaran los scripts');

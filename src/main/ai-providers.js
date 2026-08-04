@@ -2015,7 +2015,11 @@ class AIProviderManager {
     let hasAlibabaConfig = false;
     let alibabaConfigNeedsPersist = false;
     rows.forEach(row => {
-      if (row.key === 'ai_provider') this.currentProvider = row.value;
+      // Un identificador que ya no existe en el registro (proveedor retirado o
+      // valor corrupto) no puede quedar activo: `getProvider()` leería
+      // `undefined.privacy` y la rehidratación fallaría entera. Se ignora y se
+      // conserva el local por defecto.
+      if (row.key === 'ai_provider' && PROVIDERS[row.value]) this.currentProvider = row.value;
       if (row.key === 'openai_key') this.apiKeys.openai = decrypt(row.value);
       if (row.key === 'anthropic_key') this.apiKeys.anthropic = decrypt(row.value);
       if (row.key === 'groq_key') this.apiKeys.groq = decrypt(row.value);

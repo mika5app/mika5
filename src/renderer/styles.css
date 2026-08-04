@@ -124,7 +124,13 @@
 }
 
 /* === Provider selector === */
-.provider-selector { position: relative; overflow: hidden; }
+/* Sin `overflow: hidden`: este envoltorio es el contenedor de posicionamiento
+   del desplegable, que se dibuja entero por debajo de su borde inferior.
+   Recortarlo aquí ocultaba el menú al completo — 301x522 px con área visible 0
+   y ninguna de las siete opciones pulsable — sin que nada más lo delatara: el
+   markup y el registro de proveedores seguían intactos. El desbordamiento del
+   botón se contiene en el propio botón, justo debajo. */
+.provider-selector { position: relative; }
 /* El botón tiene que encoger con su envoltorio: sin max-width se desbordaba y
    se dibujaba sobre el indicador de privacidad en anchos reducidos. */
 .provider-trigger {
@@ -153,6 +159,10 @@
   min-width: 280px;
   box-shadow: 0 10px 30px rgba(0,0,0,0.4);
   z-index: 100;
+  /* Con siete proveedores la lista mide ~520 px. En ventanas bajas se desplaza
+     dentro de su propia caja en vez de salirse por debajo de la pantalla. */
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
 }
 .provider-option {
   padding: 12px;

@@ -3834,6 +3834,10 @@ function applyTranslations() {
     moreActionsBtn.setAttribute('aria-label', t('header.moreActions'));
     moreActionsBtn.title = t('header.moreActions');
   }
+  // Rótulos que se escriben desde JS: su texto se congela al pintarse, así que
+  // cambiar de idioma tiene que repintarlos o se quedan en el idioma anterior.
+  renderSessionLabels();
+  renderInstalledVersion().catch(e => console.warn('renderInstalledVersion:', e));
 }
 
 function toggleContextPanel() {
@@ -6258,12 +6262,76 @@ function wireMoreActionsMenu() {
   });
 }
 
+// --- Salir de la aplicación y versión instalada ---
+//
+// La acción se llama «Salir de MIKA5» y no «Cerrar sesión» porque no hay sesión
+// que cerrar: MIKA5 no tiene cuentas, ni login, ni credencial de usuario en
+// ninguna parte del código. Llamarlo «cerrar sesión» prometería una
+// invalidación que no ocurre y sugeriría que algo se borra. No se borra nada:
+// proyectos, chats, documentos, contexto y credenciales de proveedor siguen en
+// SQLite y reaparecen al volver a abrir. Para retirar permisos están «Revocar
+// permiso cloud» y la configuración de cada proveedor.
+async function quitApp() {
+  const confirmado = await mikaConfirm(
+    t('app.quitTitle'),
+    t('app.quitMessage'),
+    t('app.quitConfirm')
+  );
+  if (!confirmado) return;
+  try {
+    await window.mika5.app.quit();
+  } catch (e) {
+    showToast(t('app.quitFailed') + ': ' + (e?.message || e), 'error');
+  }
+}
+
+async function renderInstalledVersion() {
+  const valor = el('appVersionValue');
+  if (!valor) return;
+  try {
+    const info = await window.mika5.app.getVersion();
+    // En worktree y en `npm run dev` la aplicación no está empaquetada. Decirlo
+    // evita confundir una compilación de desarrollo con una release instalada.
+    valor.textContent = info.packaged
+      ? `v${info.installed}`
+      : `v${info.installed} · ${t('app.versionDev')}`;
+  } catch (_) {
+    valor.textContent = '—';
+  }
+}
+
+// El rotulado va aparte del cableado: los oyentes se registran una sola vez,
+// pero los textos se repintan en cada cambio de idioma desde applyTranslations.
+function renderSessionLabels() {
+  const salir = el('btnQuitApp');
+  if (salir) {
+    const etiqueta = el('btnQuitAppLabel');
+    if (etiqueta) etiqueta.textContent = t('app.quitApp');
+    salir.setAttribute('aria-label', t('app.quitApp'));
+    salir.title = t('app.quitApp');
+  }
+  const versionLabel = el('appVersionLabel');
+  if (versionLabel) versionLabel.textContent = t('app.versionLabel');
+}
+
+function wireSessionActions() {
+  const salir = el('btnQuitApp');
+  if (salir) {
+    salir.addEventListener('click', () => {
+      quitApp().catch(e => console.warn('quitApp:', e));
+    });
+  }
+  renderSessionLabels();
+  renderInstalledVersion().catch(e => console.warn('renderInstalledVersion:', e));
+}
+
 function wire() {
   el("btnCreateProject").onclick = createProject;
   const projInput = el("projectName");
   if (projInput) projInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); createProject(); } });
 
   wireMoreActionsMenu();
+  wireSessionActions();
 
   const cloudBannerDismiss = el("cloudBannerDismiss");
   if (cloudBannerDismiss) {

@@ -1,6 +1,6 @@
 {
   "name": "mika5-desktop",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "MIKA5 — local AI desktop with projects, chats, knowledge and RAG",
   "author": {
     "name": "MIKA5",
@@ -9,6 +9,10 @@
   "license": "AGPL-3.0",
   "main": "src/main/main.js",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mika5app/mika5.git"
+  },
   "scripts": {
     "dev": "electron .",
     "build": "electron-builder --config electron-builder.json",
@@ -45,7 +49,8 @@
     "test:visual-ui-polish": "node test/visual-ui-polish.test.js",
     "test:ipc-contracts": "node test/ipc-contracts.test.js",
     "test:website-i18n": "node test/website-i18n.test.js",
-    "test:print-pdf-electron": "node scripts/run-electron-test.js test/print-pdf-electron.test.js"
+    "test:print-pdf-electron": "node scripts/run-electron-test.js test/print-pdf-electron.test.js",
+    "test:provider-selector": "node scripts/run-electron-test.js test/provider-selector.test.js"
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",

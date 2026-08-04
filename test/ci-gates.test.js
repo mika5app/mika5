@@ -153,6 +153,7 @@ const SCRIPTS_REQUERIDOS = [
   'test:knowledge-cli', 'test:ci-gates', 'test:palette', 'test:visual-ui-shell', 'test:visual-ui-conversation', 'test:electron-test-isolation', 'test:visual-ui-polish', 'test:ipc-contracts',
   'test:print-pdf-electron', 'test:electron-renderer',
   'test:electron-security', 'test:image-download-electron',
+  'test:provider-selector',
   'knowledge:preflight', 'knowledge:repair'
 ];
 for (const nombre of SCRIPTS_REQUERIDOS) {
@@ -175,7 +176,11 @@ const gateScript = normalizeEol(
 const GATES_CANONICOS = [
   'npm-test', 'db', 'knowledge-scope',
   'electron-security', 'electron-renderer-integration', 'image-download-electron',
-  'print-pdf-electron'
+  'print-pdf-electron',
+  // Selector multiproveedor, sesión de escritorio y ausencia de aviso
+  // bloqueante. Necesita Electron: mide la maquetación real de Chromium para
+  // distinguir "la opción está en el DOM" de "el usuario puede pulsarla".
+  'provider-selector'
 ];
 const bloqueNames = gateScript.slice(gateScript.indexOf('NAMES=('), gateScript.indexOf(')', gateScript.indexOf('NAMES=(')));
 for (const gate of GATES_CANONICOS) {

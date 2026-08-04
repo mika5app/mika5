@@ -347,6 +347,28 @@ ipcMain.handle("openExternal", async (_, url) => {
   }
 });
 
+// MIKA5 no tiene cuentas de usuario ni sesión remota: no hay nada que
+// invalidar en un servidor. Lo único que existe es la sesión de escritorio, y
+// fuera de macOS la barra de menú está oculta, así que sin esto no había
+// ninguna vía visible para terminarla. Cerrar no borra nada: proyectos, chats,
+// documentos y credenciales viven en SQLite y siguen ahí al volver a abrir.
+ipcMain.handle("app:quit", () => {
+  app.quit();
+  return { ok: true };
+});
+
+// Versión instalada. Se lee del package.json de la aplicación y no de
+// `app.getVersion()`: cuando el punto de entrada no es la raíz del proyecto
+// —al ejecutar una prueba con `electron test/...`— `app.getVersion()` devuelve
+// la versión de Electron (31.7.7), no la de MIKA5. El package.json es el mismo
+// fichero que electron-builder sella al empaquetar, así que la cifra coincide
+// con la del instalador. Es la única versión que MIKA5 conoce de sí misma: no
+// hay comprobación de actualizaciones ni, por tanto, "versión disponible".
+ipcMain.handle("app:getVersion", () => ({
+  installed: require("../../package.json").version,
+  packaged: app.isPackaged
+}));
+
 ipcMain.handle("app:saveFile", async (_, { defaultName, filters, content, encoding }) => {
   // Security: limit file size to 50MB
   const MAX_SIZE = 50 * 1024 * 1024;
