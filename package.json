@@ -19,7 +19,7 @@
     "postinstall": "electron-builder install-app-deps",
     "icons:mac": "bash scripts/gen-icns.sh",
     "icons:win": "node scripts/gen-ico.js",
-    "test": "node test/rag.test.js && node test/vision.test.js && npm run test:alibaba && npm run test:provider-capabilities && npm run test:request-context && npm run test:provider-cancellation && npm run test:cloud-consent && npm run test:network-security && npm run test:knowledge-cli && npm run test:ci-gates && npm run test:palette && npm run test:visual-ui-shell && npm run test:visual-ui-conversation && npm run test:electron-test-isolation && npm run test:visual-ui-polish && npm run test:ipc-contracts",
+    "test": "node test/rag.test.js && node test/vision.test.js && npm run test:alibaba && npm run test:provider-capabilities && npm run test:request-context && npm run test:provider-cancellation && npm run test:cloud-consent && npm run test:network-security && npm run test:knowledge-cli && npm run test:ci-gates && npm run test:palette && npm run test:visual-ui-shell && npm run test:visual-ui-conversation && npm run test:electron-test-isolation && npm run test:visual-ui-polish && npm run test:ipc-contracts && npm run test:website-i18n",
     "test:all": "bash scripts/run-stage0a-gates.sh",
     "test:db": "node scripts/run-electron-test.js test/db.test.js",
     "test:rag": "node test/rag.test.js",
@@ -44,6 +44,7 @@
     "test:electron-test-isolation": "node test/electron-test-isolation.test.js",
     "test:visual-ui-polish": "node test/visual-ui-polish.test.js",
     "test:ipc-contracts": "node test/ipc-contracts.test.js",
+    "test:website-i18n": "node test/website-i18n.test.js",
     "test:print-pdf-electron": "node scripts/run-electron-test.js test/print-pdf-electron.test.js"
   },
   "dependencies": {
