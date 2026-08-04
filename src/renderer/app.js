@@ -4205,6 +4205,23 @@ function appendMsg(msg, target) {
 
   // Insert model-change indicator if model switched
   const container = target || el("chat");
+
+  // El estado vacío lo pinta `renderMessages()` cuando el chat no tiene
+  // mensajes, y sólo esa función lo retiraba, al repintar de cero. Aquí se
+  // añade un turno con `appendChild()` sobre el mismo contenedor, así que sin
+  // esta línea «Empieza la conversación» y sus sugerencias se quedaban por
+  // encima de la conversación recién iniciada hasta que el usuario cambiaba de
+  // chat y volvía. Se retira en el primer mensaje que llega, venga del envío,
+  // de una respuesta o de una restauración.
+  //
+  // No aplica cuando `target` es un DocumentFragment —el camino de
+  // `renderMessages()`—: allí no hay estado vacío que quitar y la consulta no
+  // encuentra nada.
+  if (container && typeof container.querySelector === 'function') {
+    const vacio = container.querySelector('.empty-state');
+    if (vacio) vacio.remove();
+  }
+
   if (msgModel && _lastRenderedModel && msgModel !== _lastRenderedModel && container) {
     const indicator = document.createElement("div");
     indicator.className = "model-change-indicator";

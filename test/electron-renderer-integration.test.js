@@ -1305,6 +1305,80 @@ async function run() {
   state.addMessageFailure = null;
   state.routeMode = 'chat';
 
+  // === Estado vacío: se retira con el primer mensaje =======================
+  //
+  // Regresión reproducida: `renderMessages()` pintaba `.empty-state` en un chat
+  // sin mensajes y sólo esa misma función lo retiraba, al repintar de cero.
+  // `appendMsg()` añadía el turno con `appendChild()` sobre el mismo
+  // contenedor, así que «Empieza la conversación» y sus tres sugerencias se
+  // quedaban por encima de la conversación recién iniciada hasta que el
+  // usuario cambiaba de chat y volvía.
+  //
+  // La secuencia es la exacta: chat vacío → enviar el primer mensaje →
+  // el estado vacío ya no está.
+
+  await win.webContents.executeJavaScript(`(() => {
+    activeProjectId = 'project-a';
+    activeChatId = 'chat-vacio';
+    currentProvider = 'local';
+    providerPrivacy = 'private';
+    unsavedAssistantMessages.length = 0;
+    const chat = document.getElementById('chat');
+    chat.innerHTML = '';
+    renderEmptyState(chat, 'empty-chat');
+  })()`, true);
+
+  const vacioAntes = await win.webContents.executeJavaScript(`({
+    estados: document.querySelectorAll('#chat .empty-state').length,
+    turnos: document.querySelectorAll('#chat .msg-content').length
+  })`, true);
+  assert.strictEqual(vacioAntes.estados, 1, 'el chat vacío arranca con su estado vacío pintado');
+  assert.strictEqual(vacioAntes.turnos, 0, 'el chat vacío arranca sin turnos');
+
+  await win.webContents.executeJavaScript(`(() => {
+    const select = document.getElementById('modelSelect');
+    select.innerHTML = '<option value="local-model">local-model</option>';
+    select.value = 'local-model';
+    document.getElementById('input').value = 'primer mensaje del chat';
+    chatAttachments = [];
+  })()`, true);
+  await win.webContents.executeJavaScript(`window.__sendPromise = send(); undefined`, true);
+  await win.webContents.executeJavaScript(`window.__sendPromise`, true);
+
+  const vacioDespues = await win.webContents.executeJavaScript(`({
+    estados: document.querySelectorAll('#chat .empty-state').length,
+    turnos: document.querySelectorAll('#chat .msg-content').length,
+    texto: (document.getElementById('chat').innerText || '')
+  })`, true);
+  assert.strictEqual(vacioDespues.estados, 0,
+    'tras el primer mensaje no queda ningún .empty-state en el chat');
+  assert(vacioDespues.turnos >= 1,
+    `tras el primer mensaje hay al menos un turno renderizado (${vacioDespues.turnos})`);
+  assert(!/Empieza la conversación|Start the conversation/.test(vacioDespues.texto),
+    'el texto del estado vacío desaparece de la conversación');
+
+  // El mismo contrato fuera del flujo de envío: cualquier turno que llegue por
+  // `appendMsg()` retira el estado vacío.
+  await win.webContents.executeJavaScript(`(() => {
+    const chat = document.getElementById('chat');
+    chat.innerHTML = '';
+    renderEmptyState(chat, 'empty-chat');
+    appendMsg({ role: 'assistant', content: 'turno restaurado', model: 'local-model' });
+  })()`, true);
+  const vacioTrasAppend = await win.webContents.executeJavaScript(
+    `document.querySelectorAll('#chat .empty-state').length`, true);
+  assert.strictEqual(vacioTrasAppend, 0,
+    'appendMsg retira el estado vacío también fuera del flujo de envío');
+
+  // Un DocumentFragment no tiene estado vacío que retirar y no puede romper por
+  // ello: es el camino que usa renderMessages() al pintar por lotes.
+  const conFragmento = await win.webContents.executeJavaScript(`(() => {
+    const fragmento = document.createDocumentFragment();
+    appendMsg({ role: 'user', content: 'dentro de un fragmento' }, fragmento);
+    return fragmento.childNodes.length;
+  })()`, true);
+  assert(conFragmento >= 1, 'appendMsg sigue funcionando sobre un DocumentFragment');
+
   win.destroy();
 
   console.log('Electron renderer integration tests passed');
