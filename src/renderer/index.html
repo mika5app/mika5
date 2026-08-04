@@ -617,7 +617,7 @@
 
         /* El estado del runtime deja de ocupar sitio en la barra, pero sigue
            siendo visible de un vistazo como punto en el disparador. */
-        .more-actions-trigger[data-runtime]::after {
+        .more-actions-trigger[data-provider-state]::after {
             content: "";
             position: absolute;
             top: 3px;
@@ -627,8 +627,19 @@
             border-radius: 50%;
             border: 1px solid var(--surface-header);
         }
-        .more-actions-trigger[data-runtime="ok"]::after { background: #4ade80; }
-        .more-actions-trigger[data-runtime="offline"]::after { background: #f87171; }
+        /* El punto lleva el estado completo, no un booleano. Verde sólo con
+           conexión verificada; ámbar cuando el servidor contesta pero el
+           servicio no sirve —límite alcanzado, error del proveedor— o falta
+           configurar; gris cuando nadie lo ha comprobado; rojo sólo para lo
+           que de verdad impide trabajar. */
+        .more-actions-trigger[data-provider-state="connected"]::after { background: #4ade80; }
+        .more-actions-trigger[data-provider-state="offline"]::after { background: #f87171; }
+        .more-actions-trigger[data-provider-state="authentication-rejected"]::after { background: #f87171; }
+        .more-actions-trigger[data-provider-state="authorization-forbidden"]::after { background: #f87171; }
+        .more-actions-trigger[data-provider-state="rate-limited"]::after { background: #fb923c; }
+        .more-actions-trigger[data-provider-state="provider-error"]::after { background: #fb923c; }
+        .more-actions-trigger[data-provider-state="configuration-required"]::after { background: #facc15; }
+        .more-actions-trigger[data-provider-state="unknown"]::after { background: #94a3b8; }
 
         .more-actions-menu {
             position: absolute;
@@ -879,6 +890,14 @@
             background: rgba(234, 179, 8, 0.18);
             color: #facc15;
             border: 1px solid rgba(234, 179, 8, 0.4);
+        }
+
+        /* Degradado: el servidor contesta, pero el servicio no está sirviendo.
+           Ni verde ni rojo, porque no es ninguna de las dos cosas. */
+        .status-pill.status-degraded {
+            background: rgba(251, 146, 60, 0.18);
+            color: #fb923c;
+            border: 1px solid rgba(251, 146, 60, 0.4);
         }
 
         /* --- Chat Area --- */

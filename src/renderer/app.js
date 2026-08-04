@@ -2273,6 +2273,22 @@ async function saveCurrentConversation(messages = conversationHistory) {
   }
 }
 
+// Texto localizado del estado de un proveedor, construido SÓLO a partir del
+// código estable y de los metadatos permitidos. El mensaje técnico del
+// proveedor no cruza el puente: se queda en el log del proceso principal.
+function describirEstadoProveedor(disp) {
+  if (!disp || !disp.errorCode) return '';
+  const clave = `provider.error.${disp.errorCode}`;
+  const traducido = t(clave);
+  if (traducido !== clave) return traducido;
+  // Código sin texto propio: se cae al del estado, que siempre existe. Nunca
+  // se enseña el código crudo ni el mensaje del proveedor.
+  const porEstado = t(`provider.state.${disp.uiState || 'unknown'}`);
+  return Number.isInteger(disp.httpStatus)
+    ? `${porEstado} (HTTP ${disp.httpStatus})`
+    : porEstado;
+}
+
 async function loadRuntime() {
   // Disponibilidad del proveedor activo, con los estados separados. Antes esto
   // era `status()`, que para todo proveedor cloud devolvía `ok: !!apiKey`: la
@@ -2282,38 +2298,51 @@ async function loadRuntime() {
   try {
     disp = await window.mika5.ai.getAvailability();
   } catch (e) {
+    // Si el propio canal falla no se sabe nada del proveedor. Se dice eso, no
+    // que esté caído: el error es de la aplicación, no del servidor remoto.
     disp = {
-      configured: false, reachable: false, authenticated: null,
-      modelsAvailable: 0, models: [], ready: false, detail: e?.message || String(e)
+      configured: false, reachable: null, authenticated: null,
+      modelsAvailable: 0, models: [], canAttempt: false, ready: false,
+      uiState: 'configuration-required', errorCode: 'PROVIDER_UNAVAILABLE', httpStatus: null
     };
   }
 
   const statusEl = el("rtStatus");
-  // Cinco estados y no dos. «Conectado» exige evidencia de que el servidor
-  // contestó; sin ella el estado es `unknown`, que se dice como tal. Presentar
-  // una ausencia de prueba como conexión verificada era la mentira que este
-  // cambio quita.
+  // Ocho estados. «Conectado» exige evidencia de que el servidor contestó Y de
+  // que el servicio respondió bien: un 404, un 429 o un 500 prueban que hay
+  // alguien al otro lado y no que se pueda trabajar, así que tienen estado
+  // propio y no se pintan en verde.
   const uiState = disp.uiState || 'unknown';
   const CLASE_POR_ESTADO = {
     'connected': 'status-ok',
     'offline': 'status-offline',
     'unknown': 'status-unknown',
     'configuration-required': 'status-unconfigured',
-    'authentication-rejected': 'status-offline'
+    'authentication-rejected': 'status-offline',
+    'authorization-forbidden': 'status-offline',
+    'rate-limited': 'status-degraded',
+    'provider-error': 'status-degraded'
   };
   statusEl.textContent = t(`provider.state.${uiState}`);
   statusEl.className = `status-pill ${CLASE_POR_ESTADO[uiState] || 'status-unknown'}`;
   statusEl.dataset.providerState = uiState;
-  if (disp.errorCode) statusEl.title = disp.message || disp.errorCode;
+  // El tooltip se compone de textos localizados a partir del código, nunca del
+  // mensaje del proveedor: un error técnico puede arrastrar rutas, endpoints o
+  // fragmentos de credencial, y el título de un elemento es visible y copiable.
+  const rotuloError = describirEstadoProveedor(disp);
+  if (rotuloError) statusEl.title = rotuloError;
   else statusEl.removeAttribute('title');
 
-  const runtimeOk = uiState === 'connected';
-  // El detalle vive dentro del menú; el punto del disparador conserva la señal.
+  // El punto del disparador lleva el estado completo, no un booleano: marcar
+  // «offline» un proveedor que está sin verificar era decir que está caído.
   const moreActionsTrigger = el("btnMoreActions");
-  if (moreActionsTrigger) moreActionsTrigger.dataset.runtime = runtimeOk ? 'ok' : 'offline';
+  if (moreActionsTrigger) moreActionsTrigger.dataset.providerState = uiState;
 
   el("modelSelect").innerHTML = "";
-  if (disp.configured && disp.reachable !== false && disp.authenticated !== false) {
+  // Se puebla con `canAttempt`, no con `ready`: un catálogo declarado por el
+  // adaptador basta para ofrecer los modelos, aunque nadie haya verificado que
+  // el proveedor responda. Lo que no se hace es llamar «listo» a eso.
+  if (disp.canAttempt || (disp.configured && disp.reachable !== false && disp.authenticated !== false)) {
     // El catálogo ya viene con la disponibilidad: pedirlo otra vez repetiría la
     // misma consulta al proveedor.
     const modelsRes = { models: disp.models || [] };

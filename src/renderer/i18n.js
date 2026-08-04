@@ -193,19 +193,40 @@ const MIKA5_TRANSLATIONS = {
     'provider.cloudWarning': '⚠️ Cloud activo: Mensajes a servidores externos.',
     'provider.moreInfo': 'Más info',
 
-    // Estados de disponibilidad del proveedor. «Desconocido» no es un fallo:
-    // significa que nadie ha podido comprobar la conexión todavía, y decirlo
-    // es más honesto que anunciar «Conectado» sin haberlo verificado.
+    // Estados de disponibilidad del proveedor y códigos de error. El renderer
+    // NUNCA muestra el mensaje técnico del proveedor: traduce a partir del
+    // código estable, que es lo único que cruza el puente.
     'provider.state.connected': '✓ Conectado',
     'provider.state.offline': '✗ Sin conexión',
     'provider.state.unknown': '• Sin verificar',
     'provider.state.configuration-required': '• Falta configurar',
     'provider.state.authentication-rejected': '✗ Clave rechazada',
+    'provider.state.authorization-forbidden': '✗ Sin permiso',
+    'provider.state.rate-limited': '• Límite alcanzado',
+    'provider.state.provider-error': '✗ Error del proveedor',
     'provider.selectEmpty.connected': 'Sin modelos disponibles',
     'provider.selectEmpty.offline': 'El servidor del proveedor no responde',
     'provider.selectEmpty.unknown': 'No se pudo obtener el catálogo de modelos',
     'provider.selectEmpty.configuration-required': 'Falta la API Key de este proveedor',
     'provider.selectEmpty.authentication-rejected': 'El proveedor rechazó la API Key',
+    'provider.selectEmpty.authorization-forbidden': 'La clave no tiene permiso para esta operación',
+    'provider.selectEmpty.rate-limited': 'Se alcanzó el límite de peticiones del proveedor',
+    'provider.selectEmpty.provider-error': 'El proveedor devolvió un error',
+    'provider.error.PROVIDER_CREDENTIAL_REQUIRED': 'Falta la API Key de este proveedor',
+    'provider.error.PROVIDER_CONFIG_REQUIRED': 'Falta completar la configuración del proveedor',
+    'provider.error.PROVIDER_CONFIG_INVALID': 'La configuración del proveedor no es válida',
+    'provider.error.PROVIDER_ENDPOINT_REQUIRED': 'Falta el endpoint del proveedor',
+    'provider.error.PROVIDER_CATALOG_REQUIRED': 'El proveedor no tiene ningún modelo configurado',
+    'provider.error.PROVIDER_CATALOG_EMPTY': 'El proveedor no ofrece ningún modelo',
+    'provider.error.PROVIDER_AUTH_REJECTED': 'El proveedor rechazó la API Key',
+    'provider.error.PROVIDER_FORBIDDEN': 'La clave no tiene permiso para esta operación',
+    'provider.error.PROVIDER_RATE_LIMITED': 'Se alcanzó el límite de peticiones del proveedor',
+    'provider.error.PROVIDER_TRANSPORT_UNREACHABLE': 'No se pudo contactar con el servidor del proveedor',
+    'provider.error.PROVIDER_TIMEOUT': 'El proveedor tardó demasiado en responder',
+    'provider.error.PROVIDER_ABORTED': 'La consulta al proveedor se canceló',
+    'provider.error.PROVIDER_UNKNOWN_ERROR': 'El proveedor devolvió un error inesperado',
+    'provider.error.PROVIDER_UNAVAILABLE': 'No se pudo consultar el estado del proveedor',
+    'provider.error.PROVIDER_UNKNOWN': 'Proveedor desconocido',
 
     // Salida de la aplicación y versión instalada
     'app.versionLabel': 'Versión instalada',
@@ -395,19 +416,40 @@ const MIKA5_TRANSLATIONS = {
     'provider.cloudWarning': '⚠️ Cloud active: Messages sent to external servers.',
     'provider.moreInfo': 'More info',
 
-    // Provider availability states. "Unverified" is not a failure: it means
-    // nobody has been able to check the connection yet, and saying so is more
-    // honest than announcing "Connected" without having verified it.
+    // Provider availability states and error codes. The renderer NEVER shows
+    // the provider technical message: it translates from the stable code,
+    // which is the only thing that crosses the bridge.
     'provider.state.connected': '✓ Connected',
     'provider.state.offline': '✗ Offline',
     'provider.state.unknown': '• Unverified',
     'provider.state.configuration-required': '• Needs setup',
     'provider.state.authentication-rejected': '✗ Key rejected',
+    'provider.state.authorization-forbidden': '✗ Not permitted',
+    'provider.state.rate-limited': '• Rate limited',
+    'provider.state.provider-error': '✗ Provider error',
     'provider.selectEmpty.connected': 'No models available',
     'provider.selectEmpty.offline': 'The provider server is not responding',
     'provider.selectEmpty.unknown': 'Could not retrieve the model catalogue',
     'provider.selectEmpty.configuration-required': 'This provider needs an API key',
     'provider.selectEmpty.authentication-rejected': 'The provider rejected the API key',
+    'provider.selectEmpty.authorization-forbidden': 'The key is not allowed to perform this operation',
+    'provider.selectEmpty.rate-limited': 'The provider request limit was reached',
+    'provider.selectEmpty.provider-error': 'The provider returned an error',
+    'provider.error.PROVIDER_CREDENTIAL_REQUIRED': 'This provider needs an API key',
+    'provider.error.PROVIDER_CONFIG_REQUIRED': 'The provider setup is incomplete',
+    'provider.error.PROVIDER_CONFIG_INVALID': 'The provider configuration is not valid',
+    'provider.error.PROVIDER_ENDPOINT_REQUIRED': 'The provider endpoint is missing',
+    'provider.error.PROVIDER_CATALOG_REQUIRED': 'The provider has no configured models',
+    'provider.error.PROVIDER_CATALOG_EMPTY': 'The provider offers no models',
+    'provider.error.PROVIDER_AUTH_REJECTED': 'The provider rejected the API key',
+    'provider.error.PROVIDER_FORBIDDEN': 'The key is not allowed to perform this operation',
+    'provider.error.PROVIDER_RATE_LIMITED': 'The provider request limit was reached',
+    'provider.error.PROVIDER_TRANSPORT_UNREACHABLE': 'Could not reach the provider server',
+    'provider.error.PROVIDER_TIMEOUT': 'The provider took too long to respond',
+    'provider.error.PROVIDER_ABORTED': 'The provider request was cancelled',
+    'provider.error.PROVIDER_UNKNOWN_ERROR': 'The provider returned an unexpected error',
+    'provider.error.PROVIDER_UNAVAILABLE': 'Could not read the provider status',
+    'provider.error.PROVIDER_UNKNOWN': 'Unknown provider',
 
     // Quitting the app and installed version
     'app.versionLabel': 'Installed version',

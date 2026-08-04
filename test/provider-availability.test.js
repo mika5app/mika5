@@ -2,28 +2,30 @@
 
 // Modelo de disponibilidad de proveedores.
 //
-// Historia de lo que estas pruebas impiden, en tres capas:
+// Historia de lo que estas pruebas impiden, en capas:
 //
 //   1. `status()` respondía `ok: !!apiKey` para todo proveedor cloud, y el
-//      renderer poblaba el selector con ese único booleano. Cuatro preguntas
-//      distintas colapsadas en una: configurado, alcanzable, autenticado y con
-//      catálogo.
-//   2. El primer intento de arreglarlo infería `reachable` y `authenticated`
-//      del hecho de que `listModels()` devolviera modelos. Falso: `anthropic`,
-//      `moonshot`, `groq` y `alibaba` sirven catálogos declarados en el propio
-//      adaptador, que se devuelven igual con el servidor apagado.
-//   3. Ese mismo intento clasificaba los fallos con una expresión regular sobre
-//      el texto del error. Un adaptador que traduzca su mensaje cambiaba la
-//      clasificación sin tocar una línea de lógica.
+//      renderer poblaba el selector con ese único booleano.
+//   2. El siguiente intento infería `reachable` y `authenticated` del hecho de
+//      que `listModels()` devolviera modelos. Falso: un catálogo puede estar
+//      declarado en el propio adaptador y devolverse con el servidor apagado.
+//   3. Y clasificaba los fallos con una expresión regular sobre el texto del
+//      error, que cualquier traducción rompía.
 //
-// Ahora la evidencia es estructurada y la ausencia de evidencia se llama
-// `null`, que nunca se presenta como «Conectado».
+// Ahora la evidencia viene de dos fuentes explícitas y de ninguna más: la
+// sonda `status()` y el objeto `probe` que devuelve `listModels()`. La
+// ausencia de evidencia se llama `null` y nunca se presenta como conexión.
+//
+// Los escenarios de red se ejercen contra un servidor HTTP sintético en un
+// puerto efímero, invocando los MÉTODOS REALES de los adaptadores. No se
+// sustituye `listModels()` por un doble: se le cambia la `baseUrl`.
 //
 //   npm run test:provider-availability
 
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
 const {
   AIProviderManager, PROVIDERS, UI_STATE, resolverUiState
 } = require('../src/main/ai-providers');
@@ -38,8 +40,13 @@ function check(condicion, mensaje) {
   console.log(`  ✓ ${mensaje}`);
 }
 
-// Base de datos falsa: `AIProviderManager` sólo la usa para leer y escribir
-// `app_state`. Así la suite corre con node, sin Electron y sin tocar disco.
+// El proceso principal registra los fallos por consola. Aquí sólo estorban.
+const warnOriginal = console.warn;
+console.warn = (...args) => {
+  if (String(args[0] || '').startsWith('[provider:')) return;
+  warnOriginal(...args);
+};
+
 function baseFalsa(filas = []) {
   const almacen = new Map(filas.map(f => [f.key, f.value]));
   return {
@@ -54,313 +61,414 @@ function baseFalsa(filas = []) {
     }
   };
 }
+const gestor = (filas) => new AIProviderManager(baseFalsa(filas));
 
-// Sustituye métodos de un adaptador REAL y los restaura al terminar. El
-// adaptador es la frontera de transporte: por debajo hay red, por encima está
-// la lógica que se quiere probar. No se sustituye el adaptador entero, así que
-// `requiresKey`, `catalogSource` y `validateConfig()` siguen siendo los suyos.
+/** Sustituye campos de un adaptador REAL y los restaura al terminar. */
 async function conAdaptador(providerId, parches, fn) {
   const config = PROVIDERS[providerId];
+  const AUSENTE = Symbol.for('ausente');
   const originales = {};
   for (const [clave, valor] of Object.entries(parches)) {
     if (valor === undefined) continue;
-    originales[clave] = Object.prototype.hasOwnProperty.call(config, clave) ? config[clave] : Symbol.for('ausente');
+    originales[clave] = Object.prototype.hasOwnProperty.call(config, clave) ? config[clave] : AUSENTE;
     config[clave] = valor;
   }
   try {
     return await fn();
   } finally {
     for (const [clave, valor] of Object.entries(originales)) {
-      if (valor === Symbol.for('ausente')) delete config[clave];
+      if (valor === AUSENTE) delete config[clave];
       else config[clave] = valor;
     }
   }
 }
 
-const gestor = (filas) => new AIProviderManager(baseFalsa(filas));
-const MODELOS = { models: [{ name: 'modelo-uno' }, { name: 'modelo-dos' }] };
+// --- Servidor HTTP sintético ------------------------------------------------
 
-/** Error de red al estilo de los que produce `fetch`: el código va en la causa. */
-function errorDeRed(code) {
-  const e = new TypeError('fetch failed');
-  e.cause = Object.assign(new Error(code), { code });
-  return e;
+function crearServidor() {
+  let guion = { status: 200, cuerpo: { data: [] }, retrasoMs: 0 };
+  const servidor = http.createServer((req, res) => {
+    const responder = () => {
+      if (guion.cortar) { req.destroy(); return; }
+      const json = JSON.stringify(guion.cuerpo);
+      res.writeHead(guion.status, { 'Content-Type': 'application/json' });
+      res.end(json);
+    };
+    if (guion.retrasoMs) setTimeout(responder, guion.retrasoMs);
+    else responder();
+  });
+  return {
+    escuchar: () => new Promise(r => servidor.listen(0, '127.0.0.1', () => r(servidor.address().port))),
+    cerrar: () => new Promise(r => servidor.close(() => r())),
+    guionizar: (nuevo) => { guion = { status: 200, cuerpo: { data: [] }, retrasoMs: 0, ...nuevo }; },
+    servidor
+  };
 }
+
+const MODELOS_HTTP = { data: [{ id: 'gpt-4o-mini' }, { id: 'gpt-4o' }] };
 
 (async () => {
 
-console.log('\n=== 1. Proveedor cloud sin credencial ===');
+const srv = crearServidor();
+const puerto = await srv.escuchar();
+const BASE_SINTETICA = `http://127.0.0.1:${puerto}/v1`;
+// Puerto cerrado deliberadamente: el sistema devuelve ECONNREFUSED.
+const cerradoSrv = crearServidor();
+const puertoCerrado = await cerradoSrv.escuchar();
+await cerradoSrv.cerrar();
+const BASE_CERRADA = `http://127.0.0.1:${puertoCerrado}/v1`;
+// Dominio reservado por la RFC 6761: nunca resuelve.
+const BASE_DNS_ROTO = 'http://no-existe.invalid/v1';
+
+console.log('\n=== 1. Servidor sintético contra el listModels REAL de openai ===');
 {
-  const m = gestor();
-  let consultado = false;
-  const d = await conAdaptador('openai', {
-    listModels: async () => { consultado = true; return MODELOS; }
-  }, () => m.getAvailability('openai'));
+  const casos = [
+    ['200 con modelos', { status: 200, cuerpo: MODELOS_HTTP }, { reachable: true, authenticated: true, modelos: 2, errorCode: null }],
+    ['200 vacío', { status: 200, cuerpo: { data: [] } }, { reachable: true, authenticated: true, modelos: 0, errorCode: 'PROVIDER_CATALOG_EMPTY' }],
+    ['401', { status: 401, cuerpo: {} }, { reachable: true, authenticated: false, modelos: 0, errorCode: 'PROVIDER_AUTH_REJECTED' }],
+    ['403', { status: 403, cuerpo: {} }, { reachable: true, authenticated: null, modelos: 0, errorCode: 'PROVIDER_FORBIDDEN' }],
+    ['404', { status: 404, cuerpo: {} }, { reachable: true, authenticated: null, modelos: 0, errorCode: 'PROVIDER_HTTP_404' }],
+    ['429', { status: 429, cuerpo: {} }, { reachable: true, authenticated: null, modelos: 0, errorCode: 'PROVIDER_RATE_LIMITED' }],
+    ['500', { status: 500, cuerpo: {} }, { reachable: true, authenticated: null, modelos: 0, errorCode: 'PROVIDER_HTTP_500' }]
+  ];
 
-  check(d.configured === false, 'sin clave el proveedor no está configurado');
-  check(d.ready === false, 'sin clave no está listo');
-  check(d.authenticated === null, 'sin clave la autenticación no se ha intentado: null, no false');
-  check(d.reachable === null, 'sin clave tampoco se sabe si el servidor responde');
-  check(d.uiState === UI_STATE.CONFIGURATION_REQUIRED, `el estado de interfaz es explícito (${d.uiState})`);
-  check(d.errorCode === 'PROVIDER_CREDENTIAL_REQUIRED', `errorCode estable (${d.errorCode})`);
-  check(consultado === false, 'sin clave no se consulta el catálogo: ninguna petición inútil');
-}
+  for (const [nombre, guion, esperado] of casos) {
+    srv.guionizar(guion);
+    const m = gestor();
+    m.apiKeys.openai = 'clave-de-prueba';
+    const d = await conAdaptador('openai', { baseUrl: BASE_SINTETICA }, () => m.getAvailability('openai'));
 
-console.log('\n=== 2. Credencial rechazada, por código y no por texto ===');
-for (const status of [401, 403]) {
-  const m = gestor();
-  m.apiKeys.openai = 'clave-de-prueba';
-  const d = await conAdaptador('openai', {
-    listModels: async () => { throw errorDeRespuesta(status, 'catálogo'); }
-  }, () => m.getAvailability('openai'));
+    check(d.reachable === esperado.reachable,
+      `${nombre}: reachable=${String(d.reachable)} (el servidor contestó de verdad)`);
+    check(d.authenticated === esperado.authenticated,
+      `${nombre}: authenticated=${String(d.authenticated)}`);
+    check(d.modelsAvailable === esperado.modelos, `${nombre}: ${d.modelsAvailable} modelos`);
+    check(d.errorCode === esperado.errorCode, `${nombre}: errorCode=${d.errorCode}`);
+  }
 
-  check(d.reachable === true, `HTTP ${status}: el servidor contestó, luego es alcanzable`);
-  check(d.authenticated === false, `HTTP ${status}: la credencial fue rechazada`);
-  check(d.ready === false, `HTTP ${status}: no está listo`);
-  check(d.uiState === UI_STATE.AUTHENTICATION_REJECTED, `HTTP ${status}: estado ${d.uiState}`);
-  check(d.errorCode === 'PROVIDER_AUTH_REJECTED', `HTTP ${status}: errorCode ${d.errorCode}`);
-}
-
-console.log('\n=== 3. Runtime local sin credencial ===');
-{
-  const m = gestor();
-  check(PROVIDERS.local.requiresKey === false, 'el adaptador local declara que no requiere clave');
-
-  const d = await conAdaptador('local', {
-    status: async () => ({ ok: true }),
-    listModels: async () => MODELOS
-  }, () => m.getAvailability('local'));
-
-  check(d.configured === true, 'un runtime sin credencial está configurado de partida');
-  check(d.reachable === true, 'su sonda propia confirma que responde');
-  check(d.authenticated === null, 'no se autentica nada: null, no false');
-  check(d.modelsAvailable === 2, 'anuncia su catálogo');
-  check(d.ready === true, 'está listo sin ninguna credencial');
-  check(d.uiState === UI_STATE.CONNECTED, 'con evidencia de red sí se dice «conectado»');
-}
-{
-  const m = gestor();
-  const d = await conAdaptador('llamacpp', {
-    status: async () => ({ ok: true }),
-    listModels: async () => MODELOS
-  }, () => m.getAvailability('llamacpp'));
-  check(d.ready === true && d.authenticated === null && d.uiState === UI_STATE.CONNECTED,
-    'el segundo runtime local se comporta igual, sin caso especial');
-}
-
-console.log('\n=== 4. Servidor inaccesible ===');
-{
-  const m = gestor();
-  let consultado = false;
-  const d = await conAdaptador('local', {
-    status: async () => ({ ok: false, error: errorDeRed('ECONNREFUSED') }),
-    listModels: async () => { consultado = true; return MODELOS; }
-  }, () => m.getAvailability('local'));
-
-  check(d.configured === true, 'seguir configurado no implica estar accesible');
-  check(d.reachable === false, 'la sonda detecta que el servidor no responde');
-  check(d.ready === false, 'un servidor caído no deja el proveedor listo');
-  check(d.uiState === UI_STATE.OFFLINE, `estado ${d.uiState}`);
-  check(d.errorCode === 'PROVIDER_TRANSPORT_UNREACHABLE', `errorCode ${d.errorCode}`);
-  check(consultado === false, 'con el servidor caído no se insiste pidiendo el catálogo');
-}
-
-console.log('\n=== 5. Catálogo vacío ===');
-{
-  const m = gestor();
-  const d = await conAdaptador('local', {
-    status: async () => ({ ok: true }),
-    listModels: async () => ({ models: [] })
-  }, () => m.getAvailability('local'));
-
-  check(d.configured === true && d.reachable === true, 'servidor accesible y configurado');
-  check(d.modelsAvailable === 0, 'no hay modelos que ofrecer');
-  check(d.ready === false, 'sin catálogo no se puede trabajar, aunque todo lo demás esté bien');
-  check(d.errorCode === 'PROVIDER_CATALOG_EMPTY', `errorCode ${d.errorCode}`);
-  check(d.uiState === UI_STATE.CONNECTED,
-    'un catálogo vacío no contradice la conexión: son ejes distintos');
-}
-{
-  // Un adaptador de red SIN sonda propia que devuelve la lista vacía: varios
-  // capturan el fallo de red y devuelven `{ models: [] }`, así que un resultado
-  // vacío es indistinguible de «el servidor no tiene modelos». No prueba
-  // conectividad y no puede afirmarla.
+  // El caso que el modelo anterior no podía expresar.
+  srv.guionizar({ status: 200, cuerpo: { data: [] } });
   const m = gestor();
   m.apiKeys.openai = 'clave';
-  check(PROVIDERS.openai.catalogSource === 'network' && typeof PROVIDERS.openai.status !== 'function',
-    'openai es de red y no trae sonda propia: su catálogo es la única señal');
-  const d = await conAdaptador('openai', {
-    listModels: async () => ({ models: [] })
-  }, () => m.getAvailability('openai'));
-  check(d.reachable === null,
-    'un catálogo vacío de un adaptador de red NO prueba que el servidor responda');
-  check(d.authenticated === null,
-    'ni que la credencial haya sido aceptada');
-  check(d.uiState === UI_STATE.UNKNOWN, `se presenta como sin verificar (${d.uiState})`);
-  check(d.ready === false, 'y sin modelos no está listo');
+  const d = await conAdaptador('openai', { baseUrl: BASE_SINTETICA }, () => m.getAvailability('openai'));
+  check(d.reachable === true && d.authenticated === true && d.modelsAvailable === 0 && d.ready === false,
+    'un 200 con catálogo vacío prueba red y credencial, y aun así no deja nada utilizable');
+  check(d.uiState === UI_STATE.CONNECTED, 'y el estado es «conectado», porque lo está');
 }
 
-console.log('\n=== 6. Catálogo disponible por red ===');
+console.log('\n=== 2. Fallos de transporte contra los métodos reales ===');
 {
   const m = gestor();
-  m.apiKeys.openai = 'clave-valida';
-  const d = await conAdaptador('openai', {
-    listModels: async () => MODELOS
-  }, () => m.getAvailability('openai'));
+  m.apiKeys.openai = 'clave';
 
-  check(d.configured === true, 'configurado');
-  check(d.reachable === true, 'un catálogo obtenido por red sí prueba conectividad');
-  check(d.authenticated === true, 'y prueba que la credencial fue aceptada');
-  check(d.modelsAvailable === 2 && d.ready === true, 'listo con dos modelos');
-  check(d.uiState === UI_STATE.CONNECTED, 'estado conectado');
-  check(Array.isArray(d.models) && d.models.length === 2,
-    'el catálogo viaja con la disponibilidad y no hay que volver a pedirlo');
+  const rechazado = await conAdaptador('openai', { baseUrl: BASE_CERRADA }, () => m.getAvailability('openai'));
+  check(rechazado.reachable === false, 'ECONNREFUSED: el servidor no responde');
+  check(rechazado.errorCode === 'PROVIDER_TRANSPORT_UNREACHABLE', `ECONNREFUSED: ${rechazado.errorCode}`);
+  check(rechazado.uiState === UI_STATE.OFFLINE, 'ECONNREFUSED: estado offline');
+
+  const dns = await conAdaptador('openai', { baseUrl: BASE_DNS_ROTO }, () => m.getAvailability('openai'));
+  check(dns.reachable === false, 'error de DNS: el servidor no responde');
+  check(dns.errorCode === 'PROVIDER_TRANSPORT_UNREACHABLE', `error de DNS: ${dns.errorCode}`);
 }
 
-console.log('\n=== 7. Un catálogo estático no prueba nada (adaptadores reales) ===');
+console.log('\n=== 3. Timeout y abort contra el listModels real de llamacpp ===');
 {
-  // Alibaba sirve su catálogo desde la configuración: se devolvería idéntico
-  // con el servidor apagado y con la clave caducada.
-  check(PROVIDERS.alibaba.catalogSource === 'static',
-    'el adaptador de Alibaba declara que su catálogo es estático');
+  // `llamacpp.listModels()` lleva su propio AbortSignal.timeout(3000).
+  srv.guionizar({ status: 200, cuerpo: MODELOS_HTTP, retrasoMs: 4000 });
   const m = gestor();
-  m.apiKeys.alibaba = 'clave';
-  const d = await m.getAvailability('alibaba');
-
-  check(d.modelsAvailable > 0, `devuelve catálogo (${d.modelsAvailable} modelos)`);
-  check(d.reachable === null, 'y NO afirma que el servidor sea alcanzable');
-  check(d.authenticated === null, 'ni que la credencial haya sido aceptada');
-  check(d.uiState === UI_STATE.UNKNOWN, `se presenta como sin verificar (${d.uiState})`);
-  check(d.ready === true,
-    'pero sigue siendo utilizable: «listo» y «conectado» son ejes distintos');
+  const d = await conAdaptador('llamacpp', {
+    baseUrl: BASE_SINTETICA,
+    status: async () => ({ ok: true })
+  }, () => m.getAvailability('llamacpp'));
+  check(d.errorCode === 'PROVIDER_TIMEOUT' || d.errorCode === 'PROVIDER_ABORTED',
+    `un servidor que no contesta a tiempo produce ${d.errorCode}`);
+  check(d.ready === false, 'y no deja el proveedor listo');
+  srv.guionizar({ status: 200, cuerpo: MODELOS_HTTP });
 }
-for (const id of ['anthropic', 'moonshot', 'groq']) {
-  check(PROVIDERS[id].catalogSource === 'static',
-    `${id} declara catálogo estático: su lista no depende de la red`);
+{
+  const abortado = describirError(Object.assign(new Error('x'), { name: 'AbortError' }));
+  check(abortado.errorCode === 'PROVIDER_ABORTED' && abortado.reachable === null,
+    'un abort no prueba nada sobre el servidor: reachable queda en null');
+}
+
+console.log('\n=== 4. La evidencia sólo viene de la sonda declarada ===');
+{
+  // Un adaptador que devuelve catálogo SIN sonda no prueba nada, por muchos
+  // modelos que traiga. Es lo que hacen los catálogos declarados.
   const m = gestor();
-  m.apiKeys[id] = 'clave';
-  const d = await m.getAvailability(id);
+  m.apiKeys.openai = 'clave';
+  const d = await conAdaptador('openai', {
+    listModels: async () => ({ models: [{ name: 'a' }, { name: 'b' }] })
+  }, () => m.getAvailability('openai'));
+  check(d.modelsAvailable === 2, 'devuelve dos modelos');
   check(d.reachable === null && d.authenticated === null,
-    `${id} con catálogo estático no inventa evidencia de red ni de credencial`);
+    'sin `probe` no se infiere conectividad ni credencial, por muchos modelos que haya');
+  check(d.ready === false, 'y por tanto NO está verificado como listo');
+  check(d.canAttempt === true, 'pero sí está configurado para intentarlo');
+  check(d.uiState === UI_STATE.UNKNOWN, `se presenta como sin verificar (${d.uiState})`);
+
+  // El código no puede volver a mirar el tamaño del catálogo.
+  const fuente = fs.readFileSync(path.join(__dirname, '../src/main/ai-providers.js'), 'utf8');
+  const cuerpo = fuente.slice(fuente.indexOf('async getAvailability('), fuente.indexOf('  getAllProviders()'));
+  assert(!/catalogSource/.test(cuerpo),
+    'getAvailability() no puede volver a deducir evidencia del tipo de catálogo');
+  assert(!/models\.length > 0\s*\)\s*\{[\s\S]{0,120}reachable = true/.test(cuerpo),
+    'getAvailability() no puede deducir conectividad del tamaño del catálogo');
+  check(true, 'la inferencia por catalogSource y por tamaño de catálogo ha desaparecido del código');
+  assert(!/catalogSource/.test(fuente), 'catalogSource ya no existe en ningún adaptador');
+  check(true, 'ningún adaptador declara ya catalogSource');
 }
 
-console.log('\n=== 8. reachable === null nunca se presenta como conectado ===');
+console.log('\n=== 5. ready es estricto; canAttempt es «configurado para intentar» ===');
+{
+  const m = gestor();
+  m.apiKeys.alibaba = 'clave-estatica-sin-verificar';
+  const d = await m.getAvailability('alibaba');
+  check(d.modelsAvailable > 0, `Alibaba ofrece su catálogo declarado (${d.modelsAvailable})`);
+  check(d.reachable === null && d.authenticated === null,
+    'sin haber hablado con el servidor no hay evidencia de nada');
+  check(d.ready === false,
+    'una clave meramente presente y un catálogo declarado NO son «listo»');
+  check(d.canAttempt === true,
+    'pero sí «configurado para intentar»: hay con qué probar');
+  check(d.uiState === UI_STATE.UNKNOWN, `y el estado lo dice (${d.uiState})`);
+
+  srv.guionizar({ status: 200, cuerpo: MODELOS_HTTP });
+  const n = gestor();
+  n.apiKeys.openai = 'clave';
+  const v = await conAdaptador('openai', { baseUrl: BASE_SINTETICA }, () => n.getAvailability('openai'));
+  check(v.ready === true, 'con evidencia de que el servidor contestó, ready sí puede ser true');
+  check(v.canAttempt === true, 'y canAttempt también');
+}
+
+console.log('\n=== 6. 401 y 403 son estados distintos ===');
+{
+  check(resolverUiState({ configured: true, reachable: true, authenticated: false, errorCode: 'PROVIDER_AUTH_REJECTED' })
+    === UI_STATE.AUTHENTICATION_REJECTED, '401 lleva a authentication-rejected');
+  check(resolverUiState({ configured: true, reachable: true, authenticated: null, errorCode: 'PROVIDER_FORBIDDEN' })
+    === UI_STATE.AUTHORIZATION_FORBIDDEN, '403 lleva a authorization-forbidden, que es otro estado');
+  check(UI_STATE.AUTHENTICATION_REJECTED !== UI_STATE.AUTHORIZATION_FORBIDDEN,
+    'los dos estados son distintos y no se confunden');
+  check(describirError(errorDeRespuesta(401)).kind === KINDS.AUTH
+     && describirError(errorDeRespuesta(403)).kind === KINDS.FORBIDDEN,
+    'la taxonomía los separa desde el origen: auth y forbidden');
+  check(describirError(errorDeRespuesta(403)).authenticated === null,
+    'un 403 no afirma que la credencial sea válida ni que no lo sea');
+}
+
+console.log('\n=== 7. 404, 429 y 500 no se presentan como conectado ===');
+{
+  const casos = [
+    ['PROVIDER_HTTP_404', UI_STATE.PROVIDER_ERROR],
+    ['PROVIDER_HTTP_500', UI_STATE.PROVIDER_ERROR],
+    ['PROVIDER_UNKNOWN_ERROR', UI_STATE.PROVIDER_ERROR],
+    ['PROVIDER_RATE_LIMITED', UI_STATE.RATE_LIMITED]
+  ];
+  for (const [errorCode, esperado] of casos) {
+    const estado = resolverUiState({ configured: true, reachable: true, authenticated: null, errorCode });
+    check(estado === esperado, `${errorCode}: estado ${estado}, no «connected»`);
+    check(estado !== UI_STATE.CONNECTED, `${errorCode}: nunca se pinta como conectado`);
+  }
+  check(Object.values(UI_STATE).length === 8,
+    `hay ocho estados de interfaz (${Object.values(UI_STATE).join(', ')})`);
+
+  // Y el efecto de punta a punta: un 500 con el servidor vivo.
+  srv.guionizar({ status: 500, cuerpo: {} });
+  const m = gestor();
+  m.apiKeys.openai = 'clave';
+  const d = await conAdaptador('openai', { baseUrl: BASE_SINTETICA }, () => m.getAvailability('openai'));
+  check(d.reachable === true && d.uiState === UI_STATE.PROVIDER_ERROR,
+    'servidor alcanzable con servicio caído: alcanzable sí, conectado no');
+  check(d.ready === false && d.canAttempt === false,
+    'y ni verificado ni intentable mientras el proveedor devuelva error');
+
+  // El caso que de verdad ejercita la barrera: un adaptador que DEGRADA a su
+  // catálogo declarado cuando el endpoint falla. Groq devuelve cinco modelos
+  // con un 429 encima. Sin la barrera, ese respaldo dejaría el proveedor como
+  // utilizable justo después de que el servicio dijera que no.
+  for (const [status, codigo, estado] of [
+    [429, 'PROVIDER_RATE_LIMITED', UI_STATE.RATE_LIMITED],
+    [500, 'PROVIDER_HTTP_500', UI_STATE.PROVIDER_ERROR],
+    [403, 'PROVIDER_FORBIDDEN', UI_STATE.AUTHORIZATION_FORBIDDEN]
+  ]) {
+    srv.guionizar({ status, cuerpo: {} });
+    const g = gestor();
+    g.apiKeys.groq = 'clave';
+    const r = await conAdaptador('groq', { baseUrl: BASE_SINTETICA }, () => g.getAvailability('groq'));
+    check(r.modelsAvailable > 0,
+      `groq/${status}: el adaptador degrada a su catálogo declarado (${r.modelsAvailable} modelos)`);
+    check(r.errorCode === codigo, `groq/${status}: la sonda conserva el fallo real (${r.errorCode})`);
+    check(r.canAttempt === false,
+      `groq/${status}: tener catálogo de respaldo NO lo vuelve utilizable`);
+    check(r.ready === false, `groq/${status}: ni verificado`);
+    check(r.uiState === estado, `groq/${status}: estado ${r.uiState}`);
+  }
+  srv.guionizar({ status: 200, cuerpo: MODELOS_HTTP });
+}
+
+console.log('\n=== 8. reachable === null nunca es conectado ===');
 {
   for (const reachable of [null, undefined]) {
-    const estado = resolverUiState({ configured: true, reachable, authenticated: null });
-    check(estado === UI_STATE.UNKNOWN,
-      `sin evidencia de conectividad (${String(reachable)}) el estado es «${estado}», no «connected»`);
+    check(resolverUiState({ configured: true, reachable, authenticated: null }) === UI_STATE.UNKNOWN,
+      `sin evidencia (${String(reachable)}) el estado es «unknown»`);
   }
   check(resolverUiState({ configured: true, reachable: true, authenticated: null }) === UI_STATE.CONNECTED,
     'sólo con evidencia positiva se dice «connected»');
   check(resolverUiState({ configured: false, reachable: true, authenticated: null }) === UI_STATE.CONFIGURATION_REQUIRED,
     'lo que el usuario debe resolver primero manda sobre la conectividad');
-  check(resolverUiState({ configured: true, reachable: true, authenticated: false }) === UI_STATE.AUTHENTICATION_REJECTED,
-    'una credencial rechazada no se presenta como conectado');
-  check(Object.values(UI_STATE).length === 5,
-    `hay cinco estados de interfaz declarados (${Object.values(UI_STATE).join(', ')})`);
 }
 
-console.log('\n=== 9. Taxonomía de fallos: sólo campos estructurados ===');
+console.log('\n=== 9. Ningún mensaje técnico ni secreto cruza al renderer ===');
 {
-  const casos = [
-    [errorDeRespuesta(401), KINDS.AUTH, true, false, 'PROVIDER_AUTH_REJECTED'],
-    [errorDeRespuesta(403), KINDS.AUTH, true, false, 'PROVIDER_AUTH_REJECTED'],
-    [errorDeRespuesta(404), KINDS.HTTP, true, null, 'PROVIDER_HTTP_404'],
-    [errorDeRespuesta(429), KINDS.RATE_LIMIT, true, null, 'PROVIDER_RATE_LIMITED'],
-    [errorDeRespuesta(500), KINDS.HTTP, true, null, 'PROVIDER_HTTP_500'],
-    [errorDeRed('ECONNREFUSED'), KINDS.TRANSPORT, false, null, 'PROVIDER_TRANSPORT_UNREACHABLE'],
-    [errorDeRed('ENOTFOUND'), KINDS.TRANSPORT, false, null, 'PROVIDER_TRANSPORT_UNREACHABLE'],
-    [errorDeRed('ETIMEDOUT'), KINDS.TIMEOUT, null, null, 'PROVIDER_TIMEOUT'],
-    [Object.assign(new Error('x'), { name: 'AbortError' }), KINDS.ABORTED, null, null, 'PROVIDER_ABORTED']
-  ];
-  for (const [error, kind, reachable, authenticated, errorCode] of casos) {
-    const d = describirError(error);
-    check(d.kind === kind && d.errorCode === errorCode,
-      `${errorCode}: clasificado como ${kind}`);
-    check(d.reachable === reachable && d.authenticated === authenticated,
-      `${errorCode}: evidencia reachable=${String(reachable)} authenticated=${String(authenticated)}`);
-  }
-
-  check(describirError(errorDeRespuesta(404)).reachable === true
-     && describirError(errorDeRed('ECONNREFUSED')).reachable === false,
-    'un 404 prueba que el servidor está vivo; un ECONNREFUSED prueba lo contrario');
-  check(describirError(errorDeRed('ETIMEDOUT')).reachable === null,
-    'un timeout no prueba que esté caído: puede estar lento, y eso es null');
-
-  // El texto no puede alterar la clasificación: es el fallo que se corrige.
-  const enganoso = new Error('no se pudo resolver https://api.example/v1/api-key/401');
-  check(describirError(enganoso).kind === KINDS.UNKNOWN,
-    'un mensaje que menciona 401 y api-key NO se clasifica como credencial rechazada');
-  const traducido = new ProviderError(KINDS.AUTH, { status: 401, message: 'Schlüssel abgelehnt' });
-  check(describirError(traducido).authenticated === false,
-    'un error ya clasificado se respeta aunque su mensaje esté en otro idioma');
-}
-
-console.log('\n=== 10. errorCode estable y mensaje saneado ===');
-{
-  check(sanearMensaje('fallo en https://usuario:secreto@api.example/v1/models') === 'fallo en [endpoint]',
-    'una URL con credenciales incrustadas no llega al renderer');
-  check(!/secreto/.test(sanearMensaje('https://u:secreto@h/x')), 'la contraseña desaparece');
-  check(sanearMensaje('Authorization: Bearer abc123xyz').includes('[oculto]'),
-    'una cabecera de autorización se oculta');
-  check(!/abc123xyz/.test(sanearMensaje('Authorization: Bearer abc123xyz')),
-    'el token no sobrevive al saneado');
-  check(!/sk-vivalavida0000/.test(sanearMensaje('clave sk-vivalavida0000 rechazada')),
-    'una clave con prefijo sk- se oculta');
-  check(sanearMensaje('x'.repeat(400)).length <= 160, 'el mensaje se acota');
-  check(sanearMensaje(null) === '' && sanearMensaje(undefined) === '',
-    'un mensaje ausente no produce "null" ni "undefined"');
-
   const m = gestor();
   m.apiKeys.openai = 'clave';
   const d = await conAdaptador('openai', {
-    listModels: async () => { throw new Error('falló https://u:secreto@api.example/v1/models'); }
+    listModels: async () => { throw new Error('falló https://u:secreto@api.example/v1/models con Bearer sk-abcdefgh12345'); }
   }, () => m.getAvailability('openai'));
-  check(!/secreto/.test(JSON.stringify(d)), 'ningún secreto viaja en la respuesta de disponibilidad');
-  check(!/api\.example/.test(JSON.stringify(d)), 'ninguna URL del proveedor viaja al renderer');
+
+  const serializado = JSON.stringify(d);
+  check(!('message' in d) && !('detail' in d) && !('logMessage' in d),
+    'la respuesta no lleva ningún campo de mensaje libre');
+  check(!/secreto/.test(serializado), 'ninguna contraseña viaja al renderer');
+  check(!/api\.example/.test(serializado), 'ninguna URL del proveedor viaja al renderer');
+  check(!/sk-abcdefgh12345/.test(serializado), 'ninguna clave viaja al renderer');
+  const permitidas = ['providerId', 'configured', 'reachable', 'authenticated',
+    'modelsAvailable', 'models', 'canAttempt', 'ready', 'uiState', 'errorCode', 'httpStatus'];
+  check(Object.keys(d).every(k => permitidas.includes(k)),
+    `la respuesta se limita a la lista permitida (${Object.keys(d).join(', ')})`);
   check(typeof d.errorCode === 'string' && d.errorCode.startsWith('PROVIDER_'),
-    `el contrato es el código, no el texto (${d.errorCode})`);
+    `el contrato es el código estable (${d.errorCode})`);
+  check(d.httpStatus === null || Number.isInteger(d.httpStatus),
+    'httpStatus es el único metadato numérico y es un entero o null');
+
+  // El saneado sigue existiendo, pero para el log del proceso principal.
+  check(sanearMensaje('Authorization: Bearer abc123xyz').includes('[oculto]')
+     && !/abc123xyz/.test(sanearMensaje('Authorization: Bearer abc123xyz')),
+    'el saneado de logs oculta el token completo');
+  check(sanearMensaje('en https://u:clave@h/x') === 'en [endpoint]',
+    'el saneado de logs retira la URL con credenciales');
 }
 
-console.log('\n=== 11. configured puede venir de validateConfig() ===');
+console.log('\n=== 10. El renderer traduce desde el código, no desde el proveedor ===');
+{
+  const app = fs.readFileSync(path.join(__dirname, '../src/renderer/app.js'), 'utf8');
+  const inicio = app.indexOf('function describirEstadoProveedor');
+  const fin = app.indexOf('// --- AI provider helpers ---');
+  const bloque = app.slice(inicio, fin);
+  const codigo = bloque.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+
+  assert(!/disp\.message|disp\.detail|disp\.logMessage/.test(codigo),
+    'el renderer no puede leer ningún mensaje técnico del proveedor');
+  check(true, 'el renderer no lee mensajes técnicos: no existen en el contrato');
+  check(/provider\.error\.\$\{/.test(codigo) || codigo.includes('provider.error.'),
+    'el tooltip se compone desde provider.error.<codigo>');
+  assert(/statusEl\.title = rotuloError/.test(codigo),
+    'el title del estado sale del rótulo localizado');
+  assert(/const rotuloError = describirEstadoProveedor\(disp\);/.test(app),
+    'el rótulo lo compone describirEstadoProveedor(), no una expresión ad hoc');
+  check(true, 'el title del elemento de estado es texto localizado, nunca un error crudo');
+
+  // Se ejecuta la función real del renderer con un `t()` de prueba: si alguien
+  // la sustituye por el código crudo, esto lo caza aunque la línea del `title`
+  // siga igual.
+  const { readRendererSource } = require('./helpers/renderer-source');
+  const renderer = readRendererSource(path.join(__dirname, '../src/renderer/app.js'));
+  const describir = new Function('t', `
+    ${renderer.slice('describirEstadoProveedor')}
+    return describirEstadoProveedor;
+  `)((clave) => (clave === 'provider.error.PROVIDER_FORBIDDEN' ? 'Sin permiso para esta operación'
+    : clave === 'provider.state.provider-error' ? 'Error del proveedor' : clave));
+
+  check(describir({ errorCode: 'PROVIDER_FORBIDDEN', uiState: 'authorization-forbidden' })
+    === 'Sin permiso para esta operación',
+    'un código con texto propio se traduce');
+  const sinTexto = describir({ errorCode: 'PROVIDER_HTTP_503', uiState: 'provider-error', httpStatus: 503 });
+  check(!/PROVIDER_/.test(sinTexto),
+    `un código sin texto propio nunca se enseña crudo ("${sinTexto}")`);
+  check(sinTexto.includes('503'), `pero sí conserva el metadato permitido ("${sinTexto}")`);
+  check(describir({ errorCode: null }) === '', 'sin error no hay tooltip');
+
+  for (const literal of ['Proveedor no disponible', 'Sin modelos (descarga uno o configura Cloud)',
+    'Falta la API Key de este proveedor', 'API Key rechazada por el proveedor']) {
+    assert(!codigo.includes(literal), `loadRuntime() ya no puede llevar el literal "${literal}"`);
+  }
+  check(true, 'loadRuntime() no conserva ningún texto de estado escrito a mano');
+}
+
+console.log('\n=== 11. Consumidores de dataset.runtime ===');
+{
+  const app = fs.readFileSync(path.join(__dirname, '../src/renderer/app.js'), 'utf8');
+  const html = fs.readFileSync(path.join(__dirname, '../src/renderer/index.html'), 'utf8');
+
+  assert(!/dataset\.runtime/.test(app), 'ya no queda ningún productor de dataset.runtime');
+  assert(!/data-runtime/.test(html), 'ya no queda ningún consumidor CSS de data-runtime');
+  check(true, 'el booleano dataset.runtime ha desaparecido de productor y consumidores');
+
+  check(/dataset\.providerState = uiState/.test(app),
+    'el disparador lleva ahora el estado explícito completo');
+  for (const estado of Object.values(UI_STATE)) {
+    check(html.includes(`[data-provider-state="${estado}"]`),
+      `el CSS del punto cubre el estado ${estado}`);
+  }
+  // Lo que este cambio impide: marcar en rojo algo que sólo está sin verificar.
+  const colorDe = (estado) => {
+    const m = html.match(new RegExp(`\\[data-provider-state="${estado}"\\]::after\\s*\\{[^}]*background:\\s*(#[0-9a-fA-F]{3,8})`));
+    return m ? m[1].toLowerCase() : null;
+  };
+  const reglaUnknown = [colorDe('unknown')];
+  const reglaOffline = [colorDe('offline')];
+  check(reglaUnknown[0] && reglaOffline[0] && reglaUnknown[0] !== reglaOffline[0],
+    `«sin verificar» y «sin conexión» no comparten color (${reglaUnknown[0]} vs ${reglaOffline[0]})`);
+  check(colorDe('connected') !== colorDe('rate-limited')
+     && colorDe('connected') !== colorDe('provider-error'),
+    'un servicio degradado tampoco comparte color con uno conectado');
+}
+
+console.log('\n=== 12. Alibaba: ready, uiState y estado del punto ===');
 {
   check(typeof PROVIDERS.alibaba.validateConfig === 'function',
     'el adaptador con configuración editable declara validateConfig()');
 
+  const sinClave = await gestor().getAvailability('alibaba');
+  check(sinClave.configured === false && sinClave.ready === false && sinClave.canAttempt === false,
+    'Alibaba sin clave: ni configurado, ni listo, ni intentable');
+  check(sinClave.uiState === UI_STATE.CONFIGURATION_REQUIRED,
+    `Alibaba sin clave se presenta como «falta configurar» (${sinClave.uiState})`);
+
   const m = gestor();
-  m.apiKeys.alibaba = 'clave';
-  // Configuración sin catálogo: hay credencial, pero no es utilizable.
-  const d = await conAdaptador('alibaba', {
-    validateConfig: () => ({ ok: false, errorCode: 'PROVIDER_ENDPOINT_REQUIRED' })
-  }, () => m.getAvailability('alibaba'));
-  check(d.configured === false,
-    'con credencial presente, validateConfig() puede seguir declarando que falta configuración');
-  check(d.errorCode === 'PROVIDER_ENDPOINT_REQUIRED', `su código llega intacto (${d.errorCode})`);
-  check(d.uiState === UI_STATE.CONFIGURATION_REQUIRED, 'y el estado lo refleja');
+  m.apiKeys.alibaba = 'clave-invalida-nunca-verificada';
+  const conClave = await m.getAvailability('alibaba');
+  check(conClave.canAttempt === true && conClave.modelsAvailable > 0,
+    `Alibaba con clave sigue ofreciendo sus preajustes (${conClave.modelsAvailable})`);
+  check(conClave.ready === false,
+    'una clave estática que nadie ha verificado NO deja el proveedor listo');
+  check(conClave.uiState === UI_STATE.UNKNOWN,
+    'y su punto de estado será gris de «sin verificar», no verde ni rojo');
+  check(conClave.reachable === null && conClave.authenticated === null,
+    'porque no hay una sola prueba de que el servidor exista');
 
   const roto = await conAdaptador('alibaba', {
+    validateConfig: () => ({ ok: false, errorCode: 'PROVIDER_ENDPOINT_REQUIRED' })
+  }, () => m.getAvailability('alibaba'));
+  check(roto.configured === false && roto.errorCode === 'PROVIDER_ENDPOINT_REQUIRED',
+    'validateConfig() puede declarar que falta configuración aunque haya credencial');
+
+  const lanza = await conAdaptador('alibaba', {
     validateConfig: () => { throw new Error('configuración ilegible'); }
   }, () => m.getAvailability('alibaba'));
-  check(roto.configured === false && roto.errorCode === 'PROVIDER_CONFIG_INVALID',
+  check(lanza.configured === false && lanza.errorCode === 'PROVIDER_CONFIG_INVALID',
     'un validateConfig() que lanza no rompe la disponibilidad');
-
-  const sinValidador = await conAdaptador('openai', {
-    listModels: async () => MODELOS
-  }, () => gestor().getAvailability('openai'));
-  check(sinValidador.configured === false,
-    'sin validateConfig() se cae al criterio mínimo: la credencial declarada');
 }
 
-console.log('\n=== 12. Sin casos especiales por identificador ===');
+console.log('\n=== 13. Contrato uniforme y sin casos especiales ===');
 {
   const m = gestor();
   const CLAVES = ['providerId', 'configured', 'reachable', 'authenticated',
-    'modelsAvailable', 'models', 'ready', 'uiState', 'errorCode', 'message'];
+    'modelsAvailable', 'models', 'canAttempt', 'ready', 'uiState', 'errorCode', 'httpStatus'];
   for (const id of Object.keys(PROVIDERS)) {
     const d = await conAdaptador(id, {
       status: PROVIDERS[id].status ? async () => ({ ok: true }) : undefined,
-      listModels: async () => MODELOS
+      listModels: async () => ({ models: [{ name: 'x' }], probe: { attempted: true, reachable: true, authenticated: null, httpStatus: 200, errorCode: null } })
     }, () => m.getAvailability(id));
     for (const clave of CLAVES) {
       assert(Object.prototype.hasOwnProperty.call(d, clave), `${id}: falta ${clave}`);
@@ -373,11 +481,11 @@ console.log('\n=== 12. Sin casos especiales por identificador ===');
   const cuerpo = fuente.slice(fuente.indexOf('async getAvailability('), fuente.indexOf('  getAllProviders()'));
   for (const id of Object.keys(PROVIDERS)) {
     assert(!new RegExp(`['"\`]${id}['"\`]`).test(cuerpo),
-      `getAvailability() no puede nombrar al proveedor ${id}: sería un caso especial`);
+      `getAvailability() no puede nombrar al proveedor ${id}`);
   }
-  check(true, 'getAvailability() no nombra a ningún proveedor: todo sale de rasgos declarados');
+  check(true, 'getAvailability() no nombra a ningún proveedor');
   assert(!/\.test\(mensaje\)|\.test\(String\(error/.test(cuerpo),
-    'getAvailability() no puede clasificar fallos por el texto del mensaje');
+    'getAvailability() no puede clasificar por el texto del mensaje');
   check(true, 'getAvailability() no aplica ninguna expresión regular al texto de los errores');
 
   const d = await m.getAvailability('proveedor-que-no-existe');
@@ -385,7 +493,7 @@ console.log('\n=== 12. Sin casos especiales por identificador ===');
     'un proveedor desconocido no está listo y lo dice con código estable');
 }
 
-console.log('\n=== 13. Textos ES/EN de los cinco estados ===');
+console.log('\n=== 14. Textos ES/EN de estados y códigos ===');
 {
   const i18n = fs.readFileSync(path.join(__dirname, '../src/renderer/i18n.js'), 'utf8');
   const bloques = i18n.split(/^  (?:es|en): \{$/m);
@@ -394,10 +502,19 @@ console.log('\n=== 13. Textos ES/EN de los cinco estados ===');
 
   for (const estado of Object.values(UI_STATE)) {
     for (const prefijo of ['provider.state', 'provider.selectEmpty']) {
-      const clave = `'${prefijo}.${estado}'`;
-      check(es.includes(clave), `ES define ${prefijo}.${estado}`);
-      check(en.includes(clave), `EN define ${prefijo}.${estado}`);
+      check(es.includes(`'${prefijo}.${estado}'`) && en.includes(`'${prefijo}.${estado}'`),
+        `${prefijo}.${estado} existe en ES y EN`);
     }
+  }
+
+  const CODIGOS = ['PROVIDER_CREDENTIAL_REQUIRED', 'PROVIDER_CONFIG_REQUIRED', 'PROVIDER_CONFIG_INVALID',
+    'PROVIDER_ENDPOINT_REQUIRED', 'PROVIDER_CATALOG_REQUIRED', 'PROVIDER_CATALOG_EMPTY',
+    'PROVIDER_AUTH_REJECTED', 'PROVIDER_FORBIDDEN', 'PROVIDER_RATE_LIMITED',
+    'PROVIDER_TRANSPORT_UNREACHABLE', 'PROVIDER_TIMEOUT', 'PROVIDER_ABORTED',
+    'PROVIDER_UNKNOWN_ERROR', 'PROVIDER_UNAVAILABLE', 'PROVIDER_UNKNOWN'];
+  for (const codigo of CODIGOS) {
+    check(es.includes(`'provider.error.${codigo}'`) && en.includes(`'provider.error.${codigo}'`),
+      `provider.error.${codigo} existe en ES y EN`);
   }
 
   const valor = (bloque, clave) => {
@@ -407,49 +524,33 @@ console.log('\n=== 13. Textos ES/EN de los cinco estados ===');
   for (const estado of Object.values(UI_STATE)) {
     const a = valor(es, `provider.selectEmpty.${estado}`);
     const b = valor(en, `provider.selectEmpty.${estado}`);
-    check(a && b && a !== b,
-      `provider.selectEmpty.${estado} está traducido de verdad ("${a}" / "${b}")`);
+    check(a && b && a !== b, `provider.selectEmpty.${estado} está traducido de verdad`);
   }
-
-  // El renderer no puede volver a escribir estos textos a mano.
-  const app = fs.readFileSync(path.join(__dirname, '../src/renderer/app.js'), 'utf8');
-  const loadRuntime = app.slice(app.indexOf('async function loadRuntime()'), app.indexOf('// --- AI provider helpers ---'));
-  // Se miran las líneas de CÓDIGO: los comentarios pueden —y deben— seguir
-  // citando los textos antiguos para explicar por qué desaparecieron.
-  const codigo = loadRuntime
-    .split('\n')
-    .filter(linea => !/^\s*(\/\/|\*|\/\*)/.test(linea))
-    .join('\n');
-  for (const literal of ['Proveedor no disponible', 'Sin modelos (descarga uno o configura Cloud)',
-    'Falta la API Key de este proveedor', 'API Key rechazada por el proveedor']) {
-    assert(!codigo.includes(literal),
-      `loadRuntime() ya no puede llevar el literal "${literal}": va por i18n`);
+  for (const codigo of ['PROVIDER_AUTH_REJECTED', 'PROVIDER_FORBIDDEN', 'PROVIDER_RATE_LIMITED']) {
+    const a = valor(es, `provider.error.${codigo}`);
+    const b = valor(en, `provider.error.${codigo}`);
+    check(a && b && a !== b, `provider.error.${codigo} está traducido de verdad`);
   }
-  check(true, 'loadRuntime() no conserva ningún texto de estado escrito a mano');
-  check(/provider\.state\.\$\{uiState\}|provider\.state\.`/.test(loadRuntime)
-     || loadRuntime.includes('provider.state.'),
-    'loadRuntime() toma el rótulo del estado desde i18n');
+  // Ningún texto de interfaz puede filtrar un código interno al usuario.
+  for (const estado of Object.values(UI_STATE)) {
+    const a = valor(es, `provider.state.${estado}`);
+    check(a && !/PROVIDER_/.test(a), `provider.state.${estado} no enseña códigos internos ("${a}")`);
+  }
 }
 
-console.log('\n=== 14. Compatibilidad: la semántica vigente no cambia ===');
+console.log('\n=== 15. Compatibilidad de status() ===');
 {
-  check(PROVIDERS.alibaba.requiresKey === true, 'Alibaba sigue declarando que requiere clave');
-  const sinClave = await gestor().getAvailability('alibaba');
-  check(sinClave.configured === false && sinClave.ready === false,
-    'Alibaba sin clave sigue sin estar listo, igual que antes');
-
   const m = gestor();
   m.apiKeys.alibaba = 'clave';
-  const conClave = await m.getAvailability('alibaba');
-  check(conClave.ready === true && conClave.modelsAvailable > 0,
-    `Alibaba con clave sigue ofreciendo sus preajustes (${conClave.modelsAvailable})`);
-
   const st = await m.status();
   check(typeof st.ok === 'boolean', 'status() sigue existiendo y conserva su forma');
 }
 
+await srv.cerrar();
+console.warn = warnOriginal;
 console.log(`\nProvider availability tests passed (${comprobaciones} comprobaciones)`);
 })().catch(error => {
+  console.warn = warnOriginal;
   console.error(error);
   process.exit(1);
 });

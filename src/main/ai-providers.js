@@ -2,7 +2,10 @@
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
-const { describirError, sanearMensaje, errorDeRespuesta, ProviderError } = require('./provider-errors');
+const {
+  describirError, sanearMensaje, errorDeRespuesta, ProviderError,
+  probeDeError, probeDeExito, probeNoIntentada
+} = require('./provider-errors');
 const {
   getProviderContract,
   resolveVisionSupport,
@@ -1230,40 +1233,106 @@ async function probeOllamaVision(modelName) {
 }
 
 /**
- * Cómo debe presentarse un proveedor. Son cinco y no dos porque «no conectado»
- * agrupaba situaciones que exigen respuestas distintas del usuario: poner una
- * clave, corregirla, o esperar a que el servidor vuelva.
+ * Códigos que impiden usar el proveedor aunque haya catálogo. Un 403, un 429 o
+ * un 500 pueden llegar junto al respaldo declarado del adaptador: sin esta
+ * comprobación, ese respaldo dejaría el proveedor como utilizable pese a que
+ * el servicio acaba de decir que no.
+ */
+const ERRORES_QUE_IMPIDEN_USO = new Set([
+  'PROVIDER_AUTH_REJECTED',
+  'PROVIDER_FORBIDDEN',
+  'PROVIDER_RATE_LIMITED',
+  'PROVIDER_TRANSPORT_UNREACHABLE',
+  'PROVIDER_UNKNOWN_ERROR'
+]);
+
+/**
+ * Cualquier error HTTP del proveedor cuenta, no sólo los enumerados: la
+ * familia `PROVIDER_HTTP_*` es abierta por definición —un 502, un 503— y
+ * dejarla fuera permitía que un 500 con catálogo de respaldo pasara por
+ * utilizable. Lo detectó la prueba de groq degradando con un 500 encima.
+ */
+function impideUso(errorCode) {
+  if (!errorCode) return false;
+  return ERRORES_QUE_IMPIDEN_USO.has(errorCode) || errorCode.startsWith('PROVIDER_HTTP_');
+}
+
+/**
+ * Log del proceso principal. El detalle saneado se queda aquí: al renderer
+ * sólo cruzan `errorCode` y `httpStatus`, nunca el texto de un error.
+ */
+function registrarFalloDeProveedor(providerId, operacion, error) {
+  const d = describirError(error);
+  const detalle = d.logMessage ? ` — ${d.logMessage}` : '';
+  console.warn(`[provider:${providerId}] ${operacion}: ${d.errorCode}${detalle}`);
+}
+
+/**
+ * Cómo debe presentarse un proveedor.
  *
- * `UNKNOWN` existe para no mentir. Un catálogo estático no prueba conectividad,
- * y presentar esa ausencia de evidencia como «Conectado» es justo lo que se
- * está corrigiendo.
+ * Ocho estados y no dos porque «alcanzable» y «utilizable» son cosas
+ * distintas, y agruparlas obligaba a mentir. Un 404, un 429 y un 500 prueban
+ * que hay alguien al otro lado y ninguno de los tres significa que el
+ * proveedor funcione: pintarlos en verde como «Conectado» afirmaba algo falso.
+ * Un 401 y un 403 tampoco son lo mismo: el primero dice que la credencial no
+ * vale, el segundo que el servidor la reconoce y no autoriza la operación.
+ *
+ * `UNKNOWN` existe para no afirmar sin prueba: es lo que queda cuando nadie ha
+ * hablado con el servidor todavía.
  */
 const UI_STATE = Object.freeze({
   CONNECTED: 'connected',
   OFFLINE: 'offline',
   UNKNOWN: 'unknown',
   CONFIGURATION_REQUIRED: 'configuration-required',
-  AUTHENTICATION_REJECTED: 'authentication-rejected'
+  AUTHENTICATION_REJECTED: 'authentication-rejected',
+  AUTHORIZATION_FORBIDDEN: 'authorization-forbidden',
+  RATE_LIMITED: 'rate-limited',
+  PROVIDER_ERROR: 'provider-error'
 });
 
-/** Prioridad: lo que el usuario debe resolver primero manda sobre lo demás. */
-function resolverUiState({ configured, reachable, authenticated }) {
+/**
+ * Qué estado corresponde a cada código de fallo. Sólo los códigos listados
+ * tienen estado propio; el resto cae al genérico de la evidencia.
+ */
+const ESTADO_POR_ERROR = Object.freeze({
+  PROVIDER_AUTH_REJECTED: UI_STATE.AUTHENTICATION_REJECTED,
+  PROVIDER_FORBIDDEN: UI_STATE.AUTHORIZATION_FORBIDDEN,
+  PROVIDER_RATE_LIMITED: UI_STATE.RATE_LIMITED,
+  PROVIDER_TRANSPORT_UNREACHABLE: UI_STATE.OFFLINE,
+  PROVIDER_TIMEOUT: UI_STATE.UNKNOWN,
+  PROVIDER_ABORTED: UI_STATE.UNKNOWN
+});
+
+/**
+ * Prioridad: lo que el usuario debe resolver primero manda. Primero lo que
+ * depende de él —configurar, corregir la clave—, después lo que depende del
+ * proveedor, y sólo al final la conectividad genérica.
+ */
+function resolverUiState({ configured, reachable, authenticated, errorCode } = {}) {
   if (!configured) return UI_STATE.CONFIGURATION_REQUIRED;
   if (authenticated === false) return UI_STATE.AUTHENTICATION_REJECTED;
+
+  if (errorCode) {
+    const propio = ESTADO_POR_ERROR[errorCode];
+    if (propio) return propio;
+    // Un error del proveedor con el servidor vivo: 404, 500, respuesta
+    // ilegible. Alcanzable, pero el servicio no está sirviendo.
+    if (errorCode.startsWith('PROVIDER_HTTP_') || errorCode === 'PROVIDER_UNKNOWN_ERROR') {
+      return UI_STATE.PROVIDER_ERROR;
+    }
+  }
+
   if (reachable === false) return UI_STATE.OFFLINE;
   if (reachable === true) return UI_STATE.CONNECTED;
   return UI_STATE.UNKNOWN;
 }
-
 const PROVIDERS = {
   // MODO LOCAL - 100% Privado (delegado a ollama.js robusto)
   local: {
     name: 'Ollama (Local)',
     privacy: 'private',
     requiresKey: false,
-    // Si el catálogo sale de la red o de una lista declarada en el propio
-    // adaptador. Un catálogo estático no prueba nada sobre conectividad.
-    catalogSource: 'network',
     visualCapabilities: {
       vision: true
     },
@@ -1340,10 +1409,12 @@ const PROVIDERS = {
           models.push(entry);
         }
 
-        return { models };
+        // Ollama contestó: eso es evidencia de conectividad. No pide
+        // credencial, así que `authenticated` se queda en null.
+        return { models, probe: probeDeExito({ authenticated: null }) };
       } catch (e) {
-        console.warn('Ollama no disponible:', e.message || e);
-        return { models: [] };
+        console.warn('Ollama no disponible:', sanearMensaje(e && e.message));
+        return { models: [], probe: probeDeError(e) };
       }
     },
     
@@ -1357,9 +1428,6 @@ const PROVIDERS = {
     name: 'OpenAI (Cloud)',
     privacy: 'cloud',
     requiresKey: true,
-    // Si el catálogo sale de la red o de una lista declarada en el propio
-    // adaptador. Un catálogo estático no prueba nada sobre conectividad.
-    catalogSource: 'network',
     baseUrl: 'https://api.openai.com/v1',
     timeout: 120000, // 2 minutes
     
@@ -1418,24 +1486,42 @@ const PROVIDERS = {
       }
     },
 
+    // Devuelve `{ models, probe }`. La sonda es la ÚNICA fuente de evidencia
+    // sobre conectividad y credencial: nadie la deduce del tamaño del catálogo.
+    // Un 200 con lista vacía prueba que el servidor respondió y aceptó la
+    // clave, y aun así no deja nada utilizable.
     async listModels(apiKey) {
-      if (!apiKey) return { models: [] };
-      const res = await fetch(`${this.baseUrl}/models`, {
-        headers: { 'Authorization': `Bearer ${apiKey}` }
-      });
-      // Estructurado, no texto: un 401 y un 500 exigen respuestas distintas y
-      // la diferencia no puede depender de cómo esté redactado el mensaje.
-      if (!res.ok) throw errorDeRespuesta(res.status, 'OpenAI no devolvió el catálogo');
-      const data = await res.json();
+      if (!apiKey) return { models: [], probe: probeNoIntentada() };
+      let res;
+      try {
+        res = await fetch(`${this.baseUrl}/models`, {
+          headers: { 'Authorization': `Bearer ${apiKey}` }
+        });
+      } catch (error) {
+        return { models: [], probe: probeDeError(error) };
+      }
+      if (!res.ok) {
+        return {
+          models: [],
+          probe: probeDeError(errorDeRespuesta(res.status, 'OpenAI no devolvió el catálogo'))
+        };
+      }
+      let data;
+      try {
+        data = await res.json();
+      } catch (error) {
+        return { models: [], probe: probeDeError(error) };
+      }
       return {
-        models: data.data
+        models: (data.data || [])
           .filter(m => m.id.includes('gpt'))
           .map(m => ({
             name: m.id,
             size: 0,
             digest: m.id,
             supportsVision: resolveVisionSupport({ providerId: 'openai', modelId: m.id }).supported
-          }))
+          })),
+        probe: probeDeExito({ httpStatus: res.status, authenticated: true })
       };
     }
   },
@@ -1445,9 +1531,6 @@ const PROVIDERS = {
     name: 'Anthropic Claude (Cloud)',
     privacy: 'cloud',
     requiresKey: true,
-    // Si el catálogo sale de la red o de una lista declarada en el propio
-    // adaptador. Un catálogo estático no prueba nada sobre conectividad.
-    catalogSource: 'static',
     baseUrl: 'https://api.anthropic.com/v1',
     timeout: 120000,
 
@@ -1563,7 +1646,10 @@ const PROVIDERS = {
         models: catalog.map(model => ({
           ...model,
           supportsVision: resolveVisionSupport({ providerId: 'anthropic', modelId: model.name }).supported
-        }))
+        })),
+        // Catálogo declarado en el propio adaptador: no se ha hablado con
+        // ningún servidor, así que no hay evidencia que aportar.
+        probe: probeNoIntentada()
       };
     }
   },
@@ -1573,9 +1659,6 @@ const PROVIDERS = {
     name: 'Groq (Cloud — Llama/Mistral)',
     privacy: 'cloud',
     requiresKey: true,
-    // Si el catálogo sale de la red o de una lista declarada en el propio
-    // adaptador. Un catálogo estático no prueba nada sobre conectividad.
-    catalogSource: 'static',
     baseUrl: 'https://api.groq.com/openai/v1',
     timeout: 30000,
 
@@ -1633,9 +1716,13 @@ const PROVIDERS = {
       }
     },
 
+    // Groq cae a una lista fija cuando su endpoint falla. Esa degradación es
+    // deliberada y se conserva, pero la sonda registra qué ocurrió de verdad:
+    // sin ella, un catálogo de respaldo era indistinguible de uno obtenido por
+    // red y se leía como prueba de que el servidor respondía.
     async listModels(apiKey) {
-      if (!apiKey) return { models: [] };
-      // Llamar al endpoint real de Groq para obtener modelos actualizados
+      if (!apiKey) return { models: [], probe: probeNoIntentada() };
+      let probe = probeNoIntentada();
       try {
         const res = await fetch(`${this.baseUrl}/models`, {
           headers: { 'Authorization': `Bearer ${apiKey}` }
@@ -1645,9 +1732,14 @@ const PROVIDERS = {
           const chatModels = (data.data || [])
             .filter(m => !m.id.includes('whisper') && !m.id.includes('tts'))
             .map(m => ({ name: m.id, size: 0, description: `Groq — ${m.id}` }));
-          if (chatModels.length > 0) return { models: chatModels };
+          probe = probeDeExito({ httpStatus: res.status, authenticated: true });
+          if (chatModels.length > 0) return { models: chatModels, probe };
+        } else {
+          probe = probeDeError(errorDeRespuesta(res.status, 'Groq'));
         }
-      } catch (_) {}
+      } catch (error) {
+        probe = probeDeError(error);
+      }
       // Fallback estático si el endpoint falla
       return {
         models: [
@@ -1656,7 +1748,8 @@ const PROVIDERS = {
           { name: 'mixtral-8x7b-32768', size: 0, description: 'Mixtral 8x7B — contexto 32k' },
           { name: 'gemma2-9b-it', size: 0, description: 'Gemma 2 9B — Google' },
           { name: 'deepseek-r1-distill-llama-70b', size: 0, description: 'DeepSeek-R1 70B — razonamiento' }
-        ]
+        ],
+        probe
       };
     }
   },
@@ -1666,9 +1759,6 @@ const PROVIDERS = {
     name: 'Moonshot AI (Kimi 2.5)',
     privacy: 'cloud',
     requiresKey: true,
-    // Si el catálogo sale de la red o de una lista declarada en el propio
-    // adaptador. Un catálogo estático no prueba nada sobre conectividad.
-    catalogSource: 'static',
     baseUrl: 'https://api.moonshot.cn/v1',
     timeout: 120000,
 
@@ -1738,7 +1828,9 @@ const PROVIDERS = {
           { name: 'moonshot-v1-32k', size: 0, description: 'Moonshot 32k — uso general' },
           { name: 'moonshot-v1-8k', size: 0, description: 'Moonshot 8k — rápido y económico' },
           { name: 'kimi-k2', size: 0, description: 'Kimi K2 — razonamiento avanzado (256k ctx)' }
-        ]
+        ],
+        // Catálogo declarado: sin intento de red, sin evidencia.
+        probe: probeNoIntentada()
       };
     }
   },
@@ -1747,9 +1839,6 @@ const PROVIDERS = {
     name: 'Alibaba Cloud Model Studio',
     privacy: 'cloud',
     requiresKey: true,
-    // Si el catálogo sale de la red o de una lista declarada en el propio
-    // adaptador. Un catálogo estático no prueba nada sobre conectividad.
-    catalogSource: 'static',
 
     /**
      * Alibaba es el único adaptador con configuración editable, así que estar
@@ -1848,7 +1937,9 @@ const PROVIDERS = {
           supportsVision: model.capabilities.vision === true,
           capabilities: model.capabilities,
           parameters: model.parameters
-        }))
+        })),
+        // El catálogo sale de la configuración del usuario, no de la red.
+        probe: probeNoIntentada()
       };
     },
 
@@ -1927,9 +2018,6 @@ const PROVIDERS = {
     name: 'llama.cpp (Local)',
     privacy: 'private',
     requiresKey: false,
-    // Si el catálogo sale de la red o de una lista declarada en el propio
-    // adaptador. Un catálogo estático no prueba nada sobre conectividad.
-    catalogSource: 'network',
     baseUrl: 'http://127.0.0.1:8080/v1',
     timeout: 300000, // 5 min — modelos grandes son lentos
 
@@ -1980,22 +2068,34 @@ const PROVIDERS = {
       }
     },
 
+    // El fallo se sigue capturando —la lista vacía es una respuesta válida—,
+    // pero ahora se conserva POR QUÉ está vacía. Antes se perdía y una caída
+    // de red era indistinguible de un servidor sin modelos cargados.
     async listModels() {
+      let res;
       try {
-        const res = await fetch(`${this.baseUrl}/models`, { signal: AbortSignal.timeout(3000) });
-        if (!res.ok) return { models: [] };
-        const data = await res.json();
-        return {
-          models: (data.data || []).map(m => ({
-            name: m.id,
-            size: 0,
-            digest: m.id,
-            description: `llama.cpp — ${m.id}`
-          }))
-        };
-      } catch (_) {
-        return { models: [] };
+        res = await fetch(`${this.baseUrl}/models`, { signal: AbortSignal.timeout(3000) });
+      } catch (error) {
+        return { models: [], probe: probeDeError(error) };
       }
+      if (!res.ok) {
+        return { models: [], probe: probeDeError(errorDeRespuesta(res.status, 'llama.cpp')) };
+      }
+      let data;
+      try {
+        data = await res.json();
+      } catch (error) {
+        return { models: [], probe: probeDeError(error) };
+      }
+      return {
+        models: (data.data || []).map(m => ({
+          name: m.id,
+          size: 0,
+          digest: m.id,
+          description: `llama.cpp — ${m.id}`
+        })),
+        probe: probeDeExito({ httpStatus: res.status })
+      };
     },
 
     async status() {
@@ -2434,61 +2534,50 @@ class AIProviderManager {
   }
 
   /**
-   * Disponibilidad de un proveedor, separada en estados que antes viajaban
-   * colapsados en un único `ok`.
+   * Disponibilidad de un proveedor, en estados que antes viajaban colapsados.
    *
-   *   configured       tiene lo que necesita para intentarlo
-   *   reachable        su endpoint contestó (null = sin evidencia)
+   *   configured       su configuración es utilizable
+   *   reachable        su endpoint contestó (null = nadie lo ha comprobado)
    *   authenticated    la credencial fue aceptada (null = sin evidencia)
-   *   modelsAvailable  cuántos modelos utilizables ofrece
-   *   ready            se puede usar ahora mismo
-   *   uiState          cómo debe presentarse: connected, offline, unknown,
-   *                    configuration-required o authentication-rejected
+   *   modelsAvailable  cuántos modelos ofrece
+   *   canAttempt       está configurado para intentarlo: hay con qué probar,
+   *                    pero NADIE ha verificado que funcione
+   *   ready            verificado utilizable: hay evidencia de que el servidor
+   *                    contestó, la credencial no fue rechazada y hay catálogo
+   *   uiState          cómo presentarlo, de un conjunto cerrado de ocho
+   *   errorCode        contrato estable; el renderer traduce a partir de él
+   *   httpStatus       único metadato numérico que cruza al renderer
    *
-   * Tres reglas gobiernan esto y conviene enunciarlas, porque la versión
-   * anterior violaba las tres:
+   * `canAttempt` y `ready` son distintos a propósito. Un catálogo declarado en
+   * el propio adaptador y una clave meramente presente permiten INTENTARLO,
+   * pero no prueban nada: el proveedor puede estar caído y la clave caducada,
+   * y sólo el primer envío lo dirá. Llamar «listo» a eso era afirmar una
+   * verificación que nunca ocurrió.
    *
-   * 1. `reachable` y `authenticated` sólo cambian con EVIDENCIA. Que
-   *    `listModels()` devuelva modelos no prueba nada si el catálogo es
-   *    estático: `anthropic`, `moonshot` y `alibaba` lo sirven desde una lista
-   *    declarada sin tocar la red. Sólo un adaptador con
-   *    `catalogSource: 'network'` aporta prueba de conectividad, y sólo aporta
-   *    prueba de autenticación si además declara `requiresKey`.
-   *
-   * 2. La ausencia de evidencia es `null`, no `true`. `null` nunca se presenta
-   *    como «Conectado»: tiene su propio estado, `unknown`.
-   *
-   * 3. `ready` y la conectividad son ejes distintos. Un proveedor con catálogo
-   *    estático y credencial puede estar listo con `reachable === null`: se
-   *    puede intentar usarlo, y sólo el primer envío dirá si el servidor
-   *    responde. Bloquearlo por falta de prueba sería inventar un fallo.
-   *
-   * Todo sale de rasgos DECLARADOS por cada adaptador —`requiresKey`,
-   * `catalogSource`, `validateConfig()` y la presencia de `status()`—, nunca de
-   * su identificador. Un adaptador nuevo obtiene el comportamiento correcto sin
-   * tocar esta función.
-   *
-   * `models` viaja en la respuesta para no repetir la consulta al catálogo.
-   * `errorCode` es el contrato estable; `message` es informativo y va saneado.
+   * La evidencia NO se deduce del tamaño del catálogo ni del tipo de
+   * adaptador. Viene de dos fuentes explícitas y de ninguna más: la sonda
+   * `status()` del adaptador, y el objeto `probe` que `listModels()` devuelve.
+   * Un 200 con catálogo vacío da `reachable: true`, `authenticated: true` y
+   * `modelsAvailable: 0`: el servidor respondió y aceptó la clave, y aun así
+   * no hay nada que usar.
    */
   async getAvailability(providerId = this.currentProvider) {
     const config = PROVIDERS[providerId];
     if (!config) {
       return {
         providerId, configured: false, reachable: null, authenticated: null,
-        modelsAvailable: 0, models: [], ready: false,
+        modelsAvailable: 0, models: [], canAttempt: false, ready: false,
         uiState: UI_STATE.CONFIGURATION_REQUIRED,
-        errorCode: 'PROVIDER_UNKNOWN', message: ''
+        errorCode: 'PROVIDER_UNKNOWN', httpStatus: null
       };
     }
 
     // `configured` puede venir del propio adaptador, que sabe si su
-    // configuración es utilizable —una URL base ausente, un endpoint mal
-    // formado—. Sin `validateConfig()` se cae al criterio mínimo: la credencial
-    // que el adaptador declare necesitar.
+    // configuración es utilizable. Sin `validateConfig()` se cae al criterio
+    // mínimo: la credencial que el adaptador declare necesitar.
     let configured;
     let errorCode = null;
-    let message = '';
+    let httpStatus = null;
     if (typeof config.validateConfig === 'function') {
       let veredicto;
       try {
@@ -2497,13 +2586,11 @@ class AIProviderManager {
           this.apiKeys[providerId]
         );
       } catch (error) {
-        veredicto = { ok: false, errorCode: 'PROVIDER_CONFIG_INVALID', message: error?.message };
+        registrarFalloDeProveedor(providerId, 'validateConfig', error);
+        veredicto = { ok: false, errorCode: 'PROVIDER_CONFIG_INVALID' };
       }
       configured = Boolean(veredicto && veredicto.ok);
-      if (!configured) {
-        errorCode = (veredicto && veredicto.errorCode) || 'PROVIDER_CONFIG_REQUIRED';
-        message = sanearMensaje(veredicto && veredicto.message);
-      }
+      if (!configured) errorCode = (veredicto && veredicto.errorCode) || 'PROVIDER_CONFIG_REQUIRED';
     } else {
       configured = !config.requiresKey || Boolean(this.apiKeys[providerId]);
       if (!configured) errorCode = 'PROVIDER_CREDENTIAL_REQUIRED';
@@ -2512,7 +2599,15 @@ class AIProviderManager {
     let reachable = null;
     let authenticated = null;
 
-    // La sonda del adaptador es evidencia directa de conectividad.
+    /** Incorpora una sonda. Una evidencia concreta sustituye a la ausencia. */
+    const incorporar = (probe) => {
+      if (!probe || probe.attempted !== true) return;
+      if (probe.reachable === true || probe.reachable === false) reachable = probe.reachable;
+      if (probe.authenticated === true || probe.authenticated === false) authenticated = probe.authenticated;
+      if (Number.isInteger(probe.httpStatus)) httpStatus = probe.httpStatus;
+      if (probe.errorCode && !errorCode) errorCode = probe.errorCode;
+    };
+
     if (typeof config.status === 'function') {
       let sonda;
       try {
@@ -2521,28 +2616,32 @@ class AIProviderManager {
         sonda = { ok: false, error };
       }
       if (sonda && sonda.ok) {
-        reachable = true;
+        incorporar(probeDeExito({ authenticated: null }));
       } else {
-        reachable = false;
-        const descrito = describirError(sonda && (sonda.error || sonda.message) || null);
-        errorCode = errorCode || (descrito.errorCode === 'PROVIDER_UNKNOWN_ERROR'
-          ? 'PROVIDER_TRANSPORT_UNREACHABLE'
-          : descrito.errorCode);
-        if (!message) message = descrito.message || sanearMensaje(sonda && (sonda.message || sonda.error));
+        const fallo = (sonda && (sonda.error || sonda.message)) || null;
+        registrarFalloDeProveedor(providerId, 'status', fallo);
+        const probe = probeDeError(fallo);
+        // Una sonda que falla sin código reconocible sigue significando que no
+        // se pudo hablar con el servidor: para eso está la sonda.
+        if (probe.reachable === null) probe.reachable = false;
+        if (!probe.errorCode || probe.errorCode === 'PROVIDER_UNKNOWN_ERROR') {
+          probe.errorCode = 'PROVIDER_TRANSPORT_UNREACHABLE';
+        }
+        incorporar(probe);
       }
     }
 
     const cerrar = (extra = {}) => {
       const base = {
         providerId, configured, reachable, authenticated,
-        modelsAvailable: 0, models: [], errorCode, message, ...extra
+        modelsAvailable: 0, models: [], errorCode, httpStatus, ...extra
       };
-      base.ready = Boolean(
-        base.configured
-        && base.reachable !== false
+      const sinRechazo = base.configured
         && base.authenticated !== false
         && base.modelsAvailable > 0
-      );
+        && !impideUso(base.errorCode);
+      base.canAttempt = Boolean(sinRechazo && base.reachable !== false);
+      base.ready = Boolean(sinRechazo && base.reachable === true);
       base.uiState = resolverUiState(base);
       return base;
     };
@@ -2559,24 +2658,13 @@ class AIProviderManager {
         this.providerConfigs[providerId]
       );
       models = Array.isArray(respuesta) ? respuesta : ((respuesta && respuesta.models) || []);
-
-      // Evidencia SÓLO si el catálogo vino de la red y trajo algo. Un catálogo
-      // estático se habría devuelto igual con el servidor apagado. Y varios
-      // adaptadores capturan el fallo de red y devuelven una lista vacía o un
-      // respaldo declarado —groq cae a una lista fija, local y llamacpp
-      // devuelven `{ models: [] }`—: ahí un resultado vacío es indistinguible
-      // de «el servidor no tiene modelos», así que no prueba conectividad.
-      if (config.catalogSource === 'network' && models.length > 0) {
-        reachable = true;
-        if (config.requiresKey) authenticated = true;
-      }
+      // Única vía de evidencia del catálogo: la sonda que el adaptador declara.
+      incorporar(respuesta && respuesta.probe);
     } catch (error) {
-      const descrito = describirError(error);
-      // La evidencia del fallo manda sobre la que hubiera antes: un 401 prueba
-      // que el servidor está vivo aunque la sonda no existiera.
-      if (descrito.reachable !== null) reachable = descrito.reachable;
-      if (descrito.authenticated !== null) authenticated = descrito.authenticated;
-      return cerrar({ errorCode: descrito.errorCode, message: descrito.message });
+      registrarFalloDeProveedor(providerId, 'listModels', error);
+      const probe = probeDeError(error);
+      incorporar(probe);
+      return cerrar({ errorCode: probe.errorCode || errorCode });
     }
 
     if (models.length === 0 && !errorCode) errorCode = 'PROVIDER_CATALOG_EMPTY';
