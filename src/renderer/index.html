@@ -28,7 +28,40 @@
             --glass-border: rgba(255, 255, 255, 0.08);
             --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
             --shadow-md: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-            
+
+            /* Tokens semánticos del shell (barra superior, aviso cloud, activo) */
+            --surface-header: #060B18;
+            --surface-elevated: #0A1124;
+            --text-secondary: #a9b4d0;
+            --active-surface: #16264F;
+            --active-indicator: #49C2F4;
+            --warning-surface: rgba(251, 146, 60, 0.10);
+            --warning-border: rgba(245, 192, 138, 0.55);
+            --warning-text: #F5C08A;
+            /* El acento general no llega a 3:1 sobre la barra clara: el anillo de
+               foco necesita su propio token para no depender de la marca. */
+            --focus-ring: #49C2F4;
+
+            /* Conversación y compositor. Mensajes y compositor se levantan sobre
+               el lienzo; los divisores dejan de ser líneas blancas. */
+            --conversation-max: 900px;
+            --surface-canvas: #04070F;
+            --surface-message: #0E1526;
+            --surface-composer: #101A2E;
+            --message-border: rgba(255, 255, 255, 0.11);
+            --divider-subtle: rgba(255, 255, 255, 0.10);
+            --composer-focus: #49C2F4;
+            --danger-surface: rgba(239, 68, 68, 0.14);
+            --danger-border: rgba(248, 113, 113, 0.5);
+            --danger-text: #FCA5A5;
+            /* Bloques de código: superficie hundida dentro de la escala azul,
+               no un gris aislado. */
+            --surface-code: #080E1C;
+            --surface-code-header: rgba(255, 255, 255, 0.05);
+            --code-text: #cbd5e1;
+            --code-meta: #A7B4C8;
+            --code-focus-ring: #49C2F4;
+
             /* Nuevos valores para mejor experiencia */
             --sidebar-width: 280px;
             --transition-speed: 0.3s;
@@ -48,6 +81,34 @@
             --light-accent: #0ea5e9;
             --light-accent-hover: #0284c7;
             --light-accent-glow: rgba(14, 165, 233, 0.25);
+
+            /* Tokens semánticos del shell en claro */
+            --light-surface-header: #f8fafc;
+            --light-surface-elevated: #ffffff;
+            --light-text-secondary: #475569;
+            --light-active-surface: #D6E4F5;
+            --light-active-indicator: #0369a1;
+            --light-warning-surface: rgba(234, 88, 12, 0.10);
+            --light-warning-border: rgba(194, 65, 12, 0.8);
+            --light-warning-text: #8A4B08;
+            --light-focus-ring: #0369a1;
+
+            /* Claro con valores propios: no es la inversión del oscuro. */
+            --light-surface-canvas: #f0f4f8;
+            --light-surface-message: #ffffff;
+            --light-surface-composer: #ffffff;
+            --light-message-border: rgba(15, 23, 42, 0.14);
+            --light-divider-subtle: rgba(15, 23, 42, 0.12);
+            --light-composer-focus: #0369a1;
+            --light-danger-surface: rgba(220, 38, 38, 0.10);
+            --light-danger-border: rgba(185, 28, 28, 0.55);
+            --light-danger-text: #991B1B;
+            /* El código sigue oscuro en tema claro, pero con tono propio. */
+            --light-surface-code: #1E2937;
+            --light-surface-code-header: rgba(255, 255, 255, 0.08);
+            --light-code-text: #e2e8f0;
+            --light-code-meta: #CBD5E1;
+            --light-code-focus-ring: #49C2F4;
         }
 
         .light-theme {
@@ -61,6 +122,29 @@
             --accent: var(--light-accent);
             --accent-hover: var(--light-accent-hover);
             --accent-glow: var(--light-accent-glow);
+            --surface-header: var(--light-surface-header);
+            --surface-elevated: var(--light-surface-elevated);
+            --text-secondary: var(--light-text-secondary);
+            --active-surface: var(--light-active-surface);
+            --active-indicator: var(--light-active-indicator);
+            --warning-surface: var(--light-warning-surface);
+            --warning-border: var(--light-warning-border);
+            --warning-text: var(--light-warning-text);
+            --focus-ring: var(--light-focus-ring);
+            --surface-canvas: var(--light-surface-canvas);
+            --surface-message: var(--light-surface-message);
+            --surface-composer: var(--light-surface-composer);
+            --message-border: var(--light-message-border);
+            --divider-subtle: var(--light-divider-subtle);
+            --composer-focus: var(--light-composer-focus);
+            --danger-surface: var(--light-danger-surface);
+            --danger-border: var(--light-danger-border);
+            --danger-text: var(--light-danger-text);
+            --surface-code: var(--light-surface-code);
+            --surface-code-header: var(--light-surface-code-header);
+            --code-text: var(--light-code-text);
+            --code-meta: var(--light-code-meta);
+            --code-focus-ring: var(--light-code-focus-ring);
         }
 
         * {
@@ -250,6 +334,46 @@
             overflow-y: auto;
             padding: var(--spacing-sm) 0;
             min-height: 0;
+            scrollbar-width: thin;
+            scrollbar-color: transparent transparent;
+            /* Reserva el canal siempre: sin esto la lista se desplaza a lo ancho
+               en cuanto aparece la barra. */
+            scrollbar-gutter: stable;
+        }
+
+        /* En reposo el pulgar es transparente; aparece al apuntar o al entrar el
+           foco. Sólo aquí: la conversación, los modales y los <pre> conservan la
+           barra global. */
+        .sidebar-content::-webkit-scrollbar-thumb {
+            background: transparent;
+            border-color: transparent;
+        }
+
+        .sidebar-content:hover,
+        .sidebar-content:focus-within {
+            scrollbar-color: var(--divider-subtle) transparent;
+        }
+
+        .sidebar-content:hover::-webkit-scrollbar-thumb,
+        .sidebar-content:focus-within::-webkit-scrollbar-thumb {
+            background: var(--border-subtle);
+            border-color: transparent;
+        }
+
+        .sidebar-content:hover::-webkit-scrollbar-thumb:hover {
+            background: var(--text-secondary);
+        }
+
+        /* Sin puntero o con colores forzados, la barra no puede desaparecer:
+           dejaría de haber señal de que la lista continúa. */
+        @media (hover: none) {
+            .sidebar-content::-webkit-scrollbar-thumb { background: var(--border-subtle); }
+            .sidebar-content { scrollbar-color: var(--border-subtle) transparent; }
+        }
+
+        @media (forced-colors: active) {
+            .sidebar-content::-webkit-scrollbar-thumb { background: ButtonBorder; }
+            .sidebar-content { scrollbar-color: auto; }
         }
 
         .item-list {
@@ -262,24 +386,52 @@
             padding: 10px var(--spacing-md);
             border-radius: 8px;
             cursor: pointer;
-            color: var(--text-muted);
+            color: var(--text-secondary);
             font-size: 14px;
             transition: background 0.15s;
             display: flex;
             align-items: center;
             justify-content: space-between;
             margin: 0 var(--spacing-sm);
+            position: relative;
         }
 
-        .item:hover {
+        .item:hover:not(.active) {
             background: var(--bg-hover);
             color: var(--text-main);
         }
 
+        /* Activo: superficie + barra de acento + peso tipográfico. Tres señales,
+           para no depender sólo del color. Sin transición: la lista se repinta
+           entera en cada apertura de chat y la animación se leería como parpadeo. */
         .item.active {
-            background: rgba(255, 255, 255, 0.08);
+            background: var(--active-surface);
             color: var(--text-main);
-            font-weight: 500;
+            font-weight: 600;
+            box-shadow: inset 3px 0 0 0 var(--active-indicator);
+            transition: none;
+        }
+
+        .item.item-placeholder {
+            opacity: 0.7;
+            cursor: default;
+            font-style: italic;
+        }
+
+        /* Píldora del proyecto: el color llega por --project-color, así que el
+           mismo estilo sirve en el sidebar y en el diálogo de mover. */
+        .project-icon-btn {
+            width: 28px;
+            height: 28px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            flex-shrink: 0;
+            color: var(--project-color, var(--accent));
+            background: color-mix(in srgb, var(--project-color, var(--accent)) 13%, transparent);
+            border: 1px solid color-mix(in srgb, var(--project-color, var(--accent)) 25%, transparent);
         }
 
         .item-preview {
@@ -291,13 +443,62 @@
             max-width: 70%;
         }
 
+        /* Acciones del chat: siempre en el DOM (descubribles por teclado y en
+           pantallas sin hover), atenuadas hasta que la fila recibe puntero o
+           foco. Con `display:none` eran inalcanzables con Tab. */
         .item-actions {
-            display: none;
-            gap: 6px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-shrink: 0;
+            opacity: 0;
+            transition: opacity 0.15s;
         }
 
-        .item:hover .item-actions {
-            display: flex;
+        .item:hover .item-actions,
+        .item:focus-within .item-actions,
+        .item.active .item-actions {
+            opacity: 1;
+        }
+
+        /* Sin puntero no hay hover que revele nada: quedan visibles. */
+        @media (hover: none) {
+            .item-actions { opacity: 1; }
+        }
+
+        .item-actions .btn-icon {
+            min-width: 32px;
+            min-height: 32px;
+            padding: 4px;
+            font-size: 13px;
+            line-height: 1;
+            border-radius: 8px;
+        }
+
+        .item-actions .btn-icon:focus-visible {
+            outline: 2px solid var(--focus-ring);
+            outline-offset: 1px;
+            opacity: 1;
+        }
+
+        /* La acción destructiva no comparte grupo con las demás: separador,
+           superficie propia y color de peligro. */
+        .item-actions-separator {
+            width: 1px;
+            align-self: stretch;
+            margin: 4px 6px;
+            background: var(--divider-subtle);
+            flex-shrink: 0;
+        }
+
+        .item-action-danger {
+            color: var(--danger-text);
+        }
+
+        .item-action-danger:hover {
+            background: var(--danger-surface);
+            color: var(--danger-text);
+            box-shadow: inset 0 0 0 1px var(--danger-border);
         }
 
         .action-icon {
@@ -326,28 +527,32 @@
             border-bottom: 1px solid var(--border-subtle);
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: var(--spacing-sm);
             padding: 8px var(--spacing-lg);
-            background: var(--bg-sidebar);
+            background: var(--surface-header);
             backdrop-filter: blur(12px);
             z-index: 10;
-            height: 52px;
+            /* Altura mínima, no fija: con altura fija el contenido se corta. */
+            min-height: 52px;
             position: relative;
         }
 
+        /* Zona elástica: es la única que puede encoger sin recortar controles. */
         .header-section {
             display: flex;
             align-items: center;
             gap: 8px;
-            flex: 1 1 0;
+            flex: 1 1 auto;
             min-width: 0;
         }
 
+        /* Los controles ceden espacio antes de desbordar; ninguno bloquea el layout. */
         .header-toolbar {
             display: flex;
             align-items: center;
-            gap: 4px;
-            flex-shrink: 0;
+            gap: 6px;
+            flex: 0 1 auto;
+            min-width: 0;
         }
 
         #activeTitle {
@@ -362,7 +567,8 @@
         .model-selector {
             position: relative;
             user-select: none;
-            flex-shrink: 0;
+            flex: 0 1 auto;
+            min-width: 0;
         }
 
         .model-trigger #currentModel {
@@ -370,15 +576,145 @@
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
-            max-width: 14ch;
+            max-width: 18ch;
         }
 
-        .privacy-indicator, .provider-selector, .status-pill {
-            flex-shrink: 0;
+        /* Proveedor y privacidad: legibles, pero subordinados al selector de modelo.
+           Ambos truncan con puntos suspensivos antes que desbordar la barra. */
+        .privacy-indicator, .provider-selector {
+            flex: 0 1 auto;
+            min-width: 0;
+        }
+
+        #currentProviderName {
+            display: inline-block;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 16ch;
+            vertical-align: middle;
         }
 
         .model-options {
             z-index: 1100;
+        }
+
+        /* --- Más acciones --- */
+        .more-actions {
+            position: relative;
+            flex: 0 0 auto;
+        }
+
+        .more-actions-trigger {
+            border: 1px solid var(--border-subtle);
+            position: relative;
+        }
+
+        .more-actions-trigger[aria-expanded="true"] {
+            background: var(--bg-hover);
+            color: var(--text-main);
+        }
+
+        /* El estado del runtime deja de ocupar sitio en la barra, pero sigue
+           siendo visible de un vistazo como punto en el disparador. */
+        .more-actions-trigger[data-runtime]::after {
+            content: "";
+            position: absolute;
+            top: 3px;
+            right: 3px;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            border: 1px solid var(--surface-header);
+        }
+        .more-actions-trigger[data-runtime="ok"]::after { background: #4ade80; }
+        .more-actions-trigger[data-runtime="offline"]::after { background: #f87171; }
+
+        .more-actions-menu {
+            position: absolute;
+            top: calc(100% + 6px);
+            right: 0;
+            min-width: 250px;
+            background: var(--surface-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: 10px;
+            padding: 6px;
+            /* Por encima del selector de modelos (z-index 1100): nunca se solapan
+               visualmente porque además se cierran entre sí al abrirse. */
+            z-index: 1200;
+            box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            max-height: min(70vh, 460px);
+            overflow-y: auto;
+        }
+
+        .more-actions-menu[hidden] {
+            display: none;
+        }
+
+        .more-actions-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+            padding: 8px 10px;
+            border-radius: 8px;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 13px;
+            text-align: left;
+            cursor: pointer;
+            justify-content: flex-start;
+        }
+
+        .more-actions-item:hover:not(:disabled),
+        .more-actions-item:focus-visible {
+            background: var(--bg-hover);
+            color: var(--text-main);
+        }
+
+        .more-actions-item:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+
+        .more-actions-item svg {
+            flex-shrink: 0;
+        }
+
+        .more-actions-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 6px 10px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .more-actions-divider {
+            height: 1px;
+            background: var(--border-subtle);
+            margin: 4px 2px;
+        }
+
+        .more-actions-menu :focus-visible,
+        .more-actions-trigger:focus-visible {
+            outline: 2px solid var(--focus-ring);
+            outline-offset: 2px;
+        }
+
+        /* Barra compacta: por debajo de ~900px la suma de los anchos mínimos no
+           cabe y las etiquetas acababan pisándose. Iconos y truncado conservan el
+           significado; el texto completo sigue disponible en el tooltip. */
+        @media (max-width: 900px) {
+            .model-trigger #currentModel { max-width: 10ch; }
+            #currentProviderName { max-width: 9ch; }
+            .privacy-badge { max-width: 10ch; }
+            #themeLabel { display: none; }
         }
 
         .mobile-toggle {
@@ -401,6 +737,9 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
+            min-width: 0;
+            max-width: 100%;
+            overflow: hidden;
             background: var(--bg-card);
             color: var(--text-main);
             font-size: 14px;
@@ -460,11 +799,10 @@
             color: var(--accent);
         }
 
-        .light-theme .item.active {
-            background: rgba(0, 0, 0, 0.08);
-        }
-        .light-theme .main-header {
-            background: rgba(255, 255, 255, 0.9);
+        /* El activo y la barra ya se resuelven por token semántico en ambos temas:
+           no se repite aquí ningún valor propio del modo oscuro. */
+        .light-theme .more-actions-menu {
+            box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
         }
         .light-theme .mobile-toggle {
             color: var(--text-main);
@@ -537,12 +875,16 @@
             min-height: 0;
         }
 
+        /* Conversación y compositor comparten columna: el mismo max-width y el
+           mismo padding lateral efectivo, calculado con la misma expresión. Sin
+           esto, el compositor quedaba desalineado respecto a los mensajes. */
         .messages-container {
             flex: 1 1 0%;
             overflow-y: auto;
             overflow-x: hidden;
-            padding: var(--spacing-lg);
+            padding: var(--spacing-lg) max(var(--spacing-lg), calc((100% - var(--conversation-max)) / 2));
             min-height: 0;
+            background: var(--surface-canvas);
         }
 
         .message {
@@ -620,32 +962,33 @@
         }
 
         /* --- Input Area --- */
+        /* Misma expresión de padding lateral que .messages-container: el eje del
+           compositor y el de la conversación coinciden a cualquier ancho. */
         .input-area {
             flex-shrink: 0;
-            padding: var(--spacing-md) var(--spacing-lg);
-            background: linear-gradient(180deg, rgba(4, 7, 15, 0) 0%, var(--bg-base) 30%);
-            border-top: 1px solid var(--border-subtle);
+            padding: var(--spacing-md) max(var(--spacing-lg), calc((100% - var(--conversation-max)) / 2));
+            background: var(--surface-canvas);
+            border-top: 1px solid var(--divider-subtle);
             max-height: 45vh;
             overflow-y: auto;
         }
 
         .input-box {
-            background: var(--bg-card);
-            border: 1px solid var(--border-subtle);
+            background: var(--surface-composer);
+            border: 1px solid var(--message-border);
             border-radius: var(--border-radius);
             padding: var(--spacing-sm);
             display: flex;
             flex-direction: column;
             gap: var(--spacing-sm);
-            box-shadow: 0 0 20px rgba(0, 0, 0, 0.2);
             transition: border-color 0.2s, box-shadow 0.2s;
-            max-width: 900px;
+            max-width: var(--conversation-max);
             margin: 0 auto;
         }
 
         .input-box:focus-within {
-            border-color: var(--accent);
-            box-shadow: 0 0 25px rgba(73, 194, 244, 0.3);
+            border-color: var(--composer-focus);
+            box-shadow: 0 0 0 2px var(--accent-glow);
         }
 
         .input-textarea {
@@ -661,6 +1004,20 @@
             overflow-y: auto;
             padding: var(--spacing-sm);
             width: 100%;
+        }
+
+        .input-textarea::placeholder {
+            color: var(--text-secondary);
+            opacity: 1;
+        }
+
+        /* El pie pertenece al compositor: mismo bloque, jerarquía menor. */
+        #footerStatus {
+            max-width: var(--conversation-max);
+            margin: 8px auto 0;
+            text-align: center;
+            font-size: 11px;
+            color: var(--text-secondary);
         }
 
         .input-actions {
@@ -779,15 +1136,26 @@
 
         .empty-title {
             font-size: 18px;
-            color: var(--text-muted);
+            color: var(--text-main);
             margin-bottom: 8px;
-            font-weight: 500;
+            font-weight: 600;
         }
 
         .empty-subtitle {
             font-size: 13px;
-            color: var(--text-muted);
-            margin-bottom: 24px;
+            color: var(--text-secondary);
+            margin-bottom: 20px;
+            max-width: 420px;
+            line-height: 1.6;
+        }
+
+        .empty-cta {
+            margin-bottom: 20px;
+        }
+
+        .empty-cta:focus-visible {
+            outline: 2px solid var(--focus-ring);
+            outline-offset: 2px;
         }
 
         .suggestion-chips {
@@ -799,9 +1167,9 @@
         }
 
         .suggestion-chip {
-            background: var(--bg-card);
-            border: 1px solid var(--border-subtle);
-            color: var(--text-muted);
+            background: var(--surface-message);
+            border: 1px solid var(--message-border);
+            color: var(--text-secondary);
             padding: 12px 16px;
             border-radius: 10px;
             font-size: 13px;
@@ -815,6 +1183,11 @@
             border-color: var(--accent);
             color: var(--accent);
             background: rgba(73, 194, 244, 0.08);
+        }
+
+        .suggestion-chip:focus-visible {
+            outline: 2px solid var(--focus-ring);
+            outline-offset: 2px;
         }
 
         /* --- Toast Notifications --- */
@@ -886,12 +1259,13 @@
         .light-theme .context-panel {
             box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
         }
+        /* El tema claro toma sus propios tokens de código; no invierte el oscuro. */
         .light-theme .code-block-wrapper {
-            background: #2d3748;
-            border-color: var(--border-subtle);
+            background: var(--surface-code);
+            border-color: var(--message-border);
         }
         .light-theme .code-block-header {
-            background: rgba(0, 0, 0, 0.2);
+            background: var(--surface-code-header);
         }
         .light-theme .empty-subtitle {
             color: var(--text-muted);
@@ -965,9 +1339,9 @@
             }
 
             .main-header {
-                padding: 0 var(--spacing-md);
+                padding: 6px var(--spacing-md);
                 gap: var(--spacing-sm);
-                height: 48px;
+                min-height: 48px;
             }
 
             .model-selector {
@@ -1003,8 +1377,8 @@
 
         @media (max-width: 480px) {
             .main-header {
-                padding: 0 var(--spacing-sm);
-                height: 44px;
+                padding: 6px var(--spacing-sm);
+                min-height: 44px;
             }
 
             .messages-container {
@@ -1260,10 +1634,10 @@
         /* --- Messages (app.js generated) --- */
         .msg {
             padding: 12px 16px;
-            border: 1px solid var(--border-subtle);
+            border: 1px solid var(--message-border);
             border-radius: var(--border-radius);
             max-width: 75%;
-            background: var(--bg-card);
+            background: var(--surface-message);
             line-height: 1.6;
             margin-bottom: var(--spacing-md);
             box-sizing: border-box;
@@ -1295,8 +1669,8 @@
             border-radius: var(--border-radius) 4px 4px var(--border-radius);
         }
         .msg.assistant {
-            background: var(--bg-card);
-            border-left: 3px solid var(--text-muted);
+            background: var(--surface-message);
+            border-left: 3px solid var(--text-secondary);
             margin-right: auto;
             margin-left: 0;
             border-radius: 4px var(--border-radius) var(--border-radius) 4px;
@@ -1312,6 +1686,17 @@
         }
         .light-theme .msg.user {
             background: linear-gradient(135deg, rgba(14, 165, 233, 0.12) 0%, rgba(14, 165, 233, 0.05) 100%);
+        }
+        .msg-content hr {
+            border: none;
+            border-top: 1px solid var(--divider-subtle);
+            margin: 1em 0;
+        }
+        .msg-content blockquote {
+            border-left: 3px solid var(--divider-subtle);
+            padding-left: 12px;
+            margin: 0.75em 0;
+            color: var(--text-secondary);
         }
         .msg-generating {
             animation: pulse 1.5s ease-in-out infinite;
@@ -1344,7 +1729,7 @@
         .model-change-line {
             flex: 1;
             height: 1px;
-            background: var(--border-subtle);
+            background: var(--divider-subtle);
         }
         .model-change-label {
             font-size: 11px;
@@ -1356,8 +1741,8 @@
         }
         .btn-save-message {
             background: transparent;
-            border: 1px solid var(--border-subtle);
-            color: var(--text-muted);
+            border: 1px solid var(--message-border);
+            color: var(--text-secondary);
             padding: 4px 10px;
             border-radius: 6px;
             cursor: pointer;
@@ -1531,27 +1916,75 @@
             margin: 0.75em 0;
             border-radius: 8px;
             overflow: hidden;
-            background: #1e1e1e;
-            border: 1px solid var(--border-subtle);
+            background: var(--surface-code);
+            border: 1px solid var(--message-border);
         }
         .code-block-header {
             display: flex;
             align-items: center;
             justify-content: space-between;
+            gap: 12px;
             padding: 6px 10px;
-            background: rgba(255, 255, 255, 0.06);
-            border-bottom: 1px solid var(--border-subtle);
+            background: var(--surface-code-header);
+            border-bottom: 1px solid var(--divider-subtle);
             font-size: 12px;
         }
+        .code-block-meta {
+            display: flex;
+            align-items: baseline;
+            gap: 10px;
+            min-width: 0;
+        }
         .code-block-lang {
-            color: var(--text-muted);
+            color: var(--code-meta);
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
+        /* Metadatos secundarios: informan sin competir con el código. */
+        .code-block-lines {
+            color: var(--code-meta);
+            font-size: 11px;
+            opacity: 0.85;
+            white-space: nowrap;
+        }
+        .code-block-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+        .code-block-toggle {
+            background: transparent;
+            border: 1px solid var(--message-border);
+            color: var(--code-meta);
+            padding: 4px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+        .code-block-toggle:hover,
+        .copy-code-btn:hover {
+            background: rgba(255, 255, 255, 0.08);
+            color: #ffffff;
+        }
+        .code-block-toggle:focus-visible,
+        .copy-code-btn:focus-visible {
+            outline: 2px solid var(--code-focus-ring);
+            outline-offset: 2px;
+        }
+        /* Colapsar recorta la altura visible: el código sigue íntegro en el DOM,
+           así que copiar y exportar no cambian. */
+        .code-block-wrapper.collapsed pre {
+            max-height: 5.4em;
+            overflow: hidden;
+            -webkit-mask-image: linear-gradient(180deg, #000 55%, transparent 100%);
+            mask-image: linear-gradient(180deg, #000 55%, transparent 100%);
+        }
         .copy-code-btn {
             background: transparent;
-            border: 1px solid var(--border-subtle);
-            color: var(--text-muted);
+            border: 1px solid var(--message-border);
+            color: var(--code-meta);
             padding: 4px 10px;
             border-radius: 6px;
             cursor: pointer;
@@ -1572,7 +2005,8 @@
             line-height: 1.5;
         }
         .msg-content .code-block-wrapper pre {
-            background: #1e1e1e;
+            background: var(--surface-code);
+            color: var(--code-text);
         }
         .msg-content pre code {
             padding: 0;
@@ -1722,8 +2156,8 @@
         <!-- Main Content -->
         <div class="main-content">
             <div class="main-header">
-                <!-- Row 1: Sidebar toggle + title + model selector + privacy -->
-                <div class="header-section" style="flex:1 1 auto;min-width:0;">
+                <!-- Zona elástica: identidad del contexto abierto. -->
+                <div class="header-section">
                     <button class="mobile-toggle" id="mobileSidebarToggle" aria-label="Alternar panel lateral">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <line x1="3" y1="12" x2="21" y2="12"></line>
@@ -1731,9 +2165,12 @@
                             <line x1="3" y1="18" x2="21" y2="18"></line>
                         </svg>
                     </button>
-                    
+
                     <span id="activeTitle">Selecciona un proyecto</span>
-                    
+                </div>
+
+                <!-- Controles principales: modelo, proveedor, privacidad, tema y menú. -->
+                <div class="header-toolbar">
                     <div class="model-selector">
                         <div class="model-trigger" id="modelTrigger" aria-haspopup="listbox" aria-expanded="false">
                             <span id="currentModel">Cargando modelos...</span>
@@ -1743,18 +2180,9 @@
                         </div>
                         <div class="model-options" id="modelOptions" role="listbox"></div>
                     </div>
-                    
+
                     <select id="modelSelect" aria-label="Selecciona un modelo"></select>
 
-                    <!-- Indicador de Privacidad -->
-                    <div id="privacyIndicator" class="privacy-indicator private">
-                        <span id="privacyBadge" class="privacy-badge private">🔒 Privado</span>
-                        <button id="revokeCloudConsent" class="btn-icon" type="button" style="display:none;margin-left:8px;" onclick="revokeCloudConsent()" data-i18n="cloudConsent.revoke">Revocar permiso cloud</button>
-                    </div>
-                </div>
-
-                <!-- Row 2: Actions toolbar -->
-                <div class="header-toolbar">
                     <!-- Provider selector (compact) -->
                     <div class="provider-selector">
                         <button class="provider-trigger" id="providerTrigger" onclick="event.stopPropagation();(function(){const o=document.getElementById('providerOptions'); o.style.display = (o.style.display==='none' || !o.style.display) ? 'block' : 'none';})()">
@@ -1818,52 +2246,97 @@
                         </div>
                     </div>
 
-                    <!-- Botón Configurar API Key -->
-                    <button id="btnConfigApiKey" class="btn-icon" style="display: none;" onclick="(typeof showApiKeyModal==='function')?showApiKeyModal():null" title="Configurar API Key">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
-                        </svg>
-                    </button>
+                    <!-- Indicador de Privacidad (compacto) -->
+                    <div id="privacyIndicator" class="privacy-indicator private">
+                        <span id="privacyBadge" class="privacy-badge private">🔒 Privado</span>
+                    </div>
 
-                    <span id="rtStatus" class="status-pill status-loading" title="Estado de Ollama">
-                        <span class="loading-pulse">●</span> Conectando...
-                    </span>
                     <button type="button" class="theme-toggle" id="themeToggle" aria-label="Cambiar tema">
                         <span id="themeIcon">🌙</span>
                         <span id="themeLabel">Claro</span>
                     </button>
-                    <button class="btn-icon" id="btnPull" type="button" aria-label="Abrir biblioteca de modelos" title="Descargar modelo">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                            <polyline points="7 10 12 15 17 10"></polyline>
-                            <line x1="12" y1="15" x2="12" y2="3"></line>
-                        </svg>
-                    </button>
-                    <button class="btn-icon" id="btnPullLocal" type="button" disabled title="Pull modelo local" aria-label="Pull modelo">Pull</button>
-                    <button class="btn-primary btn-sm" type="button" id="btnSaveChatDoc" disabled aria-label="Guardar chat">📄 Guardar</button>
-                    <button class="btn-icon" type="button" id="btnExportChat" disabled aria-label="Exportar chat" title="Exportar chat">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                            <polyline points="14 2 14 8 20 8"></polyline>
-                            <line x1="16" y1="13" x2="8" y2="13"></line>
-                            <line x1="16" y1="17" x2="8" y2="17"></line>
-                        </svg>
-                    </button>
-                    <button class="btn-icon" type="button" id="btnContextToggle" aria-label="Contexto del proyecto" title="Contexto del proyecto">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M12 20h9"></path>
-                            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
-                        </svg>
-                    </button>
-                    <button class="btn-icon" type="button" id="btnLangToggle" aria-label="Language" title="Cambiar idioma / Change language" style="font-size:12px;font-weight:600;min-width:28px;">
-                        ES
-                    </button>
-                </div>
 
-                <!-- Cloud Warning (flotante) -->
-                <div id="cloudWarning" class="cloud-warning" style="display: none;">
-                    ⚠️ <strong>Cloud activo:</strong> Mensajes a servidores externos. 
-                    <a href="#" onclick="(typeof showPrivacyInfo==='function')?showPrivacyInfo():false;return false;">Más info</a>
+                    <!-- Más acciones: todo lo secundario deja de competir por la barra. -->
+                    <div class="more-actions">
+                        <button type="button" class="btn-icon more-actions-trigger" id="btnMoreActions"
+                                aria-haspopup="true" aria-expanded="false" aria-controls="moreActionsMenu"
+                                aria-label="Más acciones" title="Más acciones">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="5" cy="12" r="1.6"></circle>
+                                <circle cx="12" cy="12" r="1.6"></circle>
+                                <circle cx="19" cy="12" r="1.6"></circle>
+                            </svg>
+                        </button>
+
+                        <div class="more-actions-menu" id="moreActionsMenu" role="menu" aria-label="Más acciones" hidden>
+                            <div class="more-actions-row" role="none">
+                                <span class="more-actions-row-label" id="rtStatusLabel">Runtime</span>
+                                <span id="rtStatus" class="status-pill status-loading" title="Estado de Ollama">
+                                    <span class="loading-pulse">●</span> Conectando...
+                                </span>
+                            </div>
+
+                            <div class="more-actions-divider" role="none"></div>
+
+                            <button id="btnConfigApiKey" class="btn-icon more-actions-item" role="menuitem" type="button" style="display: none;" onclick="(typeof showApiKeyModal==='function')?showApiKeyModal():null" title="Configurar API Key" aria-label="Configurar API Key">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+                                </svg>
+                                <span class="more-actions-item-label">Configurar API Key</span>
+                            </button>
+
+                            <button id="revokeCloudConsent" class="btn-icon more-actions-item" role="menuitem" type="button" style="display:none;" onclick="revokeCloudConsent()" data-i18n="cloudConsent.revoke" aria-label="Revocar permiso cloud">
+                                <span aria-hidden="true">🚫</span>
+                                <span class="more-actions-item-label">Revocar permiso cloud</span>
+                            </button>
+
+                            <button class="btn-icon more-actions-item" id="btnPull" role="menuitem" type="button" aria-label="Abrir biblioteca de modelos" title="Descargar modelo">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                    <polyline points="7 10 12 15 17 10"></polyline>
+                                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                                </svg>
+                                <span class="more-actions-item-label" id="btnPullLabel">Biblioteca de modelos</span>
+                            </button>
+
+                            <div class="more-actions-row" role="none">
+                                <span class="more-actions-row-label">Modelo local</span>
+                                <button class="btn-icon" id="btnPullLocal" role="menuitem" type="button" disabled title="Pull modelo local" aria-label="Pull modelo">Pull</button>
+                            </div>
+
+                            <div class="more-actions-divider" role="none"></div>
+
+                            <button class="btn-icon more-actions-item" type="button" id="btnSaveChatDoc" role="menuitem" disabled aria-label="Guardar chat">
+                                <span aria-hidden="true">📄</span>
+                                <span class="more-actions-item-label">Guardar chat</span>
+                            </button>
+
+                            <button class="btn-icon more-actions-item" type="button" id="btnExportChat" role="menuitem" disabled aria-label="Exportar chat" title="Exportar chat">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                    <polyline points="14 2 14 8 20 8"></polyline>
+                                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                                </svg>
+                                <span class="more-actions-item-label">Exportar chat</span>
+                            </button>
+
+                            <button class="btn-icon more-actions-item" type="button" id="btnContextToggle" role="menuitem" aria-label="Contexto del proyecto" title="Contexto del proyecto">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M12 20h9"></path>
+                                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                                </svg>
+                                <span class="more-actions-item-label">Contexto del proyecto</span>
+                            </button>
+
+                            <div class="more-actions-divider" role="none"></div>
+
+                            <div class="more-actions-row" role="none">
+                                <span class="more-actions-row-label">Idioma / Language</span>
+                                <button class="btn-icon" type="button" id="btnLangToggle" role="menuitem" aria-label="Language" title="Cambiar idioma / Change language" style="font-size:12px;font-weight:600;min-width:28px;">ES</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
             
@@ -1901,8 +2374,12 @@
                 </div>
                 
                 <div class="input-area">
-                    <div class="cloud-input-banner" id="cloudInputBanner">
-                        ⚠️ <strong>Modo nube:</strong> este mensaje se enviará a servidores externos. No compartas contraseñas ni datos sensibles.
+                    <!-- Única superficie detallada del aviso cloud. El contenido lo
+                         construye updatePrivacyUI() con nodos separados por i18n. -->
+                    <div class="cloud-input-banner" id="cloudInputBanner" role="status">
+                        <span class="cloud-input-banner-body" id="cloudInputBannerBody"></span>
+                        <button type="button" class="cloud-input-banner-dismiss" id="cloudBannerDismiss"
+                                aria-label="Ocultar aviso" title="Ocultar aviso">×</button>
                     </div>
                     <div class="attachment-preview" id="attachmentPreview" style="display: none;">
                         <!-- Previsualizaciones de archivos adjuntos -->
@@ -1949,7 +2426,7 @@
                         </div>
                     </div>
                     
-                    <div id="footerStatus" style="text-align:center; font-size:11px; color:var(--text-muted); margin-top:8px;">
+                    <div id="footerStatus">
                         Ollama Local AI • Privado y Seguro • 100% en tu PC
                     </div>
                 </div>

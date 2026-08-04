@@ -861,11 +861,11 @@ function mikaSelect(title, options) {
 
         // Icon/color indicator
         if (opt.icon || opt.color) {
-          const iconSpan = document.createElement('span');
-          const color = opt.color || '#3b82f6';
-          iconSpan.style.cssText = `width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;background:${color}20;border:1px solid ${color}40;color:${color};`;
-          iconSpan.textContent = opt.icon || '📁';
-          btn.appendChild(iconSpan);
+          // Misma píldora que el sidebar, por clase: sin cssText duplicado.
+          btn.appendChild(applyProjectVisual(document.createElement('span'), {
+            icon: opt.icon || '📁',
+            color: opt.color || '#3b82f6'
+          }));
         }
 
         const labelSpan = document.createElement('span');
@@ -1993,19 +1993,35 @@ function highlightCodeBlocks(container) {
   });
 }
 
+// Umbral de colapso: por encima de 40 líneas el bloque nace colapsado. Es la
+// altura a partir de la cual un volcado de código empuja la conversación fuera
+// de pantalla; por debajo, colapsar molesta más que ayuda.
+const CODE_BLOCK_COLLAPSE_THRESHOLD = 40;
+
+let _codeBlockSeq = 0;
+
+function countCodeLines(text) {
+  const contenido = String(text || '').replace(/\n$/, '');
+  if (!contenido) return 0;
+  return contenido.split('\n').length;
+}
+
 function addCopyButtonsToCodeBlocks(container) {
   if (!container) return;
-  
+
   // Usar Array.from para evitar problemas de NodeList dinámica
   const pres = Array.from(container.querySelectorAll("pre"));
-  
+
   pres.forEach((pre) => {
     try {
-      // Skip if already wrapped
+      // Skip if already wrapped — idempotencia: dos llamadas, una sola cabecera.
       if (pre.parentNode && pre.parentNode.classList && pre.parentNode.classList.contains('code-block-wrapper')) return;
     const code = pre.querySelector("code");
     const langMatch = code && code.className.match(/language-(\w+)/);
-    const lang = langMatch ? langMatch[1] : "code";
+    // Sin autodetección: sólo la clase que ya trae el markdown. Detectar el
+    // lenguaje a ojo costaba congelar la UI en chats largos.
+    const lang = langMatch ? langMatch[1] : null;
+    const lineas = countCodeLines((code || pre).textContent);
 
     // Guardar referencia al padre ANTES de mover el nodo
     const originalParent = pre.parentNode;
@@ -2016,30 +2032,71 @@ function addCopyButtonsToCodeBlocks(container) {
 
     const header = document.createElement("div");
     header.className = "code-block-header";
-    
+
+    const meta = document.createElement("div");
+    meta.className = "code-block-meta";
+
     const langSpan = document.createElement("span");
     langSpan.className = "code-block-lang";
-    langSpan.textContent = lang;
+    langSpan.textContent = lang || t('code.plainText');
+
+    const linesSpan = document.createElement("span");
+    linesSpan.className = "code-block-lines";
+    linesSpan.textContent = t('code.lines', { count: lineas });
+
+    meta.appendChild(langSpan);
+    meta.appendChild(linesSpan);
+
+    const actions = document.createElement("div");
+    actions.className = "code-block-actions";
+
+    const bodyId = `code-block-${(++_codeBlockSeq)}`;
+    pre.id = bodyId;
+
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "code-block-toggle";
+    toggle.setAttribute("aria-controls", bodyId);
 
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "copy-code-btn";
-    btn.textContent = "Copiar";
+    btn.textContent = t('code.copy');
+    btn.setAttribute("aria-label", t('code.copy'));
     btn.addEventListener("click", () => {
+      // Siempre el contenido completo, esté colapsado o no: el código nunca sale
+      // del DOM, sólo se recorta su altura visible.
       const text = (pre.querySelector("code") || pre).textContent;
       navigator.clipboard.writeText(text).then(
-        () => showToast("Código copiado", "success"),
+        () => showToast(t('toast.codeCopied'), "success"),
         () => showToast("Error al copiar", "error")
       );
     });
 
-    header.appendChild(langSpan);
-    header.appendChild(btn);
+    const applyCollapsed = (colapsado) => {
+      wrapper.classList.toggle("collapsed", colapsado);
+      toggle.setAttribute("aria-expanded", String(!colapsado));
+      const etiqueta = colapsado ? t('code.expand') : t('code.collapse');
+      toggle.textContent = etiqueta;
+      toggle.setAttribute("aria-label", etiqueta);
+    };
+
+    toggle.addEventListener("click", () => {
+      applyCollapsed(!wrapper.classList.contains("collapsed"));
+    });
+
+    actions.appendChild(toggle);
+    actions.appendChild(btn);
+    header.appendChild(meta);
+    header.appendChild(actions);
     wrapper.appendChild(header);
-    
+
     // Insert wrapper where pre is, THEN move pre into wrapper
     originalParent.insertBefore(wrapper, pre);
     wrapper.appendChild(pre);
+
+    // El estado vive en el DOM, no en el mensaje ni en la base de datos.
+    applyCollapsed(lineas > CODE_BLOCK_COLLAPSE_THRESHOLD);
     } catch (e) {
       console.warn('addCopyButtonsToCodeBlocks: skipped block', e.message);
     }
@@ -2226,13 +2283,17 @@ async function loadRuntime() {
   }
 
   const statusEl = el("rtStatus");
-  if (st.ok || currentProvider === 'alibaba') {
+  const runtimeOk = st.ok || currentProvider === 'alibaba';
+  if (runtimeOk) {
     statusEl.textContent = t('status.connected');
     statusEl.className = "status-pill status-ok";
   } else {
     statusEl.textContent = t('status.disconnected');
     statusEl.className = "status-pill status-offline";
   }
+  // El detalle vive dentro del menú; el punto del disparador conserva la señal.
+  const moreActionsTrigger = el("btnMoreActions");
+  if (moreActionsTrigger) moreActionsTrigger.dataset.runtime = runtimeOk ? 'ok' : 'offline';
 
   el("modelSelect").innerHTML = "";
   if (st.ok) {
@@ -2501,32 +2562,131 @@ async function revokeCloudConsent() {
   if (providerPrivacy !== 'cloud') return;
   const key = buildCloudConsentKey(currentProvider, cloudConsentProjectId(activeProjectId));
   await window.mika5.setAppState(key, '');
+  // Ocultar el aviso nunca puede sobrevivir a la retirada del permiso: el
+  // estado de seguridad cambió, así que el banner vuelve a mostrarse.
+  await clearCloudBannerDismissal(currentProvider, activeProjectId).catch(() => {});
   updatePrivacyUI();
   showToast(t('cloudConsent.revoked'), 'success');
+}
+
+// --- Aviso cloud: una sola superficie detallada, con cierre recordado ---
+//
+// El cierre es decorativo. No toca el consentimiento, no oculta el indicador de
+// privacidad y no evita el modal: sólo silencia el banner para el proveedor y el
+// proyecto actuales mientras el estado de seguridad no cambie.
+const CLOUD_BANNER_SCHEMA_VERSION = 1;
+
+function cloudBannerStateKey(providerId, projectId) {
+  if (!providerId) throw new Error('providerId requerido');
+  return `ui:cloudBanner:v${CLOUD_BANNER_SCHEMA_VERSION}:${providerId}:${cloudProjectScope(cloudConsentProjectId(projectId))}`;
+}
+
+// Huella del estado de seguridad. Si cambian las categorías autorizadas, la
+// huella cambia y el aviso reaparece aunque se hubiera cerrado antes.
+function cloudConsentFingerprint(consent) {
+  if (!consent || !consent.categories) return 'sin-consentimiento';
+  const granted = Object.keys(consent.categories)
+    .filter(category => consent.categories[category])
+    .sort();
+  return granted.length ? granted.join('+') : 'sin-categorias';
+}
+
+async function readCloudBannerDismissal(providerId, projectId) {
+  try {
+    const raw = await window.mika5.getAppState(cloudBannerStateKey(providerId, projectId));
+    if (!raw) return null;
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (parsed?.schemaVersion !== CLOUD_BANNER_SCHEMA_VERSION) return null;
+    if (!parsed.fingerprint) return null;
+    return { fingerprint: String(parsed.fingerprint), dismissedAt: String(parsed.dismissedAt || '') };
+  } catch (_) {
+    return null;
+  }
+}
+
+async function clearCloudBannerDismissal(providerId, projectId) {
+  if (!providerId) return;
+  await window.mika5.setAppState(cloudBannerStateKey(providerId, projectId), '');
+}
+
+async function dismissCloudInputBanner() {
+  if (providerPrivacy !== 'cloud') return;
+  const providerAtDismiss = currentProvider;
+  const projectAtDismiss = activeProjectId;
+  const consent = await readCloudConsent(providerAtDismiss, projectAtDismiss).catch(() => null);
+  await window.mika5.setAppState(
+    cloudBannerStateKey(providerAtDismiss, projectAtDismiss),
+    JSON.stringify({
+      schemaVersion: CLOUD_BANNER_SCHEMA_VERSION,
+      fingerprint: cloudConsentFingerprint(consent),
+      dismissedAt: new Date().toISOString()
+    })
+  );
+  const banner = el('cloudInputBanner');
+  if (banner && currentProvider === providerAtDismiss && activeProjectId === projectAtDismiss) {
+    banner.classList.remove('visible');
+  }
+}
+
+// Nodos separados con textContent: el aviso no depende de que una traducción
+// contenga ':' ni de inyectar HTML con el nombre del proveedor.
+function renderCloudInputBanner(providerLabel) {
+  const body = el('cloudInputBannerBody');
+  if (!body) return;
+  body.textContent = '';
+  const icon = document.createElement('span');
+  icon.setAttribute('aria-hidden', 'true');
+  icon.textContent = '⚠️ ';
+  const provider = document.createElement('span');
+  provider.className = 'cloud-input-banner-provider';
+  provider.textContent = t('cloudBanner.provider', { provider: providerLabel });
+  const detail = document.createElement('span');
+  detail.textContent = ' ' + t('privacy.inputWarning');
+  body.appendChild(icon);
+  body.appendChild(provider);
+  body.appendChild(detail);
+  const dismiss = el('cloudBannerDismiss');
+  if (dismiss) {
+    dismiss.setAttribute('aria-label', t('cloudBanner.dismiss'));
+    dismiss.title = t('cloudBanner.dismiss');
+  }
+}
+
+// El icono del indicador es estructural: vive aquí, no dentro de la traducción.
+// Antes se concatenaba un prefijo en JS sobre un texto i18n que ya traía emoji y
+// se veían dos iconos. Una sola fuente de verdad: icono en el DOM, texto en i18n.
+function renderPrivacyBadge(badge, state, label) {
+  if (!badge) return;
+  badge.textContent = '';
+  const icon = document.createElement('span');
+  icon.className = 'privacy-badge-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  icon.textContent = state === 'private' ? '🔒' : '☁️';
+  const text = document.createElement('span');
+  text.className = 'privacy-badge-text';
+  text.textContent = label;
+  badge.appendChild(icon);
+  badge.appendChild(text);
+  badge.className = 'privacy-badge ' + state;
 }
 
 function updatePrivacyUI() {
   const indicator = el('privacyIndicator');
   const badge = el('privacyBadge');
-  const warning = el('cloudWarning');
   const apiKeyBtn = el('btnConfigApiKey');
   const providerName = el('currentProviderName');
   const inputBanner = el('cloudInputBanner');
   const footerEl = el('footerStatus');
   const revokeButton = el('revokeCloudConsent');
-  
+
   const providerLabel = providerDisplayName(currentProvider);
-  
+
   if (providerPrivacy === 'private') {
     if (indicator) {
       indicator.className = 'privacy-indicator private';
       indicator.setAttribute('data-tooltip', t('privacy.tooltipPrivate'));
     }
-    if (badge) {
-      badge.innerHTML = '🟢 🔒 ' + t('privacy.private');
-      badge.className = 'privacy-badge private';
-    }
-    if (warning) warning.style.display = 'none';
+    renderPrivacyBadge(badge, 'private', t('privacy.private'));
     if (apiKeyBtn) apiKeyBtn.style.display = 'none';
     if (providerName) providerName.textContent = t('provider.local');
     if (inputBanner) inputBanner.classList.remove('visible');
@@ -2537,29 +2697,33 @@ function updatePrivacyUI() {
       indicator.className = 'privacy-indicator cloud';
       indicator.setAttribute('data-tooltip', t('privacy.tooltipCloud'));
     }
-    if (badge) {
-      badge.innerHTML = '🟠 ☁️ ' + t('privacy.cloud');
-      badge.className = 'privacy-badge cloud';
-    }
-    if (warning) {
-      warning.style.display = '';
-      warning.innerHTML = `⚠️ <strong>${t('provider.cloudWarning').split(':')[0]}:</strong> ${t('provider.cloudWarning').split(':').slice(1).join(':')} <a href="#" onclick="(typeof showPrivacyInfo==='function')?showPrivacyInfo():false;return false;">${t('provider.moreInfo')}</a>`;
-    }
+    renderPrivacyBadge(badge, 'cloud', t('privacy.cloud'));
     if (apiKeyBtn) apiKeyBtn.style.display = '';
     if (providerName) providerName.textContent = providerLabel;
-    if (inputBanner) {
-      inputBanner.classList.add('visible');
-      inputBanner.innerHTML = `⚠️ <strong>${providerLabel}:</strong> ${t('privacy.inputWarning')}`;
-    }
-    if (footerEl) footerEl.textContent = t('footer.cloud');
+    // El pie deja de repetir el aviso: sólo identifica el modo activo.
+    if (footerEl) footerEl.textContent = t('footer.cloudCompact', { provider: providerLabel });
     if (revokeButton) revokeButton.style.display = 'none';
+    if (inputBanner) {
+      renderCloudInputBanner(providerLabel);
+      // Visible por defecto: si la lectura del estado falla, se avisa igual.
+      inputBanner.classList.add('visible');
+    }
     const providerAtUpdate = currentProvider;
     const projectAtUpdate = activeProjectId;
-    readCloudConsent(providerAtUpdate, projectAtUpdate).then(consent => {
-      if (consent && currentProvider === providerAtUpdate && activeProjectId === projectAtUpdate && badge) {
-        badge.textContent = t('cloudConsent.authorized');
+    Promise.all([
+      readCloudConsent(providerAtUpdate, projectAtUpdate),
+      readCloudBannerDismissal(providerAtUpdate, projectAtUpdate)
+    ]).then(([consent, dismissal]) => {
+      if (currentProvider !== providerAtUpdate || activeProjectId !== projectAtUpdate) return;
+      if (consent && badge) {
+        // El indicador es compacto: la frase completa vive en el tooltip, no
+        // dentro de una píldora que empujaría al resto de la barra.
+        renderPrivacyBadge(badge, 'cloud', t('cloudConsent.authorizedBadge'));
+        if (indicator) indicator.setAttribute('data-tooltip', t('cloudConsent.authorized'));
         if (revokeButton) revokeButton.style.display = '';
       }
+      const silenced = Boolean(dismissal) && dismissal.fingerprint === cloudConsentFingerprint(consent);
+      if (inputBanner && silenced) inputBanner.classList.remove('visible');
     }).catch(() => {});
   }
 }
@@ -2607,6 +2771,60 @@ async function ensureQuickChat() {
 
 const PROJECT_ICONS = ['📁', '🏠', '💼', '🎯', '📚', '🔬', '🎨', '💻', '🌐', '🧠', '⚡', '🔧', '📊', '🎮', '🏗️', '📝'];
 const PROJECT_COLORS = ['#3b82f6', '#22c55e', '#ef4444', '#eab308', '#a855f7', '#06b6d4', '#f97316', '#ec4899'];
+const QUICK_CHAT_VISUAL = { icon: '💬', color: '#60a5fa' };
+// Identidad estable para proyectos antiguos sin id: no se recurre al índice de
+// la lista, que cambia al crear o borrar cualquier otro proyecto.
+const PROJECT_VISUAL_FALLBACK_ID = 'proyecto-sin-id';
+
+// Hash determinista (djb2 xor) sobre el identificador del proyecto. La misma
+// entrada da siempre el mismo par icono/color, en cualquier orden de lista y en
+// cualquier ventana.
+function projectVisualHash(identity) {
+  const texto = String(identity || PROJECT_VISUAL_FALLBACK_ID);
+  let hash = 5381;
+  for (let i = 0; i < texto.length; i++) {
+    hash = ((hash * 33) ^ texto.charCodeAt(i)) >>> 0;
+  }
+  return hash;
+}
+
+/**
+ * Icono y color por defecto de un proyecto. Depende sólo de su identidad: el
+ * cálculo anterior usaba la posición en la lista, así que borrar o crear otro
+ * proyecto repintaba los demás.
+ */
+function projectVisualDefaults(projectId) {
+  if (projectId === QUICK_CHAT_ID) return { ...QUICK_CHAT_VISUAL };
+  const hash = projectVisualHash(projectId);
+  return {
+    icon: PROJECT_ICONS[hash % PROJECT_ICONS.length],
+    color: PROJECT_COLORS[Math.floor(hash / PROJECT_ICONS.length) % PROJECT_COLORS.length]
+  };
+}
+
+/**
+ * Visual efectivo de un proyecto: lo guardado por la usuaria manda siempre y no
+ * se persiste nada aquí. El fallback sólo rellena lo que falta.
+ */
+function resolveProjectVisual(project) {
+  const id = project?.id;
+  const defaults = projectVisualDefaults(id);
+  return {
+    icon: project?.icon || defaults.icon,
+    color: project?.color || defaults.color,
+    isQuickChat: id === QUICK_CHAT_ID
+  };
+}
+
+// Una sola fuente para la píldora del icono: antes se repetía el mismo cssText
+// en el sidebar y en el diálogo de mover, con riesgo de divergir.
+function applyProjectVisual(node, visual, { interactive = false } = {}) {
+  node.classList.add('project-icon-btn');
+  node.textContent = visual.icon;
+  node.style.setProperty('--project-color', visual.color);
+  node.style.cursor = interactive ? 'pointer' : 'default';
+  return node;
+}
 
 async function loadProjects() {
   const projects = await withTimeout(Store.listProjects(), 8000, 'cargar proyectos');
@@ -2620,20 +2838,21 @@ async function loadProjects() {
     return (b.created_at || 0) - (a.created_at || 0);
   });
 
-  let userIdx = 0;
   for (const p of sorted) {
-    const isQC = p.id === QUICK_CHAT_ID;
-    const projColor = p.color || (isQC ? '#60a5fa' : PROJECT_COLORS[userIdx % PROJECT_COLORS.length]);
-    const projIcon = p.icon || (isQC ? '💬' : PROJECT_ICONS[userIdx % PROJECT_ICONS.length]);
-    if (!isQC) userIdx++;
+    const visual = resolveProjectVisual(p);
+    const isQC = visual.isQuickChat;
+    const projColor = visual.color;
+    const projIcon = visual.icon;
 
     const div = document.createElement("div");
-    div.className = "item project-item" + (p.id === activeProjectId ? " active" : "");
+    div.dataset.projectId = p.id;
+    const isActiveProject = p.id === activeProjectId;
+    div.className = "item project-item" + (isActiveProject ? " active" : "");
+    // aria-current viaja con .active: el estado activo no queda sólo en el color.
+    if (isActiveProject) div.setAttribute("aria-current", "true");
+    else div.removeAttribute("aria-current");
 
-    const iconBtn = document.createElement("span");
-    iconBtn.className = "project-icon-btn";
-    iconBtn.textContent = projIcon;
-    iconBtn.style.cssText = `background:${projColor}20;border:1px solid ${projColor}40;color:${projColor};width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;cursor:${isQC ? 'default' : 'pointer'};`;
+    const iconBtn = applyProjectVisual(document.createElement("span"), visual, { interactive: !isQC });
     if (!isQC) {
       iconBtn.title = "Cambiar icono/color";
       iconBtn.onclick = (e) => { e.stopPropagation(); showProjectStylePicker(p.id, iconBtn, projIcon, projColor); };
@@ -2749,6 +2968,20 @@ function showProjectStylePicker(projectId, iconBtnEl, currentIcon, currentColor)
   }, 10);
 }
 
+// Seleccionar un proyecto no repintaba la lista: el proyecto abierto se quedaba
+// sin marcar hasta que algo llamara a loadProjects(). Se marca en el sitio, sin
+// releer proyectos por IPC.
+function markActiveProject(projectId) {
+  const list = el("projectList");
+  if (!list) return;
+  for (const node of Array.from(list.children)) {
+    const isActive = node.dataset.projectId === projectId;
+    node.classList.toggle("active", isActive);
+    if (isActive) node.setAttribute("aria-current", "true");
+    else node.removeAttribute("aria-current");
+  }
+}
+
 async function selectProject(projectId, name) {
   if (!projectId) { console.warn('[selectProject] Ignored: missing projectId'); return; }
   return safeViewChange(async (signal) => {
@@ -2759,6 +2992,7 @@ async function selectProject(projectId, name) {
     activeProjectId = projectId;
     activeChatId = null;
     chatAttachments = [];
+    markActiveProject(projectId);
 
     const chatEl = el("chat");
     if (chatEl) {
@@ -2812,7 +3046,8 @@ async function selectProject(projectId, name) {
         if (e.name === 'AbortError') throw e;
         console.error('[selectProject] Error creating chat:', e);
         if (chatEl) {
-          chatEl.innerHTML = '<div class="empty-chat-hint">Crea un nuevo chat para empezar</div>';
+          chatEl.innerHTML = "";
+          renderEmptyState(chatEl, 'no-chat');
         }
       }
     } else {
@@ -2861,6 +3096,20 @@ async function createProject() {
   showToast(t('toast.projectCreated'), "success");
 }
 
+// El glifo es decorativo: el nombre accesible viene de i18n, no del emoji.
+function buildChatActionButton({ glyph, label, className }) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = className;
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  const icon = document.createElement("span");
+  icon.setAttribute("aria-hidden", "true");
+  icon.textContent = glyph;
+  button.appendChild(icon);
+  return button;
+}
+
 async function refreshChats() {
   const list = document.getElementById("chatList");
   if (!list) return;
@@ -2871,17 +3120,21 @@ async function refreshChats() {
   const chats = await withTimeout(Store.listChats(activeProjectId), 8000, 'cargar lista de chats');
 
   if (chats.length === 0) {
+    // Marcador, no elemento seleccionable: nunca puede quedar activo.
     const empty = document.createElement("div");
-    empty.className = "item";
-    empty.style.opacity = "0.7";
-    empty.textContent = "Sin chats todavía";
+    empty.className = "item item-placeholder";
+    empty.setAttribute("aria-disabled", "true");
+    empty.textContent = t('sidebar.noChats');
     list.appendChild(empty);
     return;
   }
 
   for (const c of chats) {
     const div = document.createElement("div");
-    div.className = "item" + (c.id === activeChatId ? " active" : "");
+    const isActiveChat = c.id === activeChatId;
+    div.className = "item" + (isActiveChat ? " active" : "");
+    if (isActiveChat) div.setAttribute("aria-current", "true");
+    else div.removeAttribute("aria-current");
     div.style.display = "flex";
     div.style.alignItems = "center";
     div.style.gap = "6px";
@@ -2892,37 +3145,33 @@ async function refreshChats() {
     titleSpan.style.minWidth = "0";
     titleSpan.style.overflow = "hidden";
     titleSpan.style.textOverflow = "ellipsis";
+    // Una sola línea: con las acciones ocupando su sitio, el título envolvía en
+    // tres o cuatro renglones y la fila crecía a lo alto.
+    titleSpan.style.whiteSpace = "nowrap";
     titleSpan.style.cursor = "pointer";
 
-    const renameBtn = document.createElement("button");
-    renameBtn.type = "button";
-    renameBtn.className = "btn-icon knowledge-item-remove";
-    renameBtn.title = "Renombrar chat";
-    renameBtn.setAttribute("aria-label", "Renombrar");
-    renameBtn.textContent = "✏️";
-    renameBtn.style.flexShrink = "0";
-    renameBtn.style.padding = "2px 6px";
-    renameBtn.style.fontSize = "12px";
+    // Un contenedor real: las tres acciones se revelan y se recorren juntas, y
+    // el glifo queda fuera del nombre accesible (aria-label + title por i18n).
+    const actions = document.createElement("div");
+    actions.className = "item-actions";
 
-    const moveBtn = document.createElement("button");
-    moveBtn.type = "button";
-    moveBtn.className = "btn-icon item-action-move";
-    moveBtn.title = "Mover a otro proyecto";
-    moveBtn.setAttribute("aria-label", "Mover a otro proyecto");
-    moveBtn.textContent = "→";
-    moveBtn.style.flexShrink = "0";
-    moveBtn.style.fontSize = "12px";
-    moveBtn.style.padding = "2px 6px";
+    const renameBtn = buildChatActionButton({
+      glyph: "✏️",
+      label: t('action.renameChat'),
+      className: "btn-icon knowledge-item-remove item-action-rename"
+    });
 
-    const delBtn = document.createElement("button");
-    delBtn.type = "button";
-    delBtn.className = "btn-icon knowledge-item-remove";
-    delBtn.title = "Eliminar chat";
-    delBtn.setAttribute("aria-label", "Eliminar chat");
-    delBtn.textContent = "×";
-    delBtn.style.flexShrink = "0";
-    delBtn.style.padding = "2px 6px";
-    delBtn.style.fontSize = "14px";
+    const moveBtn = buildChatActionButton({
+      glyph: "→",
+      label: t('action.moveChat'),
+      className: "btn-icon item-action-move"
+    });
+
+    const delBtn = buildChatActionButton({
+      glyph: "×",
+      label: t('action.deleteChat'),
+      className: "btn-icon knowledge-item-remove item-action-danger"
+    });
 
     const openChatId = c.id;
     div.onclick = (e) => {
@@ -2967,13 +3216,14 @@ async function refreshChats() {
           return; 
         }
 
-        const selectOptions = others.map((pr, i) => {
-          const isQC = pr.id === QUICK_CHAT_ID;
+        const selectOptions = others.map((pr) => {
+          // Mismo helper que el sidebar: el proyecto se ve igual en los dos sitios.
+          const visual = resolveProjectVisual(pr);
           return {
-            label: isQC ? (t('project.quickChat') || 'Chat rápido') : pr.name,
+            label: visual.isQuickChat ? (t('project.quickChat') || 'Chat rápido') : pr.name,
             value: pr.id,
-            icon: pr.icon || (isQC ? '💬' : PROJECT_ICONS[i % PROJECT_ICONS.length]),
-            color: pr.color || (isQC ? '#60a5fa' : PROJECT_COLORS[i % PROJECT_COLORS.length])
+            icon: visual.icon,
+            color: visual.color
           };
         });
         const targetId = await mikaSelect(t('modal.moveChat') || 'Mover chat a:', selectOptions);
@@ -3047,10 +3297,18 @@ async function refreshChats() {
       }
     };
 
+    const separator = document.createElement("span");
+    separator.className = "item-actions-separator";
+    separator.setAttribute("aria-hidden", "true");
+
+    actions.appendChild(renameBtn);
+    actions.appendChild(moveBtn);
+    // Separador antes de eliminar: la acción destructiva no queda pegada a mover.
+    actions.appendChild(separator);
+    actions.appendChild(delBtn);
+
     div.appendChild(titleSpan);
-    div.appendChild(renameBtn);
-    div.appendChild(moveBtn);
-    div.appendChild(delBtn);
+    div.appendChild(actions);
     list.appendChild(div);
   }
 }
@@ -3182,7 +3440,11 @@ async function openChatInternal(chatId, signal) {
     console.error("[openChat] ERROR:", error);
     showToast("Error al cargar el chat", "error");
     if (chatEl) {
-      chatEl.innerHTML = '<div class="empty-chat-hint">Error cargando mensajes. Intenta de nuevo.</div>';
+      chatEl.innerHTML = "";
+      const loadError = document.createElement("div");
+      loadError.className = "empty-chat-hint";
+      loadError.textContent = t('chat.loadError');
+      chatEl.appendChild(loadError);
     }
   }
   console.log('[openChat] DONE');
@@ -3275,6 +3537,74 @@ async function openChat(chatId) {
   });
 }
 
+// Estado vacío diseñado. Dos variantes:
+//   'empty-chat' — hay chat abierto sin mensajes: el CTA enfoca #input.
+//   'no-chat'    — no hay chat seleccionado: el CTA usa newChat().
+// El CTA reutiliza siempre la ruta existente; no hay segunda implementación.
+function renderEmptyState(container, variant = 'empty-chat') {
+  if (!container) return null;
+  const isNoChat = variant === 'no-chat';
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'empty-state';
+
+  const logo = document.createElement('img');
+  logo.className = 'empty-logo';
+  logo.src = './assets/logo.png';
+  logo.alt = 'MIKA5';
+  wrapper.appendChild(logo);
+
+  const title = document.createElement('div');
+  title.className = 'empty-title';
+  title.textContent = isNoChat ? t('empty.noChatTitle') : t('empty.title');
+  wrapper.appendChild(title);
+
+  const subtitle = document.createElement('div');
+  subtitle.className = 'empty-subtitle';
+  subtitle.textContent = isNoChat ? t('empty.noChatSubtitle') : t('empty.subtitle');
+  wrapper.appendChild(subtitle);
+
+  const cta = document.createElement('button');
+  cta.type = 'button';
+  cta.className = 'btn-primary empty-cta';
+  cta.textContent = isNoChat ? t('empty.ctaNewChat') : t('empty.ctaStart');
+  cta.addEventListener('click', () => {
+    if (isNoChat) {
+      newChat();
+      return;
+    }
+    const input = el('input');
+    if (input) { input.disabled = false; try { input.focus(); } catch (_) {} }
+  });
+  wrapper.appendChild(cta);
+
+  if (!isNoChat) {
+    const chips = document.createElement('div');
+    chips.className = 'suggestion-chips';
+    for (const key of ['empty.suggestion1', 'empty.suggestion2', 'empty.suggestion3']) {
+      const text = t(key);
+      if (!text || text === key) continue;
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'suggestion-chip';
+      chip.textContent = text;
+      chip.addEventListener('click', () => {
+        const input = el('input');
+        if (!input) return;
+        input.disabled = false;
+        input.value = text;
+        try { input.focus(); } catch (_) {}
+        try { updateSendButtonState(); } catch (_) {}
+      });
+      chips.appendChild(chip);
+    }
+    if (chips.children.length) wrapper.appendChild(chips);
+  }
+
+  container.appendChild(wrapper);
+  return wrapper;
+}
+
 // renderMessagesSafe: DocumentFragment + abort signal + tracked setTimeout + load-more
 function renderMessagesSafe(messages, signal, showLoadMore) {
   const chatEl = el("chat");
@@ -3288,12 +3618,15 @@ function renderMessagesSafe(messages, signal, showLoadMore) {
   chatEl.innerHTML = "";
 
   if (!Array.isArray(messages) || messages.length === 0) {
-    const hint = document.createElement("div");
-    hint.className = "empty-chat-hint";
-    hint.textContent = messages?.length === 0
-      ? "Escribe un mensaje abajo para empezar."
-      : "Error al cargar mensajes.";
-    chatEl.appendChild(hint);
+    // Orden contractual: 1) pintar 2) habilitar 3) enfocar 4) recalcular envío.
+    if (messages?.length === 0) {
+      renderEmptyState(chatEl, 'empty-chat');
+    } else {
+      const hint = document.createElement("div");
+      hint.className = "empty-chat-hint";
+      hint.textContent = t('chat.loadError');
+      chatEl.appendChild(hint);
+    }
     if (input) { input.disabled = false; try { input.focus(); } catch(e) {} }
     try { updateSendButtonState(); } catch(e) {}
     return;
@@ -3481,9 +3814,10 @@ function applyTranslations() {
     const elem = el(id);
     if (elem) elem[cfg.attr] = t(cfg.key);
   }
-  // Footer
-  const footer = document.querySelector('.input-area > div:last-child');
-  if (footer && footer.style.textAlign === 'center') footer.textContent = t('footer.tagline');
+  // Footer: por id. El selector estructural dependía de un style inline que ya
+  // no existe y dejaba el pie sin traducir.
+  const footer = el('footerStatus');
+  if (footer && providerPrivacy !== 'cloud') footer.textContent = t('footer.tagline');
   // Section titles
   document.querySelectorAll('.section-title > span').forEach(span => {
     if (span.textContent.includes('PROYECTO') || span.textContent.includes('PROJECT')) span.textContent = t('sidebar.projects');
@@ -3494,6 +3828,11 @@ function applyTranslations() {
   if (sendBtn && !isGenerating) {
     const svgContent = sendBtn.querySelector('svg')?.outerHTML || '';
     sendBtn.innerHTML = svgContent + ' ' + t('action.send');
+  }
+  const moreActionsBtn = el('btnMoreActions');
+  if (moreActionsBtn) {
+    moreActionsBtn.setAttribute('aria-label', t('header.moreActions'));
+    moreActionsBtn.title = t('header.moreActions');
   }
 }
 
@@ -5816,10 +6155,122 @@ function toggleSidebar() {
   window.mika5.setAppState("sidebar_collapsed", isOpen ? "" : "1").catch(() => {});
 }
 
+// --- Menú "Más acciones" ---
+//
+// Los controles secundarios ya no compiten por la barra. Conservan sus IDs, sus
+// handlers y su estado disabled: el menú sólo cambia dónde viven.
+function moreActionsItems(menu) {
+  return Array.from(menu.querySelectorAll('[role="menuitem"]'))
+    .filter(item => !item.disabled && item.style.display !== 'none');
+}
+
+function closeMoreActionsMenu({ restoreFocus = false } = {}) {
+  const trigger = el('btnMoreActions');
+  const menu = el('moreActionsMenu');
+  if (!trigger || !menu) return;
+  menu.hidden = true;
+  trigger.setAttribute('aria-expanded', 'false');
+  if (restoreFocus) { try { trigger.focus(); } catch (_) {} }
+}
+
+function openMoreActionsMenu({ focusFirst = false } = {}) {
+  const trigger = el('btnMoreActions');
+  const menu = el('moreActionsMenu');
+  if (!trigger || !menu) return;
+  // Nunca dos superficies desplegadas a la vez: no pueden solaparse.
+  const modelOptions = el('modelOptions');
+  if (modelOptions) modelOptions.classList.remove('open');
+  const modelTrigger = el('modelTrigger');
+  if (modelTrigger) modelTrigger.setAttribute('aria-expanded', 'false');
+  const providerOptions = el('providerOptions');
+  if (providerOptions) providerOptions.style.display = 'none';
+
+  menu.hidden = false;
+  trigger.setAttribute('aria-expanded', 'true');
+  if (focusFirst) {
+    const items = moreActionsItems(menu);
+    if (items.length) { try { items[0].focus(); } catch (_) {} }
+  }
+}
+
+function wireMoreActionsMenu() {
+  const trigger = el('btnMoreActions');
+  const menu = el('moreActionsMenu');
+  if (!trigger || !menu) return;
+
+  const isOpen = () => trigger.getAttribute('aria-expanded') === 'true';
+
+  // Abrir es sólo abrir: el click no se propaga a ningún elemento del menú.
+  trigger.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (isOpen()) closeMoreActionsMenu();
+    else openMoreActionsMenu();
+  });
+
+  trigger.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      openMoreActionsMenu({ focusFirst: e.key === 'ArrowDown' });
+    } else if (e.key === 'Escape' && isOpen()) {
+      e.preventDefault();
+      closeMoreActionsMenu({ restoreFocus: true });
+    }
+  });
+
+  menu.addEventListener('keydown', (e) => {
+    const items = moreActionsItems(menu);
+    const current = items.indexOf(document.activeElement);
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeMoreActionsMenu({ restoreFocus: true });
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (items.length) items[(current + 1 + items.length) % items.length].focus();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (items.length) items[(current - 1 + items.length) % items.length].focus();
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      if (items.length) items[0].focus();
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      if (items.length) items[items.length - 1].focus();
+    } else if (e.key === 'Tab') {
+      closeMoreActionsMenu();
+    }
+  });
+
+  // Ejecutar una acción cierra el menú; el handler propio del botón sigue intacto.
+  menu.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (e.target.closest('[role="menuitem"]')) closeMoreActionsMenu();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!isOpen()) return;
+    if (e.target.closest('#moreActionsMenu, #btnMoreActions')) return;
+    closeMoreActionsMenu();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && isOpen()) closeMoreActionsMenu({ restoreFocus: true });
+  });
+}
+
 function wire() {
   el("btnCreateProject").onclick = createProject;
   const projInput = el("projectName");
   if (projInput) projInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); createProject(); } });
+
+  wireMoreActionsMenu();
+
+  const cloudBannerDismiss = el("cloudBannerDismiss");
+  if (cloudBannerDismiss) {
+    cloudBannerDismiss.addEventListener("click", () => {
+      dismissCloudInputBanner().catch(e => console.warn('dismissCloudInputBanner:', e));
+    });
+  }
 
   // Language toggle
   const langBtn = el("btnLangToggle");
@@ -5830,6 +6281,8 @@ function wire() {
       setLanguage(newLang);
       langBtn.textContent = newLang === 'en' ? 'EN' : 'ES';
       applyTranslations();
+      // El pie y el aviso cloud son texto traducido y con estado: se repintan.
+      updatePrivacyUI();
     };
   }
   el("btnNewChat").onclick = newChat;

@@ -42,6 +42,8 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  overflow: hidden;
   padding: 4px 10px;
   border-radius: 20px;
   font-size: 11px;
@@ -65,10 +67,22 @@
   0%, 100% { box-shadow: 0 0 0 0 rgba(251, 146, 60, 0); }
   50% { box-shadow: 0 0 8px 2px rgba(251, 146, 60, 0.2); }
 }
+/* Compacto de verdad: si el texto no puede encogerse, desborda su contenedor y
+   se pinta encima de los controles vecinos en anchos reducidos. El icono es un
+   nodo aparte para que el truncado recorte sólo el texto. */
 .privacy-badge {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  max-width: 18ch;
+  overflow: hidden;
+}
+.privacy-badge-icon { flex: 0 0 auto; }
+.privacy-badge-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .privacy-indicator[data-tooltip]::after {
@@ -110,8 +124,13 @@
 }
 
 /* === Provider selector === */
-.provider-selector { position: relative; }
+.provider-selector { position: relative; overflow: hidden; }
+/* El botón tiene que encoger con su envoltorio: sin max-width se desbordaba y
+   se dibujaba sobre el indicador de privacidad en anchos reducidos. */
 .provider-trigger {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
   color: var(--text-main);
@@ -226,32 +245,46 @@
   text-decoration: underline;
 }
 
-/* === Cloud warning banner === */
-.cloud-warning {
-  width: 100%;
-  background: rgba(251, 146, 60, 0.1);
-  border: 1px solid rgba(251, 146, 60, 0.4);
-  color: #fb923c;
-  padding: 8px 16px;
-  border-radius: 8px;
-  font-size: 12px;
-  line-height: 1.5;
-}
-.cloud-warning a { color: #facc15; text-decoration: underline; }
-
+/* === Cloud notice ===
+   Una sola superficie detallada. El antiguo #cloudWarning del header se retiró:
+   duplicaba este mismo mensaje y competía por el alto fijo de la barra. */
 .cloud-input-banner {
   display: none;
-  background: rgba(251, 146, 60, 0.08);
-  border: 1px solid rgba(251, 146, 60, 0.3);
-  color: #fb923c;
-  padding: 6px 14px;
+  align-items: center;
+  gap: 10px;
+  background: var(--warning-surface);
+  border: 1px solid var(--warning-border);
+  color: var(--warning-text);
+  padding: 8px 12px;
   border-radius: 8px 8px 0 0;
-  font-size: 11px;
-  text-align: center;
+  font-size: 12px;
+  line-height: 1.5;
   max-width: 900px;
   margin: 0 auto -1px;
 }
-.cloud-input-banner.visible { display: block; }
+.cloud-input-banner.visible { display: flex; }
+.cloud-input-banner-body { flex: 1 1 auto; min-width: 0; }
+.cloud-input-banner-provider { font-weight: 600; }
+.cloud-input-banner-dismiss {
+  flex: 0 0 auto;
+  background: transparent;
+  border: 1px solid var(--warning-border);
+  color: var(--warning-text);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px 9px;
+  transition: background 0.2s, color 0.2s;
+}
+.cloud-input-banner-dismiss:hover {
+  background: var(--warning-surface);
+  color: var(--text-main);
+}
+.cloud-input-banner-dismiss:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
 
 /* === Project items === */
 .project-item {
