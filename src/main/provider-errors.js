@@ -207,6 +207,27 @@ function probeDeExito({ httpStatus = 200, authenticated = null } = {}) {
   };
 }
 
+/**
+ * Sonda de una respuesta que llegó bien y no se pudo interpretar: un 2xx cuyo
+ * cuerpo no es JSON válido, o lo es y no tiene la forma esperada.
+ *
+ * La evidencia se CONSERVA. El servidor contestó —hubo código de estado— y, si
+ * el proveedor exige credencial, la aceptó: un 200 no se emite tras rechazar
+ * una clave. Tratar esto como un fallo genérico borraba las dos cosas y dejaba
+ * `reachable` en null, que es justo lo contrario de lo que acababa de
+ * demostrarse.
+ */
+function probeDeRespuestaInvalida({ httpStatus = 200, authenticated = null } = {}) {
+  return {
+    attempted: true,
+    reachable: true,
+    authenticated,
+    httpStatus,
+    errorCode: 'PROVIDER_RESPONSE_INVALID',
+    logMessage: ''
+  };
+}
+
 /** Sonda de un adaptador que no intentó nada: catálogo declarado en el código. */
 function probeNoIntentada() {
   return {
@@ -230,5 +251,6 @@ module.exports = {
   sanearMensaje,
   probeDeError,
   probeDeExito,
+  probeDeRespuestaInvalida,
   probeNoIntentada
 };

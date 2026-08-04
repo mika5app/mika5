@@ -90,7 +90,8 @@ function crearServidor() {
   const servidor = http.createServer((req, res) => {
     const responder = () => {
       if (guion.cortar) { req.destroy(); return; }
-      const json = JSON.stringify(guion.cuerpo);
+      // `crudo` permite devolver un cuerpo que NO es JSON válido.
+      const json = typeof guion.crudo === 'string' ? guion.crudo : JSON.stringify(guion.cuerpo);
       res.writeHead(guion.status, { 'Content-Type': 'application/json' });
       res.end(json);
     };
@@ -189,6 +190,23 @@ console.log('\n=== 3. Timeout y abort contra el listModels real de llamacpp ==='
   const abortado = describirError(Object.assign(new Error('x'), { name: 'AbortError' }));
   check(abortado.errorCode === 'PROVIDER_ABORTED' && abortado.reachable === null,
     'un abort no prueba nada sobre el servidor: reachable queda en null');
+
+  // Corrección de una afirmación anterior. La prueba de arriba ejercita el
+  // CLASIFICADOR, no una cancelación real: hoy NINGÚN `listModels()` acepta
+  // una señal externa, así que `PROVIDER_ABORTED` es inalcanzable por esa vía.
+  // Se deja constatado para que deje de serlo el día que un adaptador la
+  // admita, en lugar de dar por probado algo que no ocurre.
+  const conSenal = Object.entries(PROVIDERS).filter(([, c]) => {
+    const fuente = String(c.listModels);
+    const firma = fuente.slice(0, fuente.indexOf(')') + 1);
+    return /signal|abortSignal|\bopts\b|\boptions\b/i.test(firma);
+  });
+  check(conSenal.length === 0,
+    `ningún adaptador admite todavía señal externa en listModels() (${conSenal.map(([i]) => i).join(', ') || 'ninguno'})`);
+  check(PROVIDERS.local.listModels.length === 0 && PROVIDERS.llamacpp.listModels.length === 0,
+    'los dos runtimes locales declaran listModels() sin parámetros: no hay dónde pasar una señal');
+  check(String(PROVIDERS.llamacpp.listModels).includes('AbortSignal.timeout'),
+    'la única cancelación que existe hoy es el timeout interno de llama.cpp, que produce PROVIDER_TIMEOUT');
 }
 
 console.log('\n=== 4. La evidencia sólo viene de la sonda declarada ===');
@@ -538,12 +556,135 @@ console.log('\n=== 14. Textos ES/EN de estados y códigos ===');
   }
 }
 
-console.log('\n=== 15. Compatibilidad de status() ===');
+console.log('\n=== 15. Un 2xx ilegible conserva la evidencia del 2xx ===');
 {
+  // Que el cuerpo no se entienda no borra lo que el código de estado demostró:
+  // el servidor respondió y, si el proveedor exige credencial, la aceptó. La
+  // versión anterior lo trataba como fallo genérico y devolvía reachable=null,
+  // justo lo contrario de lo que acababa de probarse.
+  const casos = [
+    ['JSON malformado', { status: 200, crudo: '{"data": [' }],
+    ['JSON válido con estructura inválida', { status: 200, cuerpo: { objeto: 'sin data' } }],
+    ['data que no es un array', { status: 200, cuerpo: { data: 'no soy un array' } }],
+    ['cuerpo vacío', { status: 200, crudo: '' }]
+  ];
+
+  for (const [nombre, guion] of casos) {
+    srv.guionizar(guion);
+    const m = gestor();
+    m.apiKeys.openai = 'clave';
+    const d = await conAdaptador('openai', { baseUrl: BASE_SINTETICA }, () => m.getAvailability('openai'));
+
+    check(d.reachable === true, `openai/${nombre}: reachable sigue siendo true`);
+    check(d.authenticated === true, `openai/${nombre}: authenticated sigue siendo true`);
+    check(d.httpStatus === 200, `openai/${nombre}: httpStatus conserva el código recibido (${d.httpStatus})`);
+    check(d.errorCode === 'PROVIDER_RESPONSE_INVALID', `openai/${nombre}: ${d.errorCode}`);
+    check(d.ready === false, `openai/${nombre}: no está listo`);
+    check(d.canAttempt === false, `openai/${nombre}: ni intentable`);
+    check(d.uiState === UI_STATE.PROVIDER_ERROR, `openai/${nombre}: estado ${d.uiState}`);
+  }
+
+  // llama.cpp es local: no hay credencial que aceptar, así que `authenticated`
+  // se queda en null. La conectividad sí queda demostrada.
+  for (const [nombre, guion] of [
+    ['JSON malformado', { status: 200, crudo: 'no soy json' }],
+    ['estructura inválida', { status: 200, cuerpo: { modelos: [] } }]
+  ]) {
+    srv.guionizar(guion);
+    const m = gestor();
+    const d = await conAdaptador('llamacpp', {
+      baseUrl: BASE_SINTETICA,
+      status: async () => ({ ok: true })
+    }, () => m.getAvailability('llamacpp'));
+    check(d.reachable === true, `llamacpp/${nombre}: reachable=true`);
+    check(d.authenticated === null, `llamacpp/${nombre}: authenticated=null, no hay credencial que validar`);
+    check(d.httpStatus === 200, `llamacpp/${nombre}: httpStatus=200`);
+    check(d.errorCode === 'PROVIDER_RESPONSE_INVALID', `llamacpp/${nombre}: ${d.errorCode}`);
+    check(d.ready === false && d.canAttempt === false, `llamacpp/${nombre}: ni listo ni intentable`);
+  }
+
+  // Groq degrada a su lista fija: el respaldo no puede convertir una respuesta
+  // ilegible en un proveedor utilizable.
+  srv.guionizar({ status: 200, crudo: '{{{' });
+  const g = gestor();
+  g.apiKeys.groq = 'clave';
+  const r = await conAdaptador('groq', { baseUrl: BASE_SINTETICA }, () => g.getAvailability('groq'));
+  check(r.modelsAvailable > 0, `groq: degrada a su catálogo declarado (${r.modelsAvailable})`);
+  check(r.errorCode === 'PROVIDER_RESPONSE_INVALID', `groq: conserva el motivo real (${r.errorCode})`);
+  check(r.reachable === true && r.authenticated === true, 'groq: la evidencia del 2xx sobrevive');
+  check(r.canAttempt === false, 'groq: el respaldo no lo vuelve utilizable');
+
+  // El contrato se aplica a los tres adaptadores que analizan JSON de red.
+  const fuente = fs.readFileSync(path.join(__dirname, '../src/main/ai-providers.js'), 'utf8');
+  const conParseo = ['openai', 'groq', 'llamacpp'];
+  for (const id of conParseo) {
+    const bloque = fuente.slice(fuente.indexOf(`  ${id}: {`), fuente.indexOf('\n  },', fuente.indexOf(`  ${id}: {`)));
+    assert(bloque.includes('probeDeRespuestaInvalida'),
+      `${id} analiza JSON de red y debe declarar la sonda de respuesta inválida`);
+  }
+  check(true, `los tres adaptadores que analizan JSON de red aplican el mismo contrato (${conParseo.join(', ')})`);
+
+  const i18n = fs.readFileSync(path.join(__dirname, '../src/renderer/i18n.js'), 'utf8');
+  const bloques = i18n.split(/^  (?:es|en): \{$/m);
+  const claveInvalida = "'provider.error.PROVIDER_RESPONSE_INVALID'";
+  check(bloques[1].includes(claveInvalida) && bloques[2].includes(claveInvalida),
+    'PROVIDER_RESPONSE_INVALID tiene texto en ES y EN');
+
+  srv.guionizar({ status: 200, cuerpo: MODELOS_HTTP });
+}
+
+console.log('\n=== 16. status() conserva su comportamiento, no sólo su forma ===');
+{
+  // Comprobar `typeof st.ok === 'boolean'` no demostraba nada: cualquier
+  // función que devolviera `{ ok: false }` habría pasado. Aquí se comprueba
+  // que sigue delegando en el adaptador cuando éste tiene sonda, y que sigue
+  // reflejando la presencia de credencial cuando no la tiene.
+
+  // Runtime local: delega en la sonda del adaptador, en los dos sentidos.
+  for (const [id, ok] of [['local', true], ['local', false], ['llamacpp', true], ['llamacpp', false]]) {
+    const m = gestor();
+    m.currentProvider = id;
+    let invocada = false;
+    const st = await conAdaptador(id, {
+      status: async () => { invocada = true; return { ok, message: ok ? 'activo' : 'caído' }; }
+    }, () => m.status());
+    check(invocada === true, `status() de ${id} delega en la sonda del adaptador`);
+    check(st.ok === ok, `status() de ${id} propaga ok=${ok} sin alterarlo`);
+    check(st.message === (ok ? 'activo' : 'caído'),
+      `status() de ${id} conserva el mensaje del adaptador ("${st.message}")`);
+  }
+
+  // Proveedor cloud: refleja la presencia de credencial y nada más. Ninguna
+  // sonda del adaptador debe invocarse por este camino.
+  for (const id of ['openai', 'anthropic', 'groq', 'moonshot', 'alibaba']) {
+    const sin = gestor();
+    sin.currentProvider = id;
+    let tocado = false;
+    const stSin = await conAdaptador(id, {
+      listModels: async () => { tocado = true; return { models: [] }; }
+    }, () => sin.status());
+    check(stSin.ok === false, `${id} sin credencial: status().ok es false`);
+    check(typeof stSin.message === 'string' && stSin.message.length > 0,
+      `${id} sin credencial: status() explica por qué ("${stSin.message}")`);
+    check(tocado === false, `${id}: status() no consulta el catálogo ni gasta red`);
+
+    const con = gestor();
+    con.currentProvider = id;
+    con.apiKeys[id] = 'clave';
+    const stCon = await con.status();
+    check(stCon.ok === true, `${id} con credencial: status().ok es true`);
+  }
+
+  // Y la separación que motivó todo: `status().ok` NO implica utilizable.
   const m = gestor();
-  m.apiKeys.alibaba = 'clave';
+  m.currentProvider = 'alibaba';
+  m.apiKeys.alibaba = 'clave-sin-verificar';
   const st = await m.status();
-  check(typeof st.ok === 'boolean', 'status() sigue existiendo y conserva su forma');
+  const disp = await m.getAvailability('alibaba');
+  check(st.ok === true && disp.ready === false,
+    'status().ok puede ser true mientras la disponibilidad dice que no está verificado');
+  check(disp.uiState === UI_STATE.UNKNOWN,
+    'que es exactamente la distinción que el modelo antiguo no podía expresar');
 }
 
 await srv.cerrar();

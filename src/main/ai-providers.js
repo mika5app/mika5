@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const {
   describirError, sanearMensaje, errorDeRespuesta, ProviderError,
-  probeDeError, probeDeExito, probeNoIntentada
+  probeDeError, probeDeExito, probeDeRespuestaInvalida, probeNoIntentada
 } = require('./provider-errors');
 const {
   getProviderContract,
@@ -1243,7 +1243,10 @@ const ERRORES_QUE_IMPIDEN_USO = new Set([
   'PROVIDER_FORBIDDEN',
   'PROVIDER_RATE_LIMITED',
   'PROVIDER_TRANSPORT_UNREACHABLE',
-  'PROVIDER_UNKNOWN_ERROR'
+  'PROVIDER_UNKNOWN_ERROR',
+  // Un proveedor que contesta con algo que no se entiende no es utilizable,
+  // por mucho que el 2xx demuestre que está vivo.
+  'PROVIDER_RESPONSE_INVALID'
 ]);
 
 /**
@@ -1301,7 +1304,8 @@ const ESTADO_POR_ERROR = Object.freeze({
   PROVIDER_RATE_LIMITED: UI_STATE.RATE_LIMITED,
   PROVIDER_TRANSPORT_UNREACHABLE: UI_STATE.OFFLINE,
   PROVIDER_TIMEOUT: UI_STATE.UNKNOWN,
-  PROVIDER_ABORTED: UI_STATE.UNKNOWN
+  PROVIDER_ABORTED: UI_STATE.UNKNOWN,
+  PROVIDER_RESPONSE_INVALID: UI_STATE.PROVIDER_ERROR
 });
 
 /**
@@ -1506,15 +1510,28 @@ const PROVIDERS = {
           probe: probeDeError(errorDeRespuesta(res.status, 'OpenAI no devolvió el catálogo'))
         };
       }
+      // Un cuerpo ilegible tras un 2xx no borra lo que el 2xx ya demostró: el
+      // servidor respondió y aceptó la credencial. Conservarlo es la
+      // diferencia entre «el proveedor devolvió algo que no entiendo» y «no
+      // pude hablar con el proveedor».
       let data;
       try {
         data = await res.json();
-      } catch (error) {
-        return { models: [], probe: probeDeError(error) };
+      } catch (_) {
+        return {
+          models: [],
+          probe: probeDeRespuestaInvalida({ httpStatus: res.status, authenticated: true })
+        };
+      }
+      if (!data || !Array.isArray(data.data)) {
+        return {
+          models: [],
+          probe: probeDeRespuestaInvalida({ httpStatus: res.status, authenticated: true })
+        };
       }
       return {
-        models: (data.data || [])
-          .filter(m => m.id.includes('gpt'))
+        models: data.data
+          .filter(m => m && typeof m.id === 'string' && m.id.includes('gpt'))
           .map(m => ({
             name: m.id,
             size: 0,
@@ -1728,12 +1745,23 @@ const PROVIDERS = {
           headers: { 'Authorization': `Bearer ${apiKey}` }
         });
         if (res.ok) {
-          const data = await res.json();
-          const chatModels = (data.data || [])
-            .filter(m => !m.id.includes('whisper') && !m.id.includes('tts'))
-            .map(m => ({ name: m.id, size: 0, description: `Groq — ${m.id}` }));
-          probe = probeDeExito({ httpStatus: res.status, authenticated: true });
-          if (chatModels.length > 0) return { models: chatModels, probe };
+          // Mismo contrato que el resto: un 2xx ilegible conserva la evidencia
+          // que el 2xx ya dio, y se distingue de un fallo de transporte.
+          let data;
+          try {
+            data = await res.json();
+          } catch (_) {
+            data = null;
+          }
+          if (!data || !Array.isArray(data.data)) {
+            probe = probeDeRespuestaInvalida({ httpStatus: res.status, authenticated: true });
+          } else {
+            const chatModels = data.data
+              .filter(m => m && typeof m.id === 'string' && !m.id.includes('whisper') && !m.id.includes('tts'))
+              .map(m => ({ name: m.id, size: 0, description: `Groq — ${m.id}` }));
+            probe = probeDeExito({ httpStatus: res.status, authenticated: true });
+            if (chatModels.length > 0) return { models: chatModels, probe };
+          }
         } else {
           probe = probeDeError(errorDeRespuesta(res.status, 'Groq'));
         }
@@ -2081,19 +2109,27 @@ const PROVIDERS = {
       if (!res.ok) {
         return { models: [], probe: probeDeError(errorDeRespuesta(res.status, 'llama.cpp')) };
       }
+      // Mismo contrato que los demás adaptadores de red. `authenticated` queda
+      // en null: llama.cpp es local y no pide credencial, así que un 2xx no
+      // prueba nada sobre una autenticación que no existe.
       let data;
       try {
         data = await res.json();
-      } catch (error) {
-        return { models: [], probe: probeDeError(error) };
+      } catch (_) {
+        return { models: [], probe: probeDeRespuestaInvalida({ httpStatus: res.status }) };
+      }
+      if (!data || !Array.isArray(data.data)) {
+        return { models: [], probe: probeDeRespuestaInvalida({ httpStatus: res.status }) };
       }
       return {
-        models: (data.data || []).map(m => ({
-          name: m.id,
-          size: 0,
-          digest: m.id,
-          description: `llama.cpp — ${m.id}`
-        })),
+        models: data.data
+          .filter(m => m && typeof m.id === 'string')
+          .map(m => ({
+            name: m.id,
+            size: 0,
+            digest: m.id,
+            description: `llama.cpp — ${m.id}`
+          })),
         probe: probeDeExito({ httpStatus: res.status })
       };
     },
