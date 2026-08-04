@@ -866,6 +866,21 @@
             border: 1px solid rgba(156, 163, 175, 0.4);
         }
 
+        /* Sin verificar: no es un fallo, es ausencia de prueba. En gris, para
+           no confundirlo ni con conectado ni con caído. */
+        .status-pill.status-unknown {
+            background: rgba(148, 163, 184, 0.18);
+            color: #94a3b8;
+            border: 1px solid rgba(148, 163, 184, 0.4);
+        }
+
+        /* Falta configurar: hay una acción concreta del usuario pendiente. */
+        .status-pill.status-unconfigured {
+            background: rgba(234, 179, 8, 0.18);
+            color: #facc15;
+            border: 1px solid rgba(234, 179, 8, 0.4);
+        }
+
         /* --- Chat Area --- */
         .chat-area {
             flex: 1 1 0%;

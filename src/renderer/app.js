@@ -2289,17 +2289,25 @@ async function loadRuntime() {
   }
 
   const statusEl = el("rtStatus");
-  // La píldora informa de conectividad, no de si se puede usar: un proveedor
-  // alcanzable al que le falta la clave está conectado y no listo, y decir lo
-  // contrario era justo la incoherencia que se arrastraba.
-  const runtimeOk = disp.reachable !== false;
-  if (runtimeOk) {
-    statusEl.textContent = t('status.connected');
-    statusEl.className = "status-pill status-ok";
-  } else {
-    statusEl.textContent = t('status.disconnected');
-    statusEl.className = "status-pill status-offline";
-  }
+  // Cinco estados y no dos. «Conectado» exige evidencia de que el servidor
+  // contestó; sin ella el estado es `unknown`, que se dice como tal. Presentar
+  // una ausencia de prueba como conexión verificada era la mentira que este
+  // cambio quita.
+  const uiState = disp.uiState || 'unknown';
+  const CLASE_POR_ESTADO = {
+    'connected': 'status-ok',
+    'offline': 'status-offline',
+    'unknown': 'status-unknown',
+    'configuration-required': 'status-unconfigured',
+    'authentication-rejected': 'status-offline'
+  };
+  statusEl.textContent = t(`provider.state.${uiState}`);
+  statusEl.className = `status-pill ${CLASE_POR_ESTADO[uiState] || 'status-unknown'}`;
+  statusEl.dataset.providerState = uiState;
+  if (disp.errorCode) statusEl.title = disp.message || disp.errorCode;
+  else statusEl.removeAttribute('title');
+
+  const runtimeOk = uiState === 'connected';
   // El detalle vive dentro del menú; el punto del disparador conserva la señal.
   const moreActionsTrigger = el("btnMoreActions");
   if (moreActionsTrigger) moreActionsTrigger.dataset.runtime = runtimeOk ? 'ok' : 'offline';
@@ -2350,7 +2358,7 @@ async function loadRuntime() {
     if (models.length === 0) {
       const opt = document.createElement("option");
       opt.value = "";
-      opt.textContent = "Sin modelos (descarga uno o configura Cloud)";
+      opt.textContent = t(`provider.selectEmpty.${uiState}`);
       el("modelSelect").appendChild(opt);
     } else {
       if (currentProvider === 'alibaba') {
@@ -2387,9 +2395,7 @@ async function loadRuntime() {
     // tres situaciones se leían igual, «Proveedor no disponible».
     const opt = document.createElement("option");
     opt.value = "";
-    if (!disp.configured) opt.textContent = "Falta la API Key de este proveedor";
-    else if (disp.authenticated === false) opt.textContent = "API Key rechazada por el proveedor";
-    else opt.textContent = "Proveedor no disponible";
+    opt.textContent = t(`provider.selectEmpty.${uiState}`);
     el("modelSelect").appendChild(opt);
     el("modelSelect").disabled = true;
     const pullLocal = el("btnPullLocal");

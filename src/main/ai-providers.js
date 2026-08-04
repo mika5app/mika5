@@ -2,6 +2,7 @@
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
+const { describirError, sanearMensaje, errorDeRespuesta, ProviderError } = require('./provider-errors');
 const {
   getProviderContract,
   resolveVisionSupport,
@@ -1228,10 +1229,31 @@ async function probeOllamaVision(modelName) {
   }
 }
 
-// Un fallo al pedir el catálogo puede significar dos cosas muy distintas: que
-// el servidor no responde, o que responde y rechaza la credencial. Distinguirlo
-// es lo que permite decir «clave inválida» en vez de «proveedor caído».
-const ERROR_DE_CREDENCIAL = /\b(401|403)\b|unauthorized|forbidden|api[\s_-]?key|invalid[\s_-]?(key|token|credential)|authentication/i;
+/**
+ * Cómo debe presentarse un proveedor. Son cinco y no dos porque «no conectado»
+ * agrupaba situaciones que exigen respuestas distintas del usuario: poner una
+ * clave, corregirla, o esperar a que el servidor vuelva.
+ *
+ * `UNKNOWN` existe para no mentir. Un catálogo estático no prueba conectividad,
+ * y presentar esa ausencia de evidencia como «Conectado» es justo lo que se
+ * está corrigiendo.
+ */
+const UI_STATE = Object.freeze({
+  CONNECTED: 'connected',
+  OFFLINE: 'offline',
+  UNKNOWN: 'unknown',
+  CONFIGURATION_REQUIRED: 'configuration-required',
+  AUTHENTICATION_REJECTED: 'authentication-rejected'
+});
+
+/** Prioridad: lo que el usuario debe resolver primero manda sobre lo demás. */
+function resolverUiState({ configured, reachable, authenticated }) {
+  if (!configured) return UI_STATE.CONFIGURATION_REQUIRED;
+  if (authenticated === false) return UI_STATE.AUTHENTICATION_REJECTED;
+  if (reachable === false) return UI_STATE.OFFLINE;
+  if (reachable === true) return UI_STATE.CONNECTED;
+  return UI_STATE.UNKNOWN;
+}
 
 const PROVIDERS = {
   // MODO LOCAL - 100% Privado (delegado a ollama.js robusto)
@@ -1239,6 +1261,9 @@ const PROVIDERS = {
     name: 'Ollama (Local)',
     privacy: 'private',
     requiresKey: false,
+    // Si el catálogo sale de la red o de una lista declarada en el propio
+    // adaptador. Un catálogo estático no prueba nada sobre conectividad.
+    catalogSource: 'network',
     visualCapabilities: {
       vision: true
     },
@@ -1332,6 +1357,9 @@ const PROVIDERS = {
     name: 'OpenAI (Cloud)',
     privacy: 'cloud',
     requiresKey: true,
+    // Si el catálogo sale de la red o de una lista declarada en el propio
+    // adaptador. Un catálogo estático no prueba nada sobre conectividad.
+    catalogSource: 'network',
     baseUrl: 'https://api.openai.com/v1',
     timeout: 120000, // 2 minutes
     
@@ -1395,7 +1423,9 @@ const PROVIDERS = {
       const res = await fetch(`${this.baseUrl}/models`, {
         headers: { 'Authorization': `Bearer ${apiKey}` }
       });
-      if (!res.ok) throw new Error('API Key inválida');
+      // Estructurado, no texto: un 401 y un 500 exigen respuestas distintas y
+      // la diferencia no puede depender de cómo esté redactado el mensaje.
+      if (!res.ok) throw errorDeRespuesta(res.status, 'OpenAI no devolvió el catálogo');
       const data = await res.json();
       return {
         models: data.data
@@ -1415,6 +1445,9 @@ const PROVIDERS = {
     name: 'Anthropic Claude (Cloud)',
     privacy: 'cloud',
     requiresKey: true,
+    // Si el catálogo sale de la red o de una lista declarada en el propio
+    // adaptador. Un catálogo estático no prueba nada sobre conectividad.
+    catalogSource: 'static',
     baseUrl: 'https://api.anthropic.com/v1',
     timeout: 120000,
 
@@ -1540,6 +1573,9 @@ const PROVIDERS = {
     name: 'Groq (Cloud — Llama/Mistral)',
     privacy: 'cloud',
     requiresKey: true,
+    // Si el catálogo sale de la red o de una lista declarada en el propio
+    // adaptador. Un catálogo estático no prueba nada sobre conectividad.
+    catalogSource: 'static',
     baseUrl: 'https://api.groq.com/openai/v1',
     timeout: 30000,
 
@@ -1630,6 +1666,9 @@ const PROVIDERS = {
     name: 'Moonshot AI (Kimi 2.5)',
     privacy: 'cloud',
     requiresKey: true,
+    // Si el catálogo sale de la red o de una lista declarada en el propio
+    // adaptador. Un catálogo estático no prueba nada sobre conectividad.
+    catalogSource: 'static',
     baseUrl: 'https://api.moonshot.cn/v1',
     timeout: 120000,
 
@@ -1708,6 +1747,26 @@ const PROVIDERS = {
     name: 'Alibaba Cloud Model Studio',
     privacy: 'cloud',
     requiresKey: true,
+    // Si el catálogo sale de la red o de una lista declarada en el propio
+    // adaptador. Un catálogo estático no prueba nada sobre conectividad.
+    catalogSource: 'static',
+
+    /**
+     * Alibaba es el único adaptador con configuración editable, así que estar
+     * «configurado» es más que tener credencial: sin endpoint no hay a dónde
+     * enviar. Devuelve un veredicto estructurado con código estable, no un
+     * booleano, para que la interfaz pueda decir qué falta.
+     */
+    validateConfig(providerConfig, apiKey) {
+      if (!apiKey) return { ok: false, errorCode: 'PROVIDER_CREDENTIAL_REQUIRED' };
+      const config = normalizeAlibabaConfig(providerConfig);
+      if (!config.endpoint) return { ok: false, errorCode: 'PROVIDER_ENDPOINT_REQUIRED' };
+      if (!Array.isArray(config.models) || config.models.length === 0) {
+        return { ok: false, errorCode: 'PROVIDER_CATALOG_REQUIRED' };
+      }
+      return { ok: true };
+    },
+
     visualCapabilities: {
       vision: true,
       sourceImages: true,
@@ -1868,6 +1927,9 @@ const PROVIDERS = {
     name: 'llama.cpp (Local)',
     privacy: 'private',
     requiresKey: false,
+    // Si el catálogo sale de la red o de una lista declarada en el propio
+    // adaptador. Un catálogo estático no prueba nada sobre conectividad.
+    catalogSource: 'network',
     baseUrl: 'http://127.0.0.1:8080/v1',
     timeout: 300000, // 5 min — modelos grandes son lentos
 
@@ -2372,65 +2434,123 @@ class AIProviderManager {
   }
 
   /**
-   * Disponibilidad de un proveedor, separada en estados que hasta ahora
-   * viajaban colapsados en un único `ok`.
-   *
-   * `status()` respondía `ok: !!apiKey` para todo proveedor cloud, y el
-   * renderer poblaba el selector de modelos con ese booleano. Eso mezclaba
-   * cuatro preguntas distintas: si el proveedor está configurado, si su
-   * servidor responde, si la credencial fue aceptada y si hay catálogo. La
-   * consecuencia visible era que un proveedor con clave inválida se anunciaba
-   * como disponible, y que un runtime que no pide credencial no podía estarlo.
-   *
-   * Los estados se derivan de rasgos DECLARADOS por cada adaptador, no de su
-   * identificador: `requiresKey` dice si hace falta credencial y la presencia
-   * de `status()` dice si el adaptador sabe sondear su propio endpoint. Un
-   * proveedor nuevo obtiene el comportamiento correcto sin tocar esta función
-   * ni añadir un caso especial.
+   * Disponibilidad de un proveedor, separada en estados que antes viajaban
+   * colapsados en un único `ok`.
    *
    *   configured       tiene lo que necesita para intentarlo
-   *   reachable        su endpoint respondió (null si nadie puede saberlo)
-   *   authenticated    la credencial fue aceptada (null si no se usa ninguna)
+   *   reachable        su endpoint contestó (null = sin evidencia)
+   *   authenticated    la credencial fue aceptada (null = sin evidencia)
    *   modelsAvailable  cuántos modelos utilizables ofrece
    *   ready            se puede usar ahora mismo
+   *   uiState          cómo debe presentarse: connected, offline, unknown,
+   *                    configuration-required o authentication-rejected
    *
-   * `models` viaja en la respuesta para que quien la pide no repita la misma
-   * consulta al catálogo.
+   * Tres reglas gobiernan esto y conviene enunciarlas, porque la versión
+   * anterior violaba las tres:
+   *
+   * 1. `reachable` y `authenticated` sólo cambian con EVIDENCIA. Que
+   *    `listModels()` devuelva modelos no prueba nada si el catálogo es
+   *    estático: `anthropic`, `moonshot` y `alibaba` lo sirven desde una lista
+   *    declarada sin tocar la red. Sólo un adaptador con
+   *    `catalogSource: 'network'` aporta prueba de conectividad, y sólo aporta
+   *    prueba de autenticación si además declara `requiresKey`.
+   *
+   * 2. La ausencia de evidencia es `null`, no `true`. `null` nunca se presenta
+   *    como «Conectado»: tiene su propio estado, `unknown`.
+   *
+   * 3. `ready` y la conectividad son ejes distintos. Un proveedor con catálogo
+   *    estático y credencial puede estar listo con `reachable === null`: se
+   *    puede intentar usarlo, y sólo el primer envío dirá si el servidor
+   *    responde. Bloquearlo por falta de prueba sería inventar un fallo.
+   *
+   * Todo sale de rasgos DECLARADOS por cada adaptador —`requiresKey`,
+   * `catalogSource`, `validateConfig()` y la presencia de `status()`—, nunca de
+   * su identificador. Un adaptador nuevo obtiene el comportamiento correcto sin
+   * tocar esta función.
+   *
+   * `models` viaja en la respuesta para no repetir la consulta al catálogo.
+   * `errorCode` es el contrato estable; `message` es informativo y va saneado.
    */
   async getAvailability(providerId = this.currentProvider) {
     const config = PROVIDERS[providerId];
     if (!config) {
       return {
         providerId, configured: false, reachable: null, authenticated: null,
-        modelsAvailable: 0, models: [], ready: false, detail: 'PROVEEDOR_DESCONOCIDO'
+        modelsAvailable: 0, models: [], ready: false,
+        uiState: UI_STATE.CONFIGURATION_REQUIRED,
+        errorCode: 'PROVIDER_UNKNOWN', message: ''
       };
     }
 
-    const configured = !config.requiresKey || Boolean(this.apiKeys[providerId]);
-    let reachable = null;
-    let authenticated = null;
-    let detail = null;
-
-    // Alcanzabilidad: sólo la conoce el adaptador que sabe sondear su endpoint.
-    // Para los que no traen sonda queda indeterminada hasta consultar el
-    // catálogo, y una indeterminación nunca bloquea por sí sola.
-    if (typeof config.status === 'function') {
-      const sonda = await Promise.resolve()
-        .then(() => config.status())
-        .catch(error => ({ ok: false, error: String(error?.message || error) }));
-      reachable = Boolean(sonda && sonda.ok);
-      if (!reachable) detail = (sonda && (sonda.error || sonda.message)) || 'SERVIDOR_INACCESIBLE';
+    // `configured` puede venir del propio adaptador, que sabe si su
+    // configuración es utilizable —una URL base ausente, un endpoint mal
+    // formado—. Sin `validateConfig()` se cae al criterio mínimo: la credencial
+    // que el adaptador declare necesitar.
+    let configured;
+    let errorCode = null;
+    let message = '';
+    if (typeof config.validateConfig === 'function') {
+      let veredicto;
+      try {
+        veredicto = await config.validateConfig(
+          this.providerConfigs[providerId],
+          this.apiKeys[providerId]
+        );
+      } catch (error) {
+        veredicto = { ok: false, errorCode: 'PROVIDER_CONFIG_INVALID', message: error?.message };
+      }
+      configured = Boolean(veredicto && veredicto.ok);
+      if (!configured) {
+        errorCode = (veredicto && veredicto.errorCode) || 'PROVIDER_CONFIG_REQUIRED';
+        message = sanearMensaje(veredicto && veredicto.message);
+      }
+    } else {
+      configured = !config.requiresKey || Boolean(this.apiKeys[providerId]);
+      if (!configured) errorCode = 'PROVIDER_CREDENTIAL_REQUIRED';
     }
 
-    const salida = (extra) => ({
-      providerId, configured, reachable, authenticated,
-      modelsAvailable: 0, models: [], ready: false, detail, ...extra
-    });
+    let reachable = null;
+    let authenticated = null;
 
-    // Sin credencial no se consulta nada: pedir el catálogo sólo produciría un
-    // rechazo previsible y una petición de red inútil.
-    if (!configured) return salida({ detail: detail || 'CREDENCIAL_REQUERIDA' });
-    if (reachable === false) return salida({});
+    // La sonda del adaptador es evidencia directa de conectividad.
+    if (typeof config.status === 'function') {
+      let sonda;
+      try {
+        sonda = await config.status();
+      } catch (error) {
+        sonda = { ok: false, error };
+      }
+      if (sonda && sonda.ok) {
+        reachable = true;
+      } else {
+        reachable = false;
+        const descrito = describirError(sonda && (sonda.error || sonda.message) || null);
+        errorCode = errorCode || (descrito.errorCode === 'PROVIDER_UNKNOWN_ERROR'
+          ? 'PROVIDER_TRANSPORT_UNREACHABLE'
+          : descrito.errorCode);
+        if (!message) message = descrito.message || sanearMensaje(sonda && (sonda.message || sonda.error));
+      }
+    }
+
+    const cerrar = (extra = {}) => {
+      const base = {
+        providerId, configured, reachable, authenticated,
+        modelsAvailable: 0, models: [], errorCode, message, ...extra
+      };
+      base.ready = Boolean(
+        base.configured
+        && base.reachable !== false
+        && base.authenticated !== false
+        && base.modelsAvailable > 0
+      );
+      base.uiState = resolverUiState(base);
+      return base;
+    };
+
+    // Sin configuración utilizable no se consulta nada: una petición condenada
+    // al rechazo no aporta información y sí gasta red.
+    if (!configured) return cerrar();
+    if (reachable === false) return cerrar();
 
     let models = [];
     try {
@@ -2439,31 +2559,30 @@ class AIProviderManager {
         this.providerConfigs[providerId]
       );
       models = Array.isArray(respuesta) ? respuesta : ((respuesta && respuesta.models) || []);
-      if (reachable === null) reachable = true;
-      authenticated = config.requiresKey ? true : null;
-    } catch (error) {
-      const mensaje = String(error?.message || error);
-      if (ERROR_DE_CREDENCIAL.test(mensaje)) {
-        // El servidor contestó: está vivo, pero rechazó la credencial.
-        return salida({ reachable: true, authenticated: false, detail: 'CREDENCIAL_RECHAZADA' });
+
+      // Evidencia SÓLO si el catálogo vino de la red y trajo algo. Un catálogo
+      // estático se habría devuelto igual con el servidor apagado. Y varios
+      // adaptadores capturan el fallo de red y devuelven una lista vacía o un
+      // respaldo declarado —groq cae a una lista fija, local y llamacpp
+      // devuelven `{ models: [] }`—: ahí un resultado vacío es indistinguible
+      // de «el servidor no tiene modelos», así que no prueba conectividad.
+      if (config.catalogSource === 'network' && models.length > 0) {
+        reachable = true;
+        if (config.requiresKey) authenticated = true;
       }
-      return salida({ reachable: false, detail: mensaje.slice(0, 200) });
+    } catch (error) {
+      const descrito = describirError(error);
+      // La evidencia del fallo manda sobre la que hubiera antes: un 401 prueba
+      // que el servidor está vivo aunque la sonda no existiera.
+      if (descrito.reachable !== null) reachable = descrito.reachable;
+      if (descrito.authenticated !== null) authenticated = descrito.authenticated;
+      return cerrar({ errorCode: descrito.errorCode, message: descrito.message });
     }
 
-    if (models.length === 0 && !detail) detail = 'CATALOGO_VACIO';
+    if (models.length === 0 && !errorCode) errorCode = 'PROVIDER_CATALOG_EMPTY';
 
-    return {
-      providerId,
-      configured,
-      reachable,
-      authenticated,
-      modelsAvailable: models.length,
-      models,
-      ready: configured && reachable !== false && authenticated !== false && models.length > 0,
-      detail
-    };
+    return cerrar({ modelsAvailable: models.length, models, errorCode });
   }
-
   getAllProviders() {
     return Object.entries(PROVIDERS).map(([id, config]) => ({
       id,
@@ -2479,6 +2598,8 @@ class AIProviderManager {
 module.exports = {
   AIProviderManager,
   PROVIDERS,
+  UI_STATE,
+  resolverUiState,
   probeOllamaVision,
   getProviderContract,
   resolveVisionSupport,

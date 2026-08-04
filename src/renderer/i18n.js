@@ -193,6 +193,20 @@ const MIKA5_TRANSLATIONS = {
     'provider.cloudWarning': '⚠️ Cloud activo: Mensajes a servidores externos.',
     'provider.moreInfo': 'Más info',
 
+    // Estados de disponibilidad del proveedor. «Desconocido» no es un fallo:
+    // significa que nadie ha podido comprobar la conexión todavía, y decirlo
+    // es más honesto que anunciar «Conectado» sin haberlo verificado.
+    'provider.state.connected': '✓ Conectado',
+    'provider.state.offline': '✗ Sin conexión',
+    'provider.state.unknown': '• Sin verificar',
+    'provider.state.configuration-required': '• Falta configurar',
+    'provider.state.authentication-rejected': '✗ Clave rechazada',
+    'provider.selectEmpty.connected': 'Sin modelos disponibles',
+    'provider.selectEmpty.offline': 'El servidor del proveedor no responde',
+    'provider.selectEmpty.unknown': 'No se pudo obtener el catálogo de modelos',
+    'provider.selectEmpty.configuration-required': 'Falta la API Key de este proveedor',
+    'provider.selectEmpty.authentication-rejected': 'El proveedor rechazó la API Key',
+
     // Salida de la aplicación y versión instalada
     'app.versionLabel': 'Versión instalada',
     'app.versionDev': 'desarrollo',
@@ -380,6 +394,20 @@ const MIKA5_TRANSLATIONS = {
     'provider.llamacpp': 'llama.cpp (Local)',
     'provider.cloudWarning': '⚠️ Cloud active: Messages sent to external servers.',
     'provider.moreInfo': 'More info',
+
+    // Provider availability states. "Unverified" is not a failure: it means
+    // nobody has been able to check the connection yet, and saying so is more
+    // honest than announcing "Connected" without having verified it.
+    'provider.state.connected': '✓ Connected',
+    'provider.state.offline': '✗ Offline',
+    'provider.state.unknown': '• Unverified',
+    'provider.state.configuration-required': '• Needs setup',
+    'provider.state.authentication-rejected': '✗ Key rejected',
+    'provider.selectEmpty.connected': 'No models available',
+    'provider.selectEmpty.offline': 'The provider server is not responding',
+    'provider.selectEmpty.unknown': 'Could not retrieve the model catalogue',
+    'provider.selectEmpty.configuration-required': 'This provider needs an API key',
+    'provider.selectEmpty.authentication-rejected': 'The provider rejected the API key',
 
     // Quitting the app and installed version
     'app.versionLabel': 'Installed version',
