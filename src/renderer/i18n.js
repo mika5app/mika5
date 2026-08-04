@@ -144,6 +144,13 @@ const MIKA5_TRANSLATIONS = {
     'empty.suggestion2': 'Explica un archivo de la base de conocimiento',
     'empty.suggestion3': 'Propón los próximos pasos',
 
+    // Bloques de código
+    'code.plainText': 'texto',
+    'code.lines': '{count} líneas',
+    'code.copy': 'Copiar',
+    'code.collapse': 'Colapsar',
+    'code.expand': 'Expandir',
+
     // Context panel
     'context.title': 'Contexto del proyecto',
     'context.chatTitle': 'Contexto del chat',
@@ -323,6 +330,12 @@ const MIKA5_TRANSLATIONS = {
     'empty.suggestion1': 'Summarize this project',
     'empty.suggestion2': 'Explain a file from the knowledge base',
     'empty.suggestion3': 'Suggest the next steps',
+
+    'code.plainText': 'text',
+    'code.lines': '{count} lines',
+    'code.copy': 'Copy',
+    'code.collapse': 'Collapse',
+    'code.expand': 'Expand',
 
     'context.title': 'Project context',
     'context.chatTitle': 'Chat context',

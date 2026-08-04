@@ -632,6 +632,12 @@ function sidebarTests() {
       const PROJECT_COLORS = ['#3b82f6'];
       const activeProjectId = deps.activeProjectId;
       const activeChatId = deps.activeChatId;
+      const QUICK_CHAT_VISUAL = { icon: '\u{1F4AC}', color: '#60a5fa' };
+      const PROJECT_VISUAL_FALLBACK_ID = 'proyecto-sin-id';
+      ${renderer.slice('projectVisualHash')}
+      ${renderer.slice('projectVisualDefaults')}
+      ${renderer.slice('resolveProjectVisual')}
+      ${renderer.slice('applyProjectVisual')}
       ${renderer.slice('loadProjects')}
       ${renderer.slice('buildChatActionButton')}
       ${renderer.slice('refreshChats')}

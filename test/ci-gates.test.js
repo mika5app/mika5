@@ -137,6 +137,7 @@ const EN_NPM_TEST = [
   'test:visual-ui-shell',
   'test:visual-ui-conversation',
   'test:electron-test-isolation',
+  'test:visual-ui-polish',
   'test:ipc-contracts'
 ];
 for (const suite of EN_NPM_TEST) {
@@ -149,7 +150,7 @@ const SCRIPTS_REQUERIDOS = [
   'test', 'test:all', 'test:db', 'test:rag', 'test:vision', 'test:alibaba',
   'test:provider-capabilities', 'test:request-context', 'test:provider-cancellation',
   'test:cloud-consent', 'test:network-security', 'test:knowledge-scope',
-  'test:knowledge-cli', 'test:ci-gates', 'test:palette', 'test:visual-ui-shell', 'test:visual-ui-conversation', 'test:electron-test-isolation', 'test:ipc-contracts',
+  'test:knowledge-cli', 'test:ci-gates', 'test:palette', 'test:visual-ui-shell', 'test:visual-ui-conversation', 'test:electron-test-isolation', 'test:visual-ui-polish', 'test:ipc-contracts',
   'test:print-pdf-electron', 'test:electron-renderer',
   'test:electron-security', 'test:image-download-electron',
   'knowledge:preflight', 'knowledge:repair'

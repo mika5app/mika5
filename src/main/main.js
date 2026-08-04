@@ -1,6 +1,7 @@
 const path = require("path");
 const fs = require("fs").promises;
 const { app, BrowserWindow, ipcMain, shell, dialog, Menu, net } = require("electron");
+const { buildApplicationMenuTemplate, shouldHideMenuBar } = require("./application-menu");
 const { initDb, dbApi, getDb } = require("./db");
 const { ollamaApi } = require("./ollama");
 const { AIProviderManager } = require("./ai-providers");
@@ -34,6 +35,9 @@ function createWindow() {
     icon: path.join(__dirname, "../renderer/assets/icon.png"),
     width: 1280,
     height: 820,
+    // Fuera de macOS la barra de menú no aporta y roba una franja de alto; los
+    // aceleradores de edición siguen activos porque el menú sí se registra.
+    autoHideMenuBar: shouldHideMenuBar(process.platform),
     backgroundColor: "#0b0f14",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -43,6 +47,8 @@ function createWindow() {
       spellcheck: false  // Fix: Disable spellcheck to prevent textarea freeze
     }
   });
+
+  if (shouldHideMenuBar(process.platform)) win.setMenuBarVisibility(false);
 
   win.loadFile(path.join(__dirname, "../renderer/index.html"));
 
@@ -88,6 +94,13 @@ app.whenReady().then(() => {
     app.setAppUserModelId('com.mika5.desktop');
   }
   
+  // Menú real con roles nativos en vez de la barra por defecto. Sin él, ocultar
+  // la barra dejaría a Windows y Linux sin Ctrl+C/V/X/A ni deshacer.
+  Menu.setApplicationMenu(Menu.buildFromTemplate(buildApplicationMenuTemplate({
+    platform: process.platform,
+    isDevelopment: !app.isPackaged
+  })));
+
   initDb();
   // Inicializar el gestor de proveedores AI usando la instancia de DB
   aiManager = new AIProviderManager(getDb());

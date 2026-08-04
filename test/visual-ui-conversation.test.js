@@ -532,9 +532,13 @@ function modoOscuroTests() {
   check(!/background:\s*#000000|background:\s*black\b/i.test(indexHtml),
     'no aparece negro puro como fondo general');
 
-  // Los bloques de código son del Commit 3: no se tocan aquí.
-  check(/\.code-block-wrapper\s*\{[^}]*background:\s*#1e1e1e/.test(indexHtml),
-    'los estilos de bloques de código quedan intactos para el Commit 3');
+  // Los bloques de código tienen su propia superficie (Commit 3): no comparten
+  // token con los mensajes ni con el compositor, para que sigan leyéndose como
+  // una cita de código dentro de la conversación.
+  check(/\.code-block-wrapper\s*\{[^}]*background:\s*var\(--surface-code\)/.test(indexHtml),
+    'los bloques de código usan su token propio de superficie');
+  check(!/\.code-block-wrapper\s*\{[^}]*var\(--surface-message\)/.test(indexHtml),
+    'la superficie de código no se confunde con la de los mensajes');
 }
 
 // =====================================================================

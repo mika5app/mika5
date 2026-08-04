@@ -861,11 +861,11 @@ function mikaSelect(title, options) {
 
         // Icon/color indicator
         if (opt.icon || opt.color) {
-          const iconSpan = document.createElement('span');
-          const color = opt.color || '#3b82f6';
-          iconSpan.style.cssText = `width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;background:${color}20;border:1px solid ${color}40;color:${color};`;
-          iconSpan.textContent = opt.icon || '📁';
-          btn.appendChild(iconSpan);
+          // Misma píldora que el sidebar, por clase: sin cssText duplicado.
+          btn.appendChild(applyProjectVisual(document.createElement('span'), {
+            icon: opt.icon || '📁',
+            color: opt.color || '#3b82f6'
+          }));
         }
 
         const labelSpan = document.createElement('span');
@@ -1993,19 +1993,35 @@ function highlightCodeBlocks(container) {
   });
 }
 
+// Umbral de colapso: por encima de 40 líneas el bloque nace colapsado. Es la
+// altura a partir de la cual un volcado de código empuja la conversación fuera
+// de pantalla; por debajo, colapsar molesta más que ayuda.
+const CODE_BLOCK_COLLAPSE_THRESHOLD = 40;
+
+let _codeBlockSeq = 0;
+
+function countCodeLines(text) {
+  const contenido = String(text || '').replace(/\n$/, '');
+  if (!contenido) return 0;
+  return contenido.split('\n').length;
+}
+
 function addCopyButtonsToCodeBlocks(container) {
   if (!container) return;
-  
+
   // Usar Array.from para evitar problemas de NodeList dinámica
   const pres = Array.from(container.querySelectorAll("pre"));
-  
+
   pres.forEach((pre) => {
     try {
-      // Skip if already wrapped
+      // Skip if already wrapped — idempotencia: dos llamadas, una sola cabecera.
       if (pre.parentNode && pre.parentNode.classList && pre.parentNode.classList.contains('code-block-wrapper')) return;
     const code = pre.querySelector("code");
     const langMatch = code && code.className.match(/language-(\w+)/);
-    const lang = langMatch ? langMatch[1] : "code";
+    // Sin autodetección: sólo la clase que ya trae el markdown. Detectar el
+    // lenguaje a ojo costaba congelar la UI en chats largos.
+    const lang = langMatch ? langMatch[1] : null;
+    const lineas = countCodeLines((code || pre).textContent);
 
     // Guardar referencia al padre ANTES de mover el nodo
     const originalParent = pre.parentNode;
@@ -2016,30 +2032,71 @@ function addCopyButtonsToCodeBlocks(container) {
 
     const header = document.createElement("div");
     header.className = "code-block-header";
-    
+
+    const meta = document.createElement("div");
+    meta.className = "code-block-meta";
+
     const langSpan = document.createElement("span");
     langSpan.className = "code-block-lang";
-    langSpan.textContent = lang;
+    langSpan.textContent = lang || t('code.plainText');
+
+    const linesSpan = document.createElement("span");
+    linesSpan.className = "code-block-lines";
+    linesSpan.textContent = t('code.lines', { count: lineas });
+
+    meta.appendChild(langSpan);
+    meta.appendChild(linesSpan);
+
+    const actions = document.createElement("div");
+    actions.className = "code-block-actions";
+
+    const bodyId = `code-block-${(++_codeBlockSeq)}`;
+    pre.id = bodyId;
+
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "code-block-toggle";
+    toggle.setAttribute("aria-controls", bodyId);
 
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "copy-code-btn";
-    btn.textContent = "Copiar";
+    btn.textContent = t('code.copy');
+    btn.setAttribute("aria-label", t('code.copy'));
     btn.addEventListener("click", () => {
+      // Siempre el contenido completo, esté colapsado o no: el código nunca sale
+      // del DOM, sólo se recorta su altura visible.
       const text = (pre.querySelector("code") || pre).textContent;
       navigator.clipboard.writeText(text).then(
-        () => showToast("Código copiado", "success"),
+        () => showToast(t('toast.codeCopied'), "success"),
         () => showToast("Error al copiar", "error")
       );
     });
 
-    header.appendChild(langSpan);
-    header.appendChild(btn);
+    const applyCollapsed = (colapsado) => {
+      wrapper.classList.toggle("collapsed", colapsado);
+      toggle.setAttribute("aria-expanded", String(!colapsado));
+      const etiqueta = colapsado ? t('code.expand') : t('code.collapse');
+      toggle.textContent = etiqueta;
+      toggle.setAttribute("aria-label", etiqueta);
+    };
+
+    toggle.addEventListener("click", () => {
+      applyCollapsed(!wrapper.classList.contains("collapsed"));
+    });
+
+    actions.appendChild(toggle);
+    actions.appendChild(btn);
+    header.appendChild(meta);
+    header.appendChild(actions);
     wrapper.appendChild(header);
-    
+
     // Insert wrapper where pre is, THEN move pre into wrapper
     originalParent.insertBefore(wrapper, pre);
     wrapper.appendChild(pre);
+
+    // El estado vive en el DOM, no en el mensaje ni en la base de datos.
+    applyCollapsed(lineas > CODE_BLOCK_COLLAPSE_THRESHOLD);
     } catch (e) {
       console.warn('addCopyButtonsToCodeBlocks: skipped block', e.message);
     }
@@ -2714,6 +2771,60 @@ async function ensureQuickChat() {
 
 const PROJECT_ICONS = ['📁', '🏠', '💼', '🎯', '📚', '🔬', '🎨', '💻', '🌐', '🧠', '⚡', '🔧', '📊', '🎮', '🏗️', '📝'];
 const PROJECT_COLORS = ['#3b82f6', '#22c55e', '#ef4444', '#eab308', '#a855f7', '#06b6d4', '#f97316', '#ec4899'];
+const QUICK_CHAT_VISUAL = { icon: '💬', color: '#60a5fa' };
+// Identidad estable para proyectos antiguos sin id: no se recurre al índice de
+// la lista, que cambia al crear o borrar cualquier otro proyecto.
+const PROJECT_VISUAL_FALLBACK_ID = 'proyecto-sin-id';
+
+// Hash determinista (djb2 xor) sobre el identificador del proyecto. La misma
+// entrada da siempre el mismo par icono/color, en cualquier orden de lista y en
+// cualquier ventana.
+function projectVisualHash(identity) {
+  const texto = String(identity || PROJECT_VISUAL_FALLBACK_ID);
+  let hash = 5381;
+  for (let i = 0; i < texto.length; i++) {
+    hash = ((hash * 33) ^ texto.charCodeAt(i)) >>> 0;
+  }
+  return hash;
+}
+
+/**
+ * Icono y color por defecto de un proyecto. Depende sólo de su identidad: el
+ * cálculo anterior usaba la posición en la lista, así que borrar o crear otro
+ * proyecto repintaba los demás.
+ */
+function projectVisualDefaults(projectId) {
+  if (projectId === QUICK_CHAT_ID) return { ...QUICK_CHAT_VISUAL };
+  const hash = projectVisualHash(projectId);
+  return {
+    icon: PROJECT_ICONS[hash % PROJECT_ICONS.length],
+    color: PROJECT_COLORS[Math.floor(hash / PROJECT_ICONS.length) % PROJECT_COLORS.length]
+  };
+}
+
+/**
+ * Visual efectivo de un proyecto: lo guardado por la usuaria manda siempre y no
+ * se persiste nada aquí. El fallback sólo rellena lo que falta.
+ */
+function resolveProjectVisual(project) {
+  const id = project?.id;
+  const defaults = projectVisualDefaults(id);
+  return {
+    icon: project?.icon || defaults.icon,
+    color: project?.color || defaults.color,
+    isQuickChat: id === QUICK_CHAT_ID
+  };
+}
+
+// Una sola fuente para la píldora del icono: antes se repetía el mismo cssText
+// en el sidebar y en el diálogo de mover, con riesgo de divergir.
+function applyProjectVisual(node, visual, { interactive = false } = {}) {
+  node.classList.add('project-icon-btn');
+  node.textContent = visual.icon;
+  node.style.setProperty('--project-color', visual.color);
+  node.style.cursor = interactive ? 'pointer' : 'default';
+  return node;
+}
 
 async function loadProjects() {
   const projects = await withTimeout(Store.listProjects(), 8000, 'cargar proyectos');
@@ -2727,12 +2838,11 @@ async function loadProjects() {
     return (b.created_at || 0) - (a.created_at || 0);
   });
 
-  let userIdx = 0;
   for (const p of sorted) {
-    const isQC = p.id === QUICK_CHAT_ID;
-    const projColor = p.color || (isQC ? '#60a5fa' : PROJECT_COLORS[userIdx % PROJECT_COLORS.length]);
-    const projIcon = p.icon || (isQC ? '💬' : PROJECT_ICONS[userIdx % PROJECT_ICONS.length]);
-    if (!isQC) userIdx++;
+    const visual = resolveProjectVisual(p);
+    const isQC = visual.isQuickChat;
+    const projColor = visual.color;
+    const projIcon = visual.icon;
 
     const div = document.createElement("div");
     div.dataset.projectId = p.id;
@@ -2742,10 +2852,7 @@ async function loadProjects() {
     if (isActiveProject) div.setAttribute("aria-current", "true");
     else div.removeAttribute("aria-current");
 
-    const iconBtn = document.createElement("span");
-    iconBtn.className = "project-icon-btn";
-    iconBtn.textContent = projIcon;
-    iconBtn.style.cssText = `background:${projColor}20;border:1px solid ${projColor}40;color:${projColor};width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;cursor:${isQC ? 'default' : 'pointer'};`;
+    const iconBtn = applyProjectVisual(document.createElement("span"), visual, { interactive: !isQC });
     if (!isQC) {
       iconBtn.title = "Cambiar icono/color";
       iconBtn.onclick = (e) => { e.stopPropagation(); showProjectStylePicker(p.id, iconBtn, projIcon, projColor); };
@@ -3109,13 +3216,14 @@ async function refreshChats() {
           return; 
         }
 
-        const selectOptions = others.map((pr, i) => {
-          const isQC = pr.id === QUICK_CHAT_ID;
+        const selectOptions = others.map((pr) => {
+          // Mismo helper que el sidebar: el proyecto se ve igual en los dos sitios.
+          const visual = resolveProjectVisual(pr);
           return {
-            label: isQC ? (t('project.quickChat') || 'Chat rápido') : pr.name,
+            label: visual.isQuickChat ? (t('project.quickChat') || 'Chat rápido') : pr.name,
             value: pr.id,
-            icon: pr.icon || (isQC ? '💬' : PROJECT_ICONS[i % PROJECT_ICONS.length]),
-            color: pr.color || (isQC ? '#60a5fa' : PROJECT_COLORS[i % PROJECT_COLORS.length])
+            icon: visual.icon,
+            color: visual.color
           };
         });
         const targetId = await mikaSelect(t('modal.moveChat') || 'Mover chat a:', selectOptions);

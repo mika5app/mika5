@@ -51,7 +51,15 @@ function createDocument() {
       this.attributes = Object.create(null);
       this.listeners = Object.create(null);
       this.classList = new ClassList(this);
-      this.style = { cssText: '' };
+      // Las propiedades personalizadas (--x) no son campos válidos de un objeto
+      // de estilo plano: se guardan aparte, como hace el DOM real.
+      const custom = Object.create(null);
+      this.style = {
+        cssText: '',
+        setProperty(nombre, valor) { custom[nombre] = String(valor); },
+        getPropertyValue(nombre) { return nombre in custom ? custom[nombre] : ''; },
+        removeProperty(nombre) { delete custom[nombre]; }
+      };
       this.dataset = Object.create(null);
       this._text = '';
       this.id = '';
@@ -91,6 +99,13 @@ function createDocument() {
       return child;
     }
     append(...nodes) { nodes.forEach(n => this.appendChild(n)); }
+    insertBefore(nuevo, referencia) {
+      const indice = this.children.indexOf(referencia);
+      nuevo.parentNode = this;
+      if (indice < 0) this.children.push(nuevo);
+      else this.children.splice(indice, 0, nuevo);
+      return nuevo;
+    }
     remove() {
       if (!this.parentNode) return;
       this.parentNode.children = this.parentNode.children.filter(c => c !== this);

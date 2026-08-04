@@ -54,6 +54,13 @@
             --danger-surface: rgba(239, 68, 68, 0.14);
             --danger-border: rgba(248, 113, 113, 0.5);
             --danger-text: #FCA5A5;
+            /* Bloques de código: superficie hundida dentro de la escala azul,
+               no un gris aislado. */
+            --surface-code: #080E1C;
+            --surface-code-header: rgba(255, 255, 255, 0.05);
+            --code-text: #cbd5e1;
+            --code-meta: #A7B4C8;
+            --code-focus-ring: #49C2F4;
 
             /* Nuevos valores para mejor experiencia */
             --sidebar-width: 280px;
@@ -96,6 +103,12 @@
             --light-danger-surface: rgba(220, 38, 38, 0.10);
             --light-danger-border: rgba(185, 28, 28, 0.55);
             --light-danger-text: #991B1B;
+            /* El código sigue oscuro en tema claro, pero con tono propio. */
+            --light-surface-code: #1E2937;
+            --light-surface-code-header: rgba(255, 255, 255, 0.08);
+            --light-code-text: #e2e8f0;
+            --light-code-meta: #CBD5E1;
+            --light-code-focus-ring: #49C2F4;
         }
 
         .light-theme {
@@ -127,6 +140,11 @@
             --danger-surface: var(--light-danger-surface);
             --danger-border: var(--light-danger-border);
             --danger-text: var(--light-danger-text);
+            --surface-code: var(--light-surface-code);
+            --surface-code-header: var(--light-surface-code-header);
+            --code-text: var(--light-code-text);
+            --code-meta: var(--light-code-meta);
+            --code-focus-ring: var(--light-code-focus-ring);
         }
 
         * {
@@ -316,6 +334,46 @@
             overflow-y: auto;
             padding: var(--spacing-sm) 0;
             min-height: 0;
+            scrollbar-width: thin;
+            scrollbar-color: transparent transparent;
+            /* Reserva el canal siempre: sin esto la lista se desplaza a lo ancho
+               en cuanto aparece la barra. */
+            scrollbar-gutter: stable;
+        }
+
+        /* En reposo el pulgar es transparente; aparece al apuntar o al entrar el
+           foco. Sólo aquí: la conversación, los modales y los <pre> conservan la
+           barra global. */
+        .sidebar-content::-webkit-scrollbar-thumb {
+            background: transparent;
+            border-color: transparent;
+        }
+
+        .sidebar-content:hover,
+        .sidebar-content:focus-within {
+            scrollbar-color: var(--divider-subtle) transparent;
+        }
+
+        .sidebar-content:hover::-webkit-scrollbar-thumb,
+        .sidebar-content:focus-within::-webkit-scrollbar-thumb {
+            background: var(--border-subtle);
+            border-color: transparent;
+        }
+
+        .sidebar-content:hover::-webkit-scrollbar-thumb:hover {
+            background: var(--text-secondary);
+        }
+
+        /* Sin puntero o con colores forzados, la barra no puede desaparecer:
+           dejaría de haber señal de que la lista continúa. */
+        @media (hover: none) {
+            .sidebar-content::-webkit-scrollbar-thumb { background: var(--border-subtle); }
+            .sidebar-content { scrollbar-color: var(--border-subtle) transparent; }
+        }
+
+        @media (forced-colors: active) {
+            .sidebar-content::-webkit-scrollbar-thumb { background: ButtonBorder; }
+            .sidebar-content { scrollbar-color: auto; }
         }
 
         .item-list {
@@ -358,6 +416,22 @@
             opacity: 0.7;
             cursor: default;
             font-style: italic;
+        }
+
+        /* Píldora del proyecto: el color llega por --project-color, así que el
+           mismo estilo sirve en el sidebar y en el diálogo de mover. */
+        .project-icon-btn {
+            width: 28px;
+            height: 28px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            flex-shrink: 0;
+            color: var(--project-color, var(--accent));
+            background: color-mix(in srgb, var(--project-color, var(--accent)) 13%, transparent);
+            border: 1px solid color-mix(in srgb, var(--project-color, var(--accent)) 25%, transparent);
         }
 
         .item-preview {
@@ -1185,12 +1259,13 @@
         .light-theme .context-panel {
             box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
         }
+        /* El tema claro toma sus propios tokens de código; no invierte el oscuro. */
         .light-theme .code-block-wrapper {
-            background: #2d3748;
-            border-color: var(--border-subtle);
+            background: var(--surface-code);
+            border-color: var(--message-border);
         }
         .light-theme .code-block-header {
-            background: rgba(0, 0, 0, 0.2);
+            background: var(--surface-code-header);
         }
         .light-theme .empty-subtitle {
             color: var(--text-muted);
@@ -1841,27 +1916,75 @@
             margin: 0.75em 0;
             border-radius: 8px;
             overflow: hidden;
-            background: #1e1e1e;
-            border: 1px solid var(--border-subtle);
+            background: var(--surface-code);
+            border: 1px solid var(--message-border);
         }
         .code-block-header {
             display: flex;
             align-items: center;
             justify-content: space-between;
+            gap: 12px;
             padding: 6px 10px;
-            background: rgba(255, 255, 255, 0.06);
-            border-bottom: 1px solid var(--border-subtle);
+            background: var(--surface-code-header);
+            border-bottom: 1px solid var(--divider-subtle);
             font-size: 12px;
         }
+        .code-block-meta {
+            display: flex;
+            align-items: baseline;
+            gap: 10px;
+            min-width: 0;
+        }
         .code-block-lang {
-            color: var(--text-muted);
+            color: var(--code-meta);
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
+        /* Metadatos secundarios: informan sin competir con el código. */
+        .code-block-lines {
+            color: var(--code-meta);
+            font-size: 11px;
+            opacity: 0.85;
+            white-space: nowrap;
+        }
+        .code-block-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+        .code-block-toggle {
+            background: transparent;
+            border: 1px solid var(--message-border);
+            color: var(--code-meta);
+            padding: 4px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+        .code-block-toggle:hover,
+        .copy-code-btn:hover {
+            background: rgba(255, 255, 255, 0.08);
+            color: #ffffff;
+        }
+        .code-block-toggle:focus-visible,
+        .copy-code-btn:focus-visible {
+            outline: 2px solid var(--code-focus-ring);
+            outline-offset: 2px;
+        }
+        /* Colapsar recorta la altura visible: el código sigue íntegro en el DOM,
+           así que copiar y exportar no cambian. */
+        .code-block-wrapper.collapsed pre {
+            max-height: 5.4em;
+            overflow: hidden;
+            -webkit-mask-image: linear-gradient(180deg, #000 55%, transparent 100%);
+            mask-image: linear-gradient(180deg, #000 55%, transparent 100%);
+        }
         .copy-code-btn {
             background: transparent;
-            border: 1px solid var(--border-subtle);
-            color: var(--text-muted);
+            border: 1px solid var(--message-border);
+            color: var(--code-meta);
             padding: 4px 10px;
             border-radius: 6px;
             cursor: pointer;
@@ -1882,7 +2005,8 @@
             line-height: 1.5;
         }
         .msg-content .code-block-wrapper pre {
-            background: #1e1e1e;
+            background: var(--surface-code);
+            color: var(--code-text);
         }
         .msg-content pre code {
             padding: 0;
