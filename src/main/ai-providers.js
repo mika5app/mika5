@@ -52,6 +52,7 @@ const {
   extractAlibabaUsage,
   normalizeAlibabaAssistantOutput
 } = require('./providers/alibaba-config');
+const { PROVIDER_API_VERSION, ProviderRegistry } = require('./provider-registry');
 
 
 
@@ -815,10 +816,6 @@ function resolverUiState({ configured, reachable, authenticated, errorCode } = {
 }
 // Registro canónico de proveedores. Cada adaptador vive en su propio módulo;
 // aquí sólo se componen, conservando el orden observable.
-//
-// Alibaba recibe por parámetro los helpers de configuración que todavía viven
-// en este fichero: importarlos desde su módulo crearía un ciclo. Se extraen en
-// su propia fase.
 const PROVIDERS = {
   local: adaptadorLocal,
   openai: adaptadorOpenai,
@@ -838,6 +835,27 @@ const PROVIDERS = {
   }),
   llamacpp: adaptadorLlamacpp
 };
+
+// Registro interno versionado, construido a partir del conjunto anterior.
+// Los siete se registran explícitamente y desde código de confianza: no hay
+// carga desde disco, ni descubrimiento de plugins, ni require dinámico.
+// La validación es fail-closed y ocurre aquí, al arrancar el módulo, no en el
+// primer uso: un adaptador mal formado se rechaza cuando aún se sabe quién lo
+// registró.
+const registroDeProveedores = new ProviderRegistry();
+for (const [id, adapter] of Object.entries(PROVIDERS)) {
+  registroDeProveedores.register({
+    apiVersion: PROVIDER_API_VERSION,
+    id,
+    displayName: adapter.name,
+    traits: {
+      requiresKey: adapter.requiresKey === true,
+      privacy: adapter.privacy,
+      visualCapabilities: adapter.visualCapabilities
+    },
+    adapter
+  });
+}
 
 function getProviderVisualCapabilities(providerId) {
   const provider = PROVIDERS[providerId];
@@ -915,7 +933,7 @@ class AIProviderManager {
       // valor corrupto) no puede quedar activo: `getProvider()` leería
       // `undefined.privacy` y la rehidratación fallaría entera. Se ignora y se
       // conserva el local por defecto.
-      if (row.key === 'ai_provider' && PROVIDERS[row.value]) this.currentProvider = row.value;
+      if (row.key === 'ai_provider' && registroDeProveedores.has(row.value)) this.currentProvider = row.value;
       if (row.key === 'openai_key') this.apiKeys.openai = decrypt(row.value);
       if (row.key === 'anthropic_key') this.apiKeys.anthropic = decrypt(row.value);
       if (row.key === 'groq_key') this.apiKeys.groq = decrypt(row.value);
@@ -1415,6 +1433,7 @@ class AIProviderManager {
 module.exports = {
   AIProviderManager,
   PROVIDERS,
+  registroDeProveedores,
   UI_STATE,
   resolverUiState,
   probeOllamaVision,

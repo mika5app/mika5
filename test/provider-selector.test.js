@@ -535,13 +535,21 @@ app.on('browser-window-created', (_e, win) => {
   });
 });
 
-// Margen amplio a propósito. La suite abre una ventana real, siembra la base,
-// recorre las nueve superficies flotantes y espera repintados; dentro de
-// `test:all` compite además con los otros siete gates y los 120 s que había
-// aquí se agotaban por carga, no por un bloqueo real.
+// Margen amplio a propósito, y por un coste medido, no por prudencia vaga.
+//
+// Cada `switchProvider()` dispara `loadRuntime()`, que para el proveedor local
+// pide el catálogo a Ollama y sondea CADA modelo con `/api/show` para saber si
+// acepta imágenes. En una máquina con trece modelos instalados eso son trece
+// peticiones por cambio de proveedor, y la suite cambia varias veces. Suelta
+// tarda menos de un minuto; dentro de `test:all`, con los siete gates
+// anteriores habiendo golpeado el mismo Ollama, se dispara.
+//
+// No se recorta la cobertura para que quepa en un plazo: el plazo se ajusta al
+// coste real. Si algún día se bloquea de verdad, diez minutos siguen siendo un
+// tope que corta.
 setTimeout(() => {
   console.error('provider-selector: timeout global');
   app.exit(2);
-}, 300000);
+}, 600000);
 
 assert.ok(IDS_CANONICOS.length >= 7, 'el registro canónico debe declarar al menos los siete proveedores');
