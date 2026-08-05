@@ -148,15 +148,16 @@ que finge una capacidad que no tienen.
 
 ## 5. Limitaciones conocidas
 
-1. **`switchProvider()` no resuelve recién arrancada la aplicación.** Llamada
-   unos dos segundos después de `did-finish-load` no termina, ni siquiera con
-   un proveedor que no toca la red, y bloquea el hilo del renderer hasta el
-   punto de que un `setTimeout` de respaldo tampoco dispara. El mismo
-   `switchProvider()` funciona más adelante en la misma sesión. Es anterior a
-   estos cambios y está sin diagnosticar. Para el usuario significaría que
-   pulsar un proveedor justo al abrir no hace nada y no da ningún aviso. La
-   sección 0 de `provider-selector.test.js` usa `setProvider` + `loadRuntime`
-   por este motivo, no por gusto.
+1. **El desplegable se cierra solo si se reabre demasiado pronto.**
+   `switchProvider()` pone `providerOptions.style.display = 'none'` en su
+   última línea, **después** de esperar a `loadRuntime()`. El clic sobre la
+   opción ya lo había cerrado antes, al burbujear hasta el oyente de
+   `document`, así que ese cierre final llega tarde y sin nada que cerrar…
+   salvo si el usuario ha vuelto a abrirlo mientras tanto. Con un proveedor
+   cloud lento la ventana es de segundos: se abre el desplegable y se cierra
+   solo. La sección 0 de `provider-selector.test.js` reabre en bucle hasta que
+   permanece abierto, que es la única señal fiable de que `switchProvider()`
+   terminó.
 
 2. **`local` no admite cancelación.** No tiene fetch propio: delega en
    `ollamaApi.tags()`. `fetchWithTimeout` ya acepta `options.signal` y lo trata

@@ -191,27 +191,53 @@ async function ejecutar(win) {
   check(cuerposShow.length > 0 && cuerposValidos.length === cuerposShow.length,
     `cada /api/show llegó con el nombre del modelo (${cuerposValidos.length}/${cuerposShow.length})`);
 
+  // Se activa con un CLIC REAL sobre la opción, que es la ruta del usuario:
+  // el `onclick` del markup, `switchProvider()` entero y el `loadRuntime()` que
+  // dispara. Ni `setProvider` ni `loadRuntime` por separado — rodear la ruta
+  // que se quiere verificar deja sin comprobar justo lo que importa.
   const catalogo = await ev(win, `
-    const paso = { fase: 'inicio', error: null };
-    try {
-      paso.fase = 'setProvider';
-      await window.mika5.ai.setProvider('local');
-      paso.fase = 'loadRuntime';
-      await loadRuntime();
-      paso.fase = 'leer';
-    } catch (e) {
-      paso.error = String(e && e.message || e);
+    const desplegable = document.getElementById('providerOptions');
+    // Se abre con el disparador, como lo abre el usuario, para que el cierre
+    // sea despues una senal fiable: switchProvider() lo cierra al terminar,
+    // DESPUES de esperar a loadRuntime(). Sin abrirlo antes no hay forma de
+    // saber cuando acabo, y el cierre diferido caia encima de la seccion
+    // siguiente dejandola medida a mitad de camino.
+    document.getElementById('providerTrigger').click();
+    const opcion = [...desplegable.querySelectorAll('.provider-option')]
+      .find(n => (n.getAttribute('onclick') || '').includes("switchProvider('local')"));
+    if (!opcion) return { error: 'no existe la opción local en el markup' };
+    opcion.click();
+
+    // Esperar a que el desplegable este cerrado NO sirve como senal de fin: el
+    // clic sobre la opcion burbujea hasta el oyente de document, que lo cierra
+    // en el acto, mucho antes de que switchProvider() termine. La senal valida
+    // es que se pueda reabrir y SIGA abierto: mientras switchProvider() no haya
+    // llegado a su ultima linea, su cierre diferido lo vuelve a cerrar solo.
+    let asentado = false;
+    for (let i = 0; i < 100 && !asentado; i++) {
+      document.getElementById('providerTrigger').click();
+      await new Promise(r => setTimeout(r, 100));
+      if (desplegable.style.display === 'block') {
+        asentado = true;
+        document.getElementById('providerTrigger').click();
+      }
     }
-    if (paso.error) return { error: paso.fase + ': ' + paso.error };
+    if (!asentado) return { error: 'switchProvider() nunca dejo de cerrar el desplegable' };
     return [...document.getElementById('modelSelect').options].map(o => o.value || o.textContent.trim());
   `);
   if (catalogo && catalogo.error) throw new Error(`no se pudo activar local -> ${catalogo.error}`);
-  // Nota: esta sección usa `setProvider` + `loadRuntime` y no `switchProvider`
-  // a propósito. `switchProvider()` invocado inmediatamente después del
-  // arranque no resuelve —ni con un proveedor sin red— y bloquea el hilo del
-  // renderer hasta el punto de que ni un `setTimeout` de respaldo dispara; el
-  // mismo `switchProvider()` funciona más adelante en esta misma suite
-  // (sección 4). Es anterior a este cambio y está sin diagnosticar.
+  const trasClic = await ev(win, `
+    return {
+      proveedor: (await window.mika5.ai.getCurrentProvider()).id,
+      desplegable: document.getElementById('providerOptions').style.display
+    };
+  `);
+  check(trasClic.proveedor === 'local',
+    `pulsar la opción del selector activa el proveedor (${trasClic.proveedor})`);
+  // Pulsar una opción cierra el desplegable: es la única forma de que el
+  // disparador vuelva a abrirlo, porque alterna leyendo `style.display`.
+  check(trasClic.desplegable === 'none',
+    `elegir un proveedor cierra el desplegable (display=${trasClic.desplegable || '(vacío)'})`);
   // `mika5-stub-embed:test` no aparece: el filtro de modelos de embedding del
   // renderer lo descarta, y que lo descarte forma parte de lo que se comprueba.
   check(catalogo.includes('mika5-stub-chat:test') && catalogo.includes('mika5-stub-vision:test'),
