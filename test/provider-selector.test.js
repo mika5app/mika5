@@ -691,6 +691,18 @@ app.on('browser-window-created', (_e, win) => {
       error = e;
     }
 
+    // El recuento por ruta se imprime siempre: es la evidencia de que todo el
+    // tráfico de Ollama terminó en el stub, y deja de haber que instrumentar a
+    // mano para saberlo cuando algo cambie.
+    const porRuta = new Map();
+    for (const p of peticionesStub) {
+      const clave = `${p.metodo} ${p.ruta}`;
+      porRuta.set(clave, (porRuta.get(clave) || 0) + 1);
+    }
+    console.log(`provider-selector: stub en ${process.env.MIKA5_OLLAMA_BASE} — `
+      + `${peticionesStub.length} peticiones: `
+      + [...porRuta].map(([r, n]) => `${r} x${n}`).join(', '));
+
     cerrarStub();
 
     if (error) {
