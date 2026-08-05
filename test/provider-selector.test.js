@@ -165,10 +165,15 @@ const ev = (win, codigo) => win.webContents.executeJavaScript(`(async () => { ${
 
 // Desacuerdo tolerado entre `getContentSize()` y `window.innerHeight`.
 //
-// Con escalado fraccionario los dos redondean el mismo tamaño físico de forma
-// distinta y se quedan separados PARA SIEMPRE, no un instante: medido a
-// scaleFactor 1.25, pedir 222 px deja contenido 185 e innerHeight 186. Exigir
-// igualdad exacta colgaba la espera hasta agotar el plazo.
+// Comportamiento OBSERVADO en Electron 31 sobre Windows con escalado
+// fraccionario, no un mecanismo deducido: a scaleFactor 1.25, pedir 222 px deja
+// contenido 185 e innerHeight 186, y siguen separados en todas las lecturas
+// posteriores, no sólo un instante. Electron documenta la geometría de pantalla
+// en puntos independientes de dispositivo
+// (https://electronjs.org/docs/latest/api/structures/display); por qué las dos
+// lecturas acaban en enteros distintos no se ha demostrado aquí y esta prueba no
+// lo afirma. Lo que sí se midió es que exigir igualdad exacta colgaba la espera
+// hasta agotar el plazo.
 //
 // El margen sigue siendo diminuto frente a lo que esta espera existe para
 // detectar: cuando Chromium deja de propagar el tamaño a una ventana tapada, la
@@ -819,12 +824,11 @@ async function ejecutar(win) {
 
   // Se pide una ventana muy por debajo del mínimo. Electron tiene que recortar.
   //
-  // La relación es `>=`, no `===`, y no por comodidad: `minHeight` se declara en
-  // píxeles independientes de dispositivo y el mínimo se impone en píxeles
-  // FÍSICOS, así que con escalado fraccionario el recorte cae en el primer valor
-  // representable por encima del declarado. Medido a scaleFactor 1.25: pedir 100
-  // devuelve 222 exteriores para un `minHeight` de 220. Exigir 220 exacto ataba
-  // la prueba a una pantalla sin escalar.
+  // La relación es `>=`, no `===`, y no por comodidad. Comportamiento observado
+  // en Electron 31 sobre Windows a scaleFactor 1.25: con `minHeight` en 220,
+  // pedir 100 devuelve 222 exteriores, no 220. En qué unidad aplica Electron ese
+  // recorte por dentro no se ha demostrado y aquí no se afirma; lo medido es el
+  // resultado. Exigir 220 exacto ataba la prueba a una pantalla sin escalado.
   //
   // Lo que no se relaja es la garantía: la altura interior resultante, sea la
   // que sea, tiene que dar de sí para una fila entera, y eso lo comprueba el
