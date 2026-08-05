@@ -160,9 +160,18 @@
   box-shadow: 0 10px 30px rgba(0,0,0,0.4);
   z-index: 100;
   /* Con siete proveedores la lista mide ~520 px. En ventanas bajas se desplaza
-     dentro de su propia caja en vez de salirse por debajo de la pantalla. */
+     dentro de su propia caja en vez de salirse por debajo de la pantalla.
+
+     El alto real lo fija `ajustarAltoDesplegableProveedores()` al abrir,
+     midiendo dónde empieza el menú. Lo de aquí es sólo el respaldo para el
+     instante anterior a que ese código corra, y es conservador a propósito:
+     antes era el valor definitivo, y su 96 suponía dónde empezaba el menú
+     —empieza en y=50—, así que dejaba 46 px vacíos en cualquier ventana lo
+     bastante baja como para recortar. Media fila de proveedor, por nada. */
   max-height: calc(100vh - 96px);
   overflow-y: auto;
+  /* Sin esto la lista cambia 8 px de ancho al pasar de caber a no caber. */
+  scrollbar-gutter: stable;
 }
 .provider-option {
   padding: 12px;

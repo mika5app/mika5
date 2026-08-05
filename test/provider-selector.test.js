@@ -736,6 +736,95 @@ async function ejecutar(win) {
   `);
   check(final.vivos === final.total && final.total === IDS_CANONICOS.length,
     `el selector sigue completo y pulsable al final (${final.vivos}/${final.total})`);
+
+  // --- 11. El desplegable cabe en la ventana, a cualquier altura ------------
+  //
+  // Con siete proveedores la lista mide ~520 px: en una ventana baja no cabe.
+  // Lo que se comprueba es que se recorta dentro de su propia caja y no por
+  // debajo de la pantalla, que se llega a todas las opciones, y que el hueco
+  // que deja libre es el margen declarado y no uno mayor.
+  //
+  // La regresión concreta: el alto máximo era `calc(100vh - 96px)` en CSS. Ese
+  // 96 suponía dónde empieza el menú, que empieza en y=50, así que reservaba
+  // 46 px y los dejaba vacíos — media fila de proveedor perdida en toda ventana
+  // lo bastante baja como para recortar. Y una constante así deja de valer en
+  // silencio en cuanto la cabecera cambia de alto.
+  const [anchoOriginal, altoOriginal] = win.getSize();
+  const MARGEN = 16;
+  for (const alto of [1000, 700, 600, 500, 420]) {
+    win.setSize(anchoOriginal, alto);
+    await new Promise(r => setTimeout(r, 350));
+    const g = await ev(win, `
+      const menu = document.getElementById('providerOptions');
+      menu.style.display = 'none';
+      document.getElementById('providerTrigger').click();
+      await new Promise(r => setTimeout(r, 200));
+      const caja = menu.getBoundingClientRect();
+      const opciones = [...menu.querySelectorAll('.provider-option')];
+
+      // Se recorre la lista como lo haría el usuario y se comprueba que cada
+      // opción llega a ser pulsable en algún momento del recorrido.
+      const alcanzadas = new Set();
+      const pasos = Math.ceil(menu.scrollHeight / Math.max(1, menu.clientHeight)) + 2;
+      for (let i = 0; i <= pasos; i++) {
+        menu.scrollTop = (menu.scrollHeight / pasos) * i;
+        await new Promise(r => setTimeout(r, 60));
+        for (const n of opciones) {
+          const r = n.getBoundingClientRect();
+          const centro = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          if (centro && n.contains(centro)) alcanzadas.add(n.getAttribute('onclick'));
+        }
+      }
+      menu.scrollTop = 0;
+      document.getElementById('providerTrigger').click();
+      return {
+        ventana: window.innerHeight,
+        top: Math.round(caja.top),
+        bottom: Math.round(caja.bottom),
+        recorta: menu.scrollHeight > menu.clientHeight,
+        alcanzadas: alcanzadas.size,
+        total: opciones.length
+      };
+    `);
+    check(g.bottom <= g.ventana,
+      `${alto}px: el desplegable no se sale por debajo (${g.bottom} <= ${g.ventana})`);
+    check(g.alcanzadas === g.total,
+      `${alto}px: se llega a las ${g.total} opciones (${g.alcanzadas})`);
+    // Cuando recorta, tiene que estar aprovechando el alto disponible: el hueco
+    // libre bajo el menú es el margen y no más. Sin esta comprobación, volver a
+    // una constante inventada pasaría desapercibido mientras «quepa».
+    if (g.recorta) {
+      const hueco = g.ventana - g.bottom;
+      check(hueco <= MARGEN + 4,
+        `${alto}px: al recortar aprovecha el alto disponible (deja ${hueco}px, margen ${MARGEN})`);
+    }
+  }
+
+  // Redimensionar con el menú abierto tiene que reajustarlo, no dejarlo con el
+  // alto de la ventana anterior.
+  win.setSize(anchoOriginal, 1000);
+  await new Promise(r => setTimeout(r, 300));
+  const reajuste = await ev(win, `
+    const menu = document.getElementById('providerOptions');
+    menu.style.display = 'none';
+    document.getElementById('providerTrigger').click();
+    await new Promise(r => setTimeout(r, 200));
+    return { antes: Math.round(menu.getBoundingClientRect().bottom) };
+  `);
+  win.setSize(anchoOriginal, 480);
+  await new Promise(r => setTimeout(r, 500));
+  const despues = await ev(win, `
+    const menu = document.getElementById('providerOptions');
+    const caja = menu.getBoundingClientRect();
+    const r = { bottom: Math.round(caja.bottom), ventana: window.innerHeight };
+    document.getElementById('providerTrigger').click();
+    return r;
+  `);
+  check(despues.bottom <= despues.ventana,
+    `encoger la ventana con el menú abierto lo reajusta (${despues.bottom} <= ${despues.ventana}, antes ${reajuste.antes})`);
+
+  win.setSize(anchoOriginal, altoOriginal);
+  await new Promise(r => setTimeout(r, 300));
 }
 
 // El oyente se registra antes de cargar main.js, que es quien abre la ventana.

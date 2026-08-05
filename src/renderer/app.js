@@ -2782,6 +2782,47 @@ function updatePrivacyUI() {
   }
 }
 
+// Margen que se deja libre bajo el desplegable para que no muera pegado al
+// borde inferior de la ventana.
+const MARGEN_DESPLEGABLE = 16;
+
+/**
+ * Ajusta cuánto puede crecer el desplegable de proveedores antes de desplazarse
+ * por dentro.
+ *
+ * El alto se MIDE, no se adivina. Antes era `max-height: calc(100vh - 96px)`
+ * en CSS: una constante que codificaba una suposición sobre dónde empieza el
+ * menú. El menú empieza en y=50, así que ese 96 reservaba 46 px de más y los
+ * dejaba vacíos en cualquier ventana lo bastante baja como para recortar —
+ * media fila de proveedor perdida sin motivo. Y si la cabecera cambia de alto,
+ * la constante deja de valer sin que nada avise.
+ *
+ * Se llama al abrir y al redimensionar con el menú abierto.
+ */
+function ajustarAltoDesplegableProveedores() {
+  const menu = el('providerOptions');
+  if (!menu || menu.style.display === 'none' || !menu.style.display) return;
+  const arriba = menu.getBoundingClientRect().top;
+  const disponible = Math.max(120, window.innerHeight - arriba - MARGEN_DESPLEGABLE);
+  menu.style.maxHeight = `${Math.round(disponible)}px`;
+}
+
+/** Abre o cierra el desplegable de proveedores. */
+function toggleProviderMenu() {
+  const menu = el('providerOptions');
+  if (!menu) return;
+  const cerrado = menu.style.display === 'none' || !menu.style.display;
+  menu.style.display = cerrado ? 'block' : 'none';
+  if (cerrado) {
+    // El alto se calcula con el menú ya visible: en `display: none` no hay
+    // caja que medir y `getBoundingClientRect()` devolvería ceros.
+    ajustarAltoDesplegableProveedores();
+    menu.scrollTop = 0;
+  }
+}
+
+window.addEventListener('resize', ajustarAltoDesplegableProveedores);
+
 async function switchProvider(providerId) {
   // El desplegable se cierra AQUÍ, antes de cualquier espera.
   //

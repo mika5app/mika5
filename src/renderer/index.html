@@ -2219,7 +2219,7 @@
 
                     <!-- Provider selector (compact) -->
                     <div class="provider-selector">
-                        <button class="provider-trigger" id="providerTrigger" onclick="event.stopPropagation();(function(){const o=document.getElementById('providerOptions'); o.style.display = (o.style.display==='none' || !o.style.display) ? 'block' : 'none';})()">
+                        <button class="provider-trigger" id="providerTrigger" onclick="event.stopPropagation(); toggleProviderMenu();">
                             <span id="currentProviderName">Ollama Local</span>
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M6 9l6 6 6-6"/>
