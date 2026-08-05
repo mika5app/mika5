@@ -36,6 +36,21 @@ function resolverBaseOllama(valor) {
 const BASE = resolverBaseOllama(process.env.MIKA5_OLLAMA_BASE);
 const FETCH_TIMEOUT = 600000; // 10 minutos para modelos muy grandes
 
+/** Plazo en texto legible, para que el mensaje describa lo que de verdad venció. */
+function describirPlazo(ms) {
+  if (ms >= 60000) {
+    const minutos = ms / 60000;
+    const cifra = Number.isInteger(minutos) ? minutos : minutos.toFixed(1);
+    return `${cifra} ${minutos === 1 ? 'minuto' : 'minutos'}`;
+  }
+  if (ms >= 1000) {
+    const segundos = ms / 1000;
+    const cifra = Number.isInteger(segundos) ? segundos : segundos.toFixed(1);
+    return `${cifra} ${segundos === 1 ? 'segundo' : 'segundos'}`;
+  }
+  return `${Math.round(ms)} ms`;
+}
+
 // Dynamic context window sizing
 const CHARS_PER_TOKEN = 3.5;
 const OUTPUT_TOKEN_RESERVE = 1024;
@@ -70,14 +85,28 @@ function fetchWithTimeout(url, options = {}) {
     // texto: sin él `clasificarError()` no encuentra nada estructurado y un
     // plazo vencido acababa como PROVIDER_UNKNOWN_ERROR, indistinguible de un
     // fallo que nadie supo explicar.
+    //
+    // `options.timeoutMs` existe para poder provocar el vencimiento en una
+    // prueba. Sin él, la única forma de ejercitar esta rama era construir el
+    // error a mano, y eso comprueba que se clasifica bien, no que este camino
+    // lo produzca; esperar diez minutos no es una opción. El valor por defecto
+    // es el de siempre y es el único que se usa en producción.
+    const plazoMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+      ? options.timeoutMs
+      : FETCH_TIMEOUT;
     const timeoutId = setTimeout(() => {
       controller.abort();
       finish(() => {
-        const vencido = new Error('Timeout: La operación excedió 10 minutos');
+        // El mensaje se compone del plazo QUE VENCIÓ, no de la constante. Decir
+        // «excedió 10 minutos» tras un plazo de 300 ms describe otra cosa que
+        // la que pasó, y un mensaje que no coincide con el hecho es peor que no
+        // tenerlo. En producción `plazoMs` es `FETCH_TIMEOUT`, así que el texto
+        // que ve el usuario no cambia.
+        const vencido = new Error(`Timeout: La operación excedió ${describirPlazo(plazoMs)}`);
         vencido.code = 'PROVIDER_TIMEOUT';
         reject(vencido);
       });
-    }, FETCH_TIMEOUT);
+    }, plazoMs);
 
     const req = http.request(
       {
@@ -302,4 +331,4 @@ const ollamaApi = {
 // local, que es la parte con consecuencias de seguridad. `BASE` no: quien la
 // necesita la obtiene de `ollamaApi.status().base`, y exponer el valor ya
 // resuelto sólo añade superficie que después hay que mantener.
-module.exports = { ollamaApi, fetchWithTimeout, resolverBaseOllama };
+module.exports = { ollamaApi, fetchWithTimeout, resolverBaseOllama, describirPlazo };

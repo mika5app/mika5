@@ -198,15 +198,52 @@ async function principal() {
     check(/vencido\.code\s*=\s*'PROVIDER_TIMEOUT'/.test(fuenteOllama),
       'y cuando vence lleva código, no sólo un texto que nadie puede clasificar');
 
-    // Que ese error se clasifique bien se comprueba de verdad, no leyendo la
-    // fuente: se construye el mismo error que produce el plazo.
+    // El plazo se hace VENCER de verdad contra el servidor, con un valor corto.
+    // Construir el error a mano comprobaba que se clasifica bien, no que este
+    // camino lo produzca — y era justamente esa rama la que salía sin código y
+    // acababa en PROVIDER_UNKNOWN_ERROR.
+    limpiar();
+    estado.retrasoMs = 5000;
+    const { fetchWithTimeout } = require('../src/main/ollama');
     const { probeDeError } = require('../src/main/provider-errors');
-    const vencido = new Error('Timeout: La operación excedió 10 minutos');
-    vencido.code = 'PROVIDER_TIMEOUT';
-    const probe = probeDeError(vencido);
+    const inicio = Date.now();
+    let lanzado = null;
+    try {
+      await fetchWithTimeout(`${base}/api/tags`, { timeoutMs: 300 });
+    } catch (e) {
+      lanzado = e;
+    }
+    const transcurrido = Date.now() - inicio;
+    check(lanzado && lanzado.code === 'PROVIDER_TIMEOUT',
+      `el plazo vence de verdad y el error sale con código (${lanzado && lanzado.code})`);
+    check(transcurrido < 2500, `vence en su plazo, no en el del servidor (${transcurrido} ms)`);
+    check(lanzado && lanzado.name !== 'AbortError',
+      'y no se confunde con una cancelación del usuario');
+
+    const probe = probeDeError(lanzado);
     check(probe.errorCode === 'PROVIDER_TIMEOUT',
-      `un plazo vencido da ${probe.errorCode}, distinto de una cancelación`);
+      `se clasifica como ${probe.errorCode}, distinto de una cancelación`);
     check(probe.reachable === null, 'y tampoco prueba nada del servidor');
+
+    await new Promise(r => setTimeout(r, 300));
+    check(estado.abortadas >= 1,
+      `al vencer se cierra el socket: el servidor lo vio (${estado.abortadas})`);
+
+    // El mensaje describe el plazo QUE VENCIÓ, no la constante. Antes decía
+    // siempre «10 minutos», también tras un plazo de 300 ms: un texto que no
+    // coincide con el hecho es peor que no tenerlo.
+    check(/300 ms/.test(lanzado.message),
+      `el mensaje nombra el plazo real que venció ("${lanzado.message}")`);
+
+    // Y en producción, donde el plazo es la constante, el texto es el de
+    // siempre: la opción de prueba no cambia lo que lee el usuario.
+    const { fetchWithTimeout: fwt } = require('../src/main/ollama');
+    const fuente = String(fwt);
+    check(/describirPlazo\(plazoMs\)/.test(fuente),
+      'el texto se compone del plazo vencido, no de una constante fija');
+    const { describirPlazo } = require('../src/main/ollama');
+    check(typeof describirPlazo === 'function' && describirPlazo(600000) === '10 minutos',
+      `con el plazo de producción el mensaje sigue diciendo «10 minutos» (${typeof describirPlazo === 'function' ? describirPlazo(600000) : 'no exportada'})`);
   }
 
   console.log('\n=== 5. Los dos códigos salen del MISMO camino ===');
