@@ -273,4 +273,27 @@ console.log('\n=== 11. validarAdaptador() es reutilizable y no muta ===');
     'validar null falla cerrado con código estable');
 }
 
+console.log('\n=== 12. El registro gobierna: nadie indexa PROVIDERS a mano ===');
+{
+  // Registrar los adaptadores y seguir accediendo por `PROVIDERS[id]` dejaba
+  // el registro como decorado: validaba al arrancar y después no pasaba nada
+  // por él, así que ninguna de sus garantías —identificador conocido, traits
+  // validados, descriptor congelado— llegaba a aplicarse en ejecución. Esta
+  // comprobación es lo que impide que vuelva a quedarse así.
+  const fuente = fs.readFileSync(path.join(__dirname, '../src/main/ai-providers.js'), 'utf8');
+  const lineasDeCodigo = fuente.split(/\r?\n/)
+    .filter(linea => !/^\s*(\/\/|\*|\/\*)/.test(linea));
+
+  const accesosDirectos = lineasDeCodigo.filter(linea => /PROVIDERS\s*\[/.test(linea));
+  check(accesosDirectos.length === 0,
+    `ai-providers.js no indexa PROVIDERS directamente (${accesosDirectos.length}: ${accesosDirectos.map(l => l.trim()).join(' | ')})`);
+
+  // Y el registro tiene que usarse de verdad, no sólo existir: si alguien
+  // borrase las consultas, la comprobación anterior seguiría pasando.
+  const consultas = lineasDeCodigo
+    .filter(linea => /registroDeProveedores\.(get|getAdapter|has)\(/.test(linea));
+  check(consultas.length >= 8,
+    `el acceso a proveedores pasa por el registro (${consultas.length} consultas)`);
+}
+
 console.log(`\nProvider registry tests passed (${comprobaciones} comprobaciones)`);

@@ -858,7 +858,7 @@ for (const [id, adapter] of Object.entries(PROVIDERS)) {
 }
 
 function getProviderVisualCapabilities(providerId) {
-  const provider = PROVIDERS[providerId];
+  const provider = registroDeProveedores.getAdapter(providerId);
   const declared = provider?.visualCapabilities || {};
   const imageGeneration = typeof provider?.generateImage === 'function';
   const sourceImages = imageGeneration
@@ -958,29 +958,36 @@ class AIProviderManager {
   }
   
   setProvider(providerId) {
-    if (!PROVIDERS[providerId]) throw new Error('Proveedor no válido');
+    const descriptor = registroDeProveedores.get(providerId);
+    if (!descriptor) throw new Error('Proveedor no válido');
     this.currentProvider = providerId;
-    
+
     const stmt = this.db.prepare('INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)');
     stmt.run('ai_provider', providerId);
-    
-    return { provider: providerId, privacy: PROVIDERS[providerId].privacy };
+
+    return { provider: providerId, privacy: descriptor.traits.privacy };
   }
-  
+
   getProvider() {
-    const config = PROVIDERS[this.currentProvider];
+    // Los metadatos salen del descriptor registrado, no del adaptador: son
+    // datos declarados y validados al registrar, así que un adaptador no puede
+    // presentarse aquí con una privacidad que el registro nunca aceptó.
+    const descriptor = registroDeProveedores.get(this.currentProvider);
+    const privacy = descriptor.traits.privacy;
     return {
       id: this.currentProvider,
-      name: config.name,
-      privacy: config.privacy,
-      requiresKey: config.requiresKey,
-      privacyLabel: config.privacy === 'private' ? 'Privado' : 'Cloud',
+      name: descriptor.displayName,
+      privacy,
+      requiresKey: descriptor.traits.requiresKey,
+      privacyLabel: privacy === 'private' ? 'Privado' : 'Cloud',
       capabilities: this.getCapabilities(this.currentProvider)
     };
   }
-  
+
   setApiKey(provider, key) {
-    if (!PROVIDERS[provider].requiresKey) return false;
+    const descriptor = registroDeProveedores.get(provider);
+    if (!descriptor) throw new Error('Proveedor no válido');
+    if (!descriptor.traits.requiresKey) return false;
     this.apiKeys[provider] = key;
     
     const stmt = this.db.prepare('INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)');
@@ -1035,7 +1042,7 @@ class AIProviderManager {
   }
 
   async chat(params) {
-    const provider = PROVIDERS[this.currentProvider];
+    const provider = registroDeProveedores.getAdapter(this.currentProvider);
     if (this.currentProvider === ALIBABA_PROVIDER_ID) {
       const selectedModelId = params.model || ALIBABA_DEFAULT_MODEL_ID;
       const selectedModel = this.providerConfigs.alibaba.models.find(model => model.id === selectedModelId);
@@ -1132,7 +1139,7 @@ class AIProviderManager {
   }
 
   async generateImage(params) {
-    const provider = PROVIDERS[this.currentProvider];
+    const provider = registroDeProveedores.getAdapter(this.currentProvider);
     if (!provider || typeof provider.generateImage !== 'function') {
       throw new Error('El proveedor actual no soporta generación de imágenes');
     }
@@ -1260,7 +1267,7 @@ class AIProviderManager {
   }
   
   async listModels() {
-    const provider = PROVIDERS[this.currentProvider];
+    const provider = registroDeProveedores.getAdapter(this.currentProvider);
     if (this.currentProvider === 'local') {
       return provider.listModels();
     }
@@ -1309,7 +1316,9 @@ class AIProviderManager {
    * no hay nada que usar.
    */
   async getAvailability(providerId = this.currentProvider) {
-    const config = PROVIDERS[providerId];
+    // Un identificador que el registro no conoce no es un proveedor: aquí es
+    // donde se decide, y por eso `config` puede seguir siendo nulo sin romper.
+    const config = registroDeProveedores.getAdapter(providerId);
     if (!config) {
       return {
         providerId, configured: false, reachable: null, authenticated: null,
