@@ -130,15 +130,33 @@ máquina que construye; no viaja en el instalador. Se cierran con
 
 ## Pendiente, por orden
 
-1. **Electron 31 → 43.** Doce majors. Runtime sin soporte; es lo único
-   empaquetado que sigue abierto. Rama y plan de pruebas propios.
-2. **Habilitar los fuses de Electron.** `EnableEmbeddedAsarIntegrityValidation`
-   y `OnlyLoadAppFromAsar`. Hoy el ASAR no está protegido en absoluto.
-3. **Aislar el parseo de hojas de cálculo.** Segunda capa, aunque 0.20.3 cierre
+1. **Electron 31 → 43, y los fuses en ese mismo trabajo, no antes.** Doce
+   majors. Runtime sin soporte; es lo único empaquetado que sigue abierto.
+
+   > **No habilitar los fuses mientras MIKA5 siga en Electron 31.** El aviso de
+   > bypass de integridad ASAR afecta precisamente a las aplicaciones que ya
+   > tienen los dos fuses activos. Hoy MIKA5 no los tiene, y por eso el aviso no
+   > la alcanza; encenderlos sobre la 31 la metería justo en el supuesto
+   > vulnerable. Primero se actualiza Electron y después se habilitan
+   > `EnableEmbeddedAsarIntegrityValidation` y `OnlyLoadAppFromAsar`, juntos.
+
+   Una versión anterior de este documento los listaba como trabajo
+   independiente y por delante de la actualización. En ese orden habrían
+   empeorado la situación en vez de mejorarla.
+
+   La rama de seguridad debe llevar: `electron@43.2.0`,
+   `electron-builder@26.15.3`, `@electron/fuses@2.1.3`, los dos fuses
+   habilitados, **comprobación de los fuses sobre el binario empaquetado** —no
+   sobre la configuración, que dice lo que se pidió y no lo que quedó—, y
+   checkout limpio con `npm audit`, build y `test:all` en verde.
+
+2. **Aislar el parseo de hojas de cálculo.** Segunda capa, aunque 0.20.3 cierre
    las vulnerabilidades conocidas. Un proceso hijo con Node completo, el
    entorno heredado y acceso normal al sistema de ficheros **no cuenta como
    aislamiento**.
-4. **electron-builder 24 → 26.** Cierra los dieciséis de construcción.
+
+`electron-builder 24 → 26` va dentro del punto 1: cierra los dieciséis avisos
+de construcción y hace falta de todas formas para empaquetar Electron 43.
 
 Ninguna se hizo aquí: son saltos mayores, y meterlos en la rama de
 estabilización haría imposible saber qué rompió qué.

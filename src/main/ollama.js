@@ -70,14 +70,23 @@ function fetchWithTimeout(url, options = {}) {
     // texto: sin él `clasificarError()` no encuentra nada estructurado y un
     // plazo vencido acababa como PROVIDER_UNKNOWN_ERROR, indistinguible de un
     // fallo que nadie supo explicar.
+    //
+    // `options.timeoutMs` existe para poder provocar el vencimiento en una
+    // prueba. Sin él, la única forma de ejercitar esta rama era construir el
+    // error a mano, y eso comprueba que se clasifica bien, no que este camino
+    // lo produzca; esperar diez minutos no es una opción. El valor por defecto
+    // es el de siempre y es el único que se usa en producción.
+    const plazoMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+      ? options.timeoutMs
+      : FETCH_TIMEOUT;
     const timeoutId = setTimeout(() => {
       controller.abort();
       finish(() => {
-        const vencido = new Error('Timeout: La operación excedió 10 minutos');
+        const vencido = new Error(`Timeout: La operación excedió ${FETCH_TIMEOUT / 60000} minutos`);
         vencido.code = 'PROVIDER_TIMEOUT';
         reject(vencido);
       });
-    }, FETCH_TIMEOUT);
+    }, plazoMs);
 
     const req = http.request(
       {
