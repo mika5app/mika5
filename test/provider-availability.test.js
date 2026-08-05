@@ -490,9 +490,16 @@ console.log('\n=== 12b. La extracción a módulos no cambió el conjunto ===');
     `el registro expone los siete adaptadores en su orden observable (${Object.keys(PROVIDERS).join(', ')})`);
 
   const dir = path.join(__dirname, '../src/main/providers');
+  // Módulos del directorio que NO son adaptadores. La lista es explícita: un
+  // fichero nuevo sin declarar aquí hace fallar la comprobación, que es lo que
+  // impide que se cuele un adaptador sin registrar.
+  const NO_ADAPTADORES = ['alibaba-config'];
   const modulos = fs.readdirSync(dir).filter(f => f.endsWith('.js')).map(f => f.replace(/\.js$/, '')).sort();
-  check(JSON.stringify(modulos) === JSON.stringify([...IDS_ESPERADOS].sort()),
-    `hay un módulo por adaptador y ninguno de más (${modulos.join(', ')})`);
+  const adaptadores = modulos.filter(m => !NO_ADAPTADORES.includes(m));
+  check(JSON.stringify(adaptadores) === JSON.stringify([...IDS_ESPERADOS].sort()),
+    `hay un módulo por adaptador y ninguno de más (${adaptadores.join(', ')})`);
+  check(NO_ADAPTADORES.every(m => modulos.includes(m)),
+    `los módulos auxiliares declarados existen (${NO_ADAPTADORES.join(', ')})`);
 
   // Cada módulo tiene que poder cargarse por sí solo: si dependiera de un
   // identificador que sólo existe dentro de ai-providers.js, la extracción
@@ -537,6 +544,44 @@ console.log('\n=== 12b. La extracción a módulos no cambió el conjunto ===');
     check(JSON.stringify(metodos) === JSON.stringify([...esperado.metodos].sort()),
       `${id}: conserva sus funciones (${metodos.join(', ')})`);
   }
+}
+
+console.log('\n=== 12c. Alibaba conserva sus preajustes y su fallback ===');
+{
+  // La configuración de Alibaba se extrajo a su propio módulo. Estas
+  // comprobaciones fijan los dos comportamientos documentados que la
+  // extracción NO podía «arreglar» de paso, porque son deliberados.
+  const cfg = require('../src/main/providers/alibaba-config');
+
+  check(cfg.ALIBABA_DEFAULT_CONFIG.models.length === 11,
+    `el catálogo de preajustes conserva sus once modelos (${cfg.ALIBABA_DEFAULT_CONFIG.models.length})`);
+  check(cfg.ALIBABA_TOKEN_PLAN_ENDPOINT.startsWith('https://'),
+    'el endpoint del plan de tokens sigue siendo https');
+  check(cfg.ALIBABA_DEFAULT_MAX_TOKENS === 8192 && cfg.ALIBABA_LEGACY_MAX_TOKENS === 1024,
+    'los dos límites de tokens conservan su valor: la migración depende de distinguirlos');
+
+  // `normalizeAlibabaConfig()` reinyecta siempre los preajustes. Es la razón
+  // por la que `deleteProviderModel()` no puede retirarlos, y está documentado.
+  const vacio = cfg.normalizeAlibabaConfig({ models: [] });
+  check(vacio.models.length === 11,
+    `normalizar una configuración sin modelos reinyecta los preajustes (${vacio.models.length})`);
+  const conExtra = cfg.normalizeAlibabaConfig({
+    models: [{ id: 'modelo-propio', displayName: 'Propio', taskType: 'chat' }]
+  });
+  check(conExtra.models.some(m => m.id === 'modelo-propio'),
+    'un modelo añadido por el usuario sobrevive a la normalización');
+  check(conExtra.models.length === 12,
+    `y convive con los once preajustes, no los sustituye (${conExtra.models.length})`);
+
+  // El catálogo es estático: no toca la red y por tanto no aporta evidencia.
+  const alibaba = PROVIDERS.alibaba;
+  const listado = await alibaba.listModels('clave', undefined);
+  check(listado.probe && listado.probe.attempted === false,
+    'el catálogo de Alibaba sigue declarando que no intentó ninguna consulta de red');
+  check(listado.probe.reachable === null && listado.probe.authenticated === null,
+    'y por tanto no afirma conectividad ni credencial aceptada');
+  check(listado.models.length > 0,
+    `pero sigue ofreciendo modelos utilizables (${listado.models.length})`);
 }
 
 console.log('\n=== 13. Contrato uniforme y sin casos especiales ===');

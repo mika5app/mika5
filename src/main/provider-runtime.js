@@ -101,10 +101,37 @@ async function probeOllamaVision(modelName) {
   }
 }
 
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+// Predicado genérico de fallo de red. Su único consumidor hoy es el reintento
+// de Alibaba, pero no tiene nada de específico suyo: distingue un problema de
+// transporte de una cancelación o de una respuesta con error.
+function isProviderNetworkError(error) {
+  if (!error || error.name === 'AbortError') return false;
+  const details = [
+    error.name,
+    error.code,
+    error.message,
+    error.cause?.name,
+    error.cause?.code,
+    error.cause?.message
+  ].filter(Boolean).join(' ');
+  return /fetch failed|UND_ERR_CONNECT_TIMEOUT|ConnectTimeoutError|ETIMEDOUT|ECONNRESET|ENOTFOUND|EAI_AGAIN|UND_ERR_HEADERS_TIMEOUT|UND_ERR_BODY_TIMEOUT/i.test(details);
+}
+
+function normalizeProviderNetworkError(_error, providerLabel = 'el proveedor') {
+  return `No se pudo conectar con ${providerLabel}. Revisa conexión, VPN, endpoint o vuelve a intentar.`;
+}
+
 module.exports = {
   sanitizeForCloud,
   formatBytes,
   detectCapabilities,
   createAbortContext,
-  probeOllamaVision
+  probeOllamaVision,
+  isProviderNetworkError,
+  delay,
+  normalizeProviderNetworkError
 };
