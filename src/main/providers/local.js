@@ -9,7 +9,7 @@
 const { ollamaApi } = require('../ollama');
 const { assertVisionSupported, normalizeChatResult } = require('../provider-capabilities');
 const { probeDeError, probeDeExito, sanearMensaje } = require('../provider-errors');
-const { formatBytes, detectCapabilities, probeOllamaVision } = require('../provider-runtime');
+const { formatBytes, detectCapabilities, probeOllamaVision, createAbortContext } = require('../provider-runtime');
 
 // MODO LOCAL - 100% Privado (delegado a ollama.js robusto)
 const adaptadorLocal = {
@@ -63,9 +63,19 @@ const adaptadorLocal = {
     });
   },
   
-  async listModels() {
+  // Mismo contrato de cancelación que openai, groq y llamacpp: una señal
+  // externa da PROVIDER_ABORTED y el plazo propio da PROVIDER_TIMEOUT, ambos
+  // con `reachable: null` porque nadie llegó a saber si el servidor estaba.
+  // Antes `local` no podía cancelarse: no hace fetch propio, delega en
+  // ollamaApi, y ollamaApi no aceptaba señal.
+  //
+  // El plazo cubre el catálogo COMPLETO, sondas de visión incluidas: son N+1
+  // peticiones en serie y darle a cada una su propio plazo dejaría el total
+  // sin techo.
+  async listModels(_apiKey, _config, options = {}) {
+    const abortContext = createAbortContext(options.signal, 30000, 'Ollama');
     try {
-      const data = await ollamaApi.tags();
+      const data = await ollamaApi.tags({ signal: abortContext.signal });
       const raw = data.models || data.tags || [];
 
       // Probe each model for vision capabilities via /api/show
@@ -84,7 +94,7 @@ const adaptadorLocal = {
         // Única fuente: la sonda. Si /api/show falla, el modelo queda sin visión
         // y adjuntar una imagen se bloqueará con un mensaje claro. Antes se caía
         // a detección por nombre y la imagen se perdía en silencio.
-        entry.supportsVision = await probeOllamaVision(name);
+        entry.supportsVision = await probeOllamaVision(name, { signal: abortContext.signal });
         if (entry.supportsVision && !entry.capabilities.includes('👁️ Visión')) {
           entry.capabilities.push('👁️ Visión');
         }
@@ -96,13 +106,16 @@ const adaptadorLocal = {
       // credencial, así que `authenticated` se queda en null.
       return { models, probe: probeDeExito({ authenticated: null }) };
     } catch (e) {
-      console.warn('Ollama no disponible:', sanearMensaje(e && e.message));
-      return { models: [], probe: probeDeError(e) };
+      const error = abortContext.normalize(e);
+      console.warn('Ollama no disponible:', sanearMensaje(error && error.message));
+      return { models: [], probe: probeDeError(error) };
+    } finally {
+      abortContext.cleanup();
     }
   },
-  
-  async status() {
-    return ollamaApi.status();
+
+  async status(options = {}) {
+    return ollamaApi.status({ signal: options.signal });
   }
 };
 

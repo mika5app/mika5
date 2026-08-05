@@ -182,18 +182,23 @@ async function fetchJson(url, opts = {}) {
   }
 }
 
+// `options.signal` es opcional en todos los métodos de lectura. `fetchWithTimeout`
+// ya sabía distinguir una cancelación externa de su propio plazo; lo que faltaba
+// era que estas tres funciones aceptasen la señal y la pasaran, porque sin eso
+// el adaptador `local` no tenía forma de cancelar nada: no hace fetch propio.
+// Las llamadas sin argumentos siguen funcionando igual.
 const ollamaApi = {
-  async status() {
+  async status(options = {}) {
     try {
-      await fetchJson(`${BASE}/api/tags`);
+      await fetchJson(`${BASE}/api/tags`, { signal: options.signal });
       return { ok: true, base: BASE };
     } catch (e) {
       return { ok: false, base: BASE, error: String(e?.message || e) };
     }
   },
 
-  async tags() {
-    return fetchJson(`${BASE}/api/tags`);
+  async tags(options = {}) {
+    return fetchJson(`${BASE}/api/tags`, { signal: options.signal });
   },
 
   async chat({ model, messages, signal }) {
@@ -236,7 +241,7 @@ const ollamaApi = {
     }
   },
 
-  async embed({ model, input }) {
+  async embed({ model, input, signal }) {
     const m = (model || "").trim();
     if (!m) throw new Error("INVALID_EMBED_MODEL");
 
@@ -246,17 +251,19 @@ const ollamaApi = {
       body: JSON.stringify({
         model: m,
         input: input
-      })
+      }),
+      signal
     });
   },
 
-  async show(model) {
+  async show(model, options = {}) {
     const m = (model || "").trim();
     if (!m) throw new Error("INVALID_MODEL");
     return fetchJson(`${BASE}/api/show`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: m })
+      body: JSON.stringify({ name: m }),
+      signal: options.signal
     });
   },
 

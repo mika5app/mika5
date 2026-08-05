@@ -194,7 +194,10 @@ console.log('\n=== 3. Timeout y abort contra el listModels real de llamacpp ==='
   // Cancelación REAL atravesando listModels() de un adaptador de red. Antes
   // esto no se podía probar: ningún adaptador aceptaba señal externa y
   // `PROVIDER_ABORTED` era inalcanzable por esa vía.
-  const CON_SENAL = ['openai', 'groq', 'llamacpp'];
+  // `local` está aquí desde que `ollamaApi` acepta señal: antes no podía
+  // estarlo porque no hace fetch propio y la señal moría en la frontera del
+  // módulo. Su cadena completa se ejercita en test/ollama-cancellation.test.js.
+  const CON_SENAL = ['openai', 'groq', 'llamacpp', 'local'];
   for (const id of CON_SENAL) {
     const firma = String(PROVIDERS[id].listModels);
     check(/options\s*=\s*\{\}/.test(firma.slice(0, firma.indexOf(')') + 1)),

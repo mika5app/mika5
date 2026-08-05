@@ -88,15 +88,21 @@ function createAbortContext(externalSignal, timeoutMs, providerLabel) {
 // Los modelos locales de visión exponen claves .vision.* o image_token en
 // model_info; los más nuevos lo publican en el array capabilities.
 // Devuelve false ante cualquier fallo: no se asume visión por el nombre.
-async function probeOllamaVision(modelName) {
+//
+// Con `options.signal` una cancelación se propaga en vez de tragarse. El
+// `catch` que devuelve false vale para «el modelo no declara visión», no para
+// «el usuario canceló»: confundirlos haría que un catálogo cancelado a medias
+// se presentase como un catálogo válido sin visión.
+async function probeOllamaVision(modelName, options = {}) {
   if (!modelName) return false;
   try {
-    const info = await ollamaApi.show(modelName);
+    const info = await ollamaApi.show(modelName, { signal: options.signal });
     const infoKeys = Object.keys(info?.model_info || {});
     const ollamaCaps = Array.isArray(info?.capabilities) ? info.capabilities : [];
     return infoKeys.some(key => key.includes('.vision.') || key.includes('image_token'))
       || ollamaCaps.includes('vision');
-  } catch (_) {
+  } catch (error) {
+    if (error && (error.name === 'AbortError' || error.code === 'PROVIDER_TIMEOUT')) throw error;
     return false;
   }
 }
