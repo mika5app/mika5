@@ -148,31 +148,51 @@ que finge una capacidad que no tienen.
 
 ## 5. Limitaciones conocidas
 
-1. **`local` no admite cancelación.** No tiene fetch propio: delega en
-   `ollamaApi.tags()`. Propagarle una señal exige cambiar `ollama.js`.
+1. **`switchProvider()` no resuelve recién arrancada la aplicación.** Llamada
+   unos dos segundos después de `did-finish-load` no termina, ni siquiera con
+   un proveedor que no toca la red, y bloquea el hilo del renderer hasta el
+   punto de que un `setTimeout` de respaldo tampoco dispara. El mismo
+   `switchProvider()` funciona más adelante en la misma sesión. Es anterior a
+   estos cambios y está sin diagnosticar. Para el usuario significaría que
+   pulsar un proveedor justo al abrir no hace nada y no da ningún aviso. La
+   sección 0 de `provider-selector.test.js` usa `setProvider` + `loadRuntime`
+   por este motivo, no por gusto.
 
-2. **`alibaba.js` recibe su configuración por inyección.** Su módulo exporta
+2. **`local` no admite cancelación.** No tiene fetch propio: delega en
+   `ollamaApi.tags()`. `fetchWithTimeout` ya acepta `options.signal` y lo trata
+   bien; lo que falta es que `tags()`, `show()` y `status()` lo acepten y lo
+   propaguen.
+
+3. **`alibaba.js` recibe su configuración por inyección.** Su módulo exporta
    una factoría en lugar de un objeto, porque importar `alibaba-config` desde
    el adaptador y componerlo desde `ai-providers.js` cerraría un ciclo. Es una
    asimetría real frente a los otros seis.
 
-3. **La migración de `PROVIDERS[id]` al registro está a medias.** Se hizo en la
-   guarda de `init()`, que es donde aporta y está cubierta por prueba. Migrar
-   los otros siete accesos hacía que el gate de Electron agotase su plazo de
-   forma reproducible y no se aisló la causa; se revirtió para no dejar el
-   árbol en rojo. `PROVIDERS` sigue siendo la vía de acceso normal y es API
-   interna con consumidores dentro y fuera del módulo.
+### Lo que ya no es limitación
 
-4. **`getAvailability()` no consulta el registro.** Sigue trabajando sobre
-   `PROVIDERS`, y cumple igual el principio de no contener casos especiales por
-   proveedor: una prueba recorre su cuerpo y falla si aparece el nombre de
-   cualquiera.
+- **El registro gobierna.** Los nueve accesos —`getProviderVisualCapabilities`,
+  `setProvider`, `getProvider`, `setApiKey`, `chat`, `generateImage`,
+  `listModels` y `getAvailability`— pasan por él. Una prueba recorre la fuente
+  y falla si reaparece un `PROVIDERS[` directo, y exige además que el registro
+  se consulte de verdad: sin esa segunda mitad, borrar todas las consultas
+  también pasaría. `PROVIDERS` sigue exportado como API interna, con
+  consumidores en las pruebas.
 
-5. **El gate de Electron es sensible al estado de la máquina.** Cada
-   `switchProvider()` hace que `loadRuntime()` sondee con `/api/show` todos los
-   modelos que Ollama tenga instalados. La suite tarda segundos con la máquina
-   en reposo y minutos bajo carga; su plazo global es de diez minutos por ese
-   motivo, no por prudencia genérica.
+- **El gate de Electron no depende de la máquina.** `ollama.js` lee
+  `MIKA5_OLLAMA_BASE`, cuyo valor por defecto es el de siempre y es el único
+  que se usa en producción; está restringida a bucle local para que una
+  variable de entorno no pueda desviar a un host remoto lo que el usuario cree
+  que no sale de su equipo. La suite levanta su propio servidor en un puerto
+  efímero antes de cargar los módulos y comprueba que ninguno estaba ya
+  cargado, en vez de limpiar la caché de `require`. Tres corridas seguidas:
+  24 s, 24 s, 24 s. Plazo de dos minutos, no de diez.
+
+- **El sondeo secuencial de `/api/show` no era una regresión.** v0.2.0
+  (tag `438d393`) recorre los modelos uno a uno igual que hoy. Sí hay una
+  diferencia real, anterior a este trabajo: v0.2.0 caía a detección por nombre
+  cuando `/api/show` fallaba, y hoy el modelo se queda sin visión. Fue
+  deliberado —la detección por nombre dejaba perder la imagen en silencio— y
+  aquí sólo se hace constar.
 
 ---
 
@@ -194,7 +214,18 @@ que finge una capacidad que no tienen.
 
 | Suite | Comprobaciones |
 |---|---|
-| `test/provider-availability.test.js` | 315 |
-| `test/provider-registry.test.js` | 91 |
+| `test/provider-availability.test.js` | 325 |
+| `test/provider-registry.test.js` | 93 |
 | `test/provider-credentials.test.js` | 30 |
-| `npm run test:all` | 8/8 gates |
+| `test/provider-selector.test.js` | 116 |
+| `npm run test:all` | 8/8 gates, exit 0, 42 s |
+
+## 8. Lo que el selector ofrece
+
+`loadRuntime()` puebla el desplegable de modelos **sólo** con `canAttempt`, sin
+reconstruirlo a partir de `configured`, `reachable` y `authenticated`. En
+`rate-limited`, `authorization-forbidden` y `provider-error` el servidor
+responde y la credencial vale, pero el proveedor no se puede usar: el selector
+queda deshabilitado con el texto del estado y su única opción lleva valor
+vacío, que `send()` ya rechaza. Conservar los modelos visibles pero
+deshabilitados sería otro diseño, y sería un cambio de UX aparte.
