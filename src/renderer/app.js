@@ -2342,7 +2342,16 @@ async function loadRuntime() {
   // Se puebla con `canAttempt`, no con `ready`: un catálogo declarado por el
   // adaptador basta para ofrecer los modelos, aunque nadie haya verificado que
   // el proveedor responda. Lo que no se hace es llamar «listo» a eso.
-  if (disp.canAttempt || (disp.configured && disp.reachable !== false && disp.authenticated !== false)) {
+  //
+  // Y `canAttempt` es la ÚNICA condición. Antes había además un
+  // `configured && reachable !== false && authenticated !== false`, que se
+  // saltaba la comprobación de errores que impiden usar el proveedor: con un
+  // 429, un 403 o un 500 la credencial es válida y el servidor responde, así
+  // que esa segunda mitad daba verde y llenaba el selector de modelos que
+  // ninguna petición iba a poder usar. La píldora decía «límite alcanzado» y
+  // el desplegable ofrecía trece modelos: dos respuestas distintas a la misma
+  // pregunta. No se reconstruye `canAttempt` a partir de sus ingredientes.
+  if (disp.canAttempt) {
     // El catálogo ya viene con la disponibilidad: pedirlo otra vez repetiría la
     // misma consulta al proveedor.
     const modelsRes = { models: disp.models || [] };

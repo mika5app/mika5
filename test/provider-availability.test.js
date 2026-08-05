@@ -478,6 +478,116 @@ console.log('\n=== 10. El renderer traduce desde el código, no desde el proveed
   check(true, 'loadRuntime() no conserva ningún texto de estado escrito a mano');
 }
 
+console.log('\n=== 10 bis. loadRuntime() sólo puebla el selector con canAttempt ===');
+{
+  // Se ejecuta el `loadRuntime()` real del renderer, no una copia ni una
+  // aserción sobre su texto: lo que se comprueba es la decisión que toma.
+  //
+  // La regresión concreta: la condición era
+  //   `disp.canAttempt || (disp.configured && disp.reachable !== false
+  //                        && disp.authenticated !== false)`
+  // y esa segunda mitad reconstruía `canAttempt` a partir de sus ingredientes
+  // olvidando el que importa — que no haya un error que impida usar el
+  // proveedor. Con 429, 403 o 500 la clave es válida y el servidor contesta,
+  // así que daba verde: la píldora decía «límite alcanzado» y el desplegable
+  // ofrecía modelos con los que ninguna petición podía salir.
+  const { readRendererSource } = require('./helpers/renderer-source');
+  const renderer = readRendererSource(path.join(__dirname, '../src/renderer/app.js'));
+
+  const construirEntorno = (disp) => {
+    const nodos = new Map();
+    const nodo = (id) => {
+      if (!nodos.has(id)) {
+        nodos.set(id, {
+          id, innerHTML: '', textContent: '', disabled: false, hijos: [],
+          dataset: {}, style: {}, className: '', title: undefined,
+          appendChild(h) { this.hijos.push(h); },
+          removeAttribute() { this.title = undefined; }
+        });
+      }
+      return nodos.get(id);
+    };
+    return {
+      nodos,
+      globales: {
+        el: nodo,
+        t: (clave) => clave,
+        document: {
+          createElement: () => ({
+            value: '', textContent: '', dataset: {}, appendChild() {}
+          })
+        },
+        window: {
+          mika5: {
+            ai: { getAvailability: async () => disp },
+            getAppState: async () => null
+          }
+        },
+        currentProvider: 'openai',
+        AUTOMATIC_MODEL_ID: '__automatic__',
+        formatBytesRenderer: () => '1 GB',
+        syncModelDropdown: () => {},
+        describirEstadoProveedor: () => ''
+      }
+    };
+  };
+
+  const ejecutarLoadRuntime = async (disp) => {
+    const { nodos, globales } = construirEntorno(disp);
+    const nombres = Object.keys(globales);
+    const cuerpo = renderer.slice('loadRuntime');
+    const fabrica = new Function(...nombres, `${cuerpo}\nreturn loadRuntime;`);
+    await fabrica(...nombres.map(n => globales[n]))();
+    const select = nodos.get('modelSelect');
+    return {
+      opciones: select.hijos.length,
+      valores: select.hijos.map(h => h.value),
+      deshabilitado: select.disabled === true
+    };
+  };
+
+  const modelos = [{ name: 'gpt-4o', taskType: 'chat' }, { name: 'gpt-4o-mini', taskType: 'chat' }];
+
+  // Con `canAttempt` los modelos se ofrecen y el selector queda utilizable.
+  const intentable = await ejecutarLoadRuntime({
+    configured: true, reachable: true, authenticated: true, modelsAvailable: 2,
+    models: modelos, canAttempt: true, ready: true, uiState: 'connected',
+    errorCode: null, httpStatus: null
+  });
+  check(intentable.opciones === 2 && !intentable.deshabilitado,
+    `canAttempt ofrece el catálogo y deja elegir (${intentable.opciones} opciones, deshabilitado=${intentable.deshabilitado})`);
+
+  // Los tres estados de la regresión: servidor vivo, credencial válida, y aun
+  // así el proveedor no se puede usar.
+  const NO_UTILIZABLES = [
+    { uiState: 'rate-limited', errorCode: 'PROVIDER_RATE_LIMIT', httpStatus: 429 },
+    { uiState: 'authorization-forbidden', errorCode: 'PROVIDER_FORBIDDEN', httpStatus: 403 },
+    { uiState: 'provider-error', errorCode: 'PROVIDER_HTTP_500', httpStatus: 500 }
+  ];
+  for (const caso of NO_UTILIZABLES) {
+    const r = await ejecutarLoadRuntime({
+      configured: true, reachable: true, authenticated: true,
+      modelsAvailable: modelos.length, models: modelos,
+      canAttempt: false, ready: false, ...caso
+    });
+    check(r.opciones === 1 && r.valores[0] === '',
+      `${caso.uiState}: el selector no ofrece ningún modelo (${r.opciones} opciones)`);
+    check(r.deshabilitado,
+      `${caso.uiState}: el selector queda deshabilitado`);
+  }
+
+  // Y el motivo se dice, no se calla: la opción única lleva el texto del
+  // estado, que es lo que separa «no hay modelos» de «te han limitado».
+  const limitado = construirEntorno(null);
+  check(typeof limitado.globales.t === 'function', 'el texto vacío sale de t(), no de un literal');
+  const codigoLoadRuntime = renderer.slice('loadRuntime')
+    .split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  check(/provider\.selectEmpty\.\$\{uiState\}/.test(codigoLoadRuntime),
+    'el selector vacío se rotula con el estado concreto, no con un texto único');
+  check(!/disp\.configured\s*&&/.test(codigoLoadRuntime),
+    'no queda ninguna vía que rodee canAttempt reconstruyéndolo a mano');
+}
+
 console.log('\n=== 11. Consumidores de dataset.runtime ===');
 {
   const app = fs.readFileSync(path.join(__dirname, '../src/renderer/app.js'), 'utf8');
