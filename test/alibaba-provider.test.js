@@ -1238,7 +1238,14 @@ function createDb() {
   const { readRendererSource } = require('./helpers/renderer-source');
   const renderer = readRendererSource(require.resolve('../src/renderer/app.js'));
   const rendererSource = renderer.text;
-  const providerSource = fs.readFileSync(require.resolve('../src/main/ai-providers.js'), 'utf8');
+  // Los adaptadores viven en src/main/providers/ desde la extracción, pero los
+  // helpers de configuración de Alibaba siguen en ai-providers.js. Las
+  // comprobaciones estructurales miran los dos concatenados, para no depender
+  // de en cuál de los dos ficheros acabe cada fragmento.
+  const providerSource = [
+    require.resolve('../src/main/ai-providers.js'),
+    require.resolve('../src/main/providers/alibaba.js')
+  ].map(ruta => fs.readFileSync(ruta, 'utf8')).join('\n');
   const sendGuard = rendererSource.indexOf('Este modelo se usa desde Crear imagen, no desde chat.');
   const chatCall = rendererSource.indexOf('window.mika5.ai.chat(payload)', sendGuard);
   assert(sendGuard >= 0 && chatCall > sendGuard);

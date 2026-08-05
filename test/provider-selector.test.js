@@ -484,9 +484,18 @@ async function ejecutar(win) {
 
   // El desplegable sigue completo y pulsable al final del recorrido.
   const final = await ev(win, `
-    document.getElementById('providerOptions').style.display = 'none';
+    const opciones = document.getElementById('providerOptions');
+    opciones.style.display = 'none';
     document.getElementById('providerTrigger').click();
-    await new Promise(r => setTimeout(r, 150));
+    // Espera activa en vez de un plazo fijo: tras crear un proyecto y
+    // recargarlo, el repintado puede tardar más de los 150 ms que había aquí y
+    // la comprobación resultaba intermitente. Se espera al estado, no al reloj.
+    for (let i = 0; i < 40; i++) {
+      if (getComputedStyle(opciones).display === 'block'
+          && opciones.getBoundingClientRect().height > 0) break;
+      await new Promise(r => setTimeout(r, 50));
+    }
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     const nodos = [...document.querySelectorAll('#providerOptions .provider-option')];
     const vivos = nodos.filter(n => {
       const r = n.getBoundingClientRect();
@@ -526,9 +535,13 @@ app.on('browser-window-created', (_e, win) => {
   });
 });
 
+// Margen amplio a propósito. La suite abre una ventana real, siembra la base,
+// recorre las nueve superficies flotantes y espera repintados; dentro de
+// `test:all` compite además con los otros siete gates y los 120 s que había
+// aquí se agotaban por carga, no por un bloqueo real.
 setTimeout(() => {
   console.error('provider-selector: timeout global');
   app.exit(2);
-}, 120000);
+}, 300000);
 
 assert.ok(IDS_CANONICOS.length >= 7, 'el registro canónico debe declarar al menos los siete proveedores');

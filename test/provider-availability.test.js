@@ -478,6 +478,67 @@ console.log('\n=== 12. Alibaba: ready, uiState y estado del punto ===');
     'un validateConfig() que lanza no rompe la disponibilidad');
 }
 
+console.log('\n=== 12b. La extracción a módulos no cambió el conjunto ===');
+{
+  // Los siete adaptadores viven ahora en src/main/providers/<id>.js y
+  // ai-providers.js los compone. Esto fija el resultado observable de esa
+  // extracción: los mismos identificadores, en el mismo orden, con la misma
+  // forma. Un módulo que se olvide de registrarse, o que se registre con otro
+  // nombre o en otra posición, cae aquí.
+  const IDS_ESPERADOS = ['local', 'openai', 'anthropic', 'groq', 'moonshot', 'alibaba', 'llamacpp'];
+  check(JSON.stringify(Object.keys(PROVIDERS)) === JSON.stringify(IDS_ESPERADOS),
+    `el registro expone los siete adaptadores en su orden observable (${Object.keys(PROVIDERS).join(', ')})`);
+
+  const dir = path.join(__dirname, '../src/main/providers');
+  const modulos = fs.readdirSync(dir).filter(f => f.endsWith('.js')).map(f => f.replace(/\.js$/, '')).sort();
+  check(JSON.stringify(modulos) === JSON.stringify([...IDS_ESPERADOS].sort()),
+    `hay un módulo por adaptador y ninguno de más (${modulos.join(', ')})`);
+
+  // Cada módulo tiene que poder cargarse por sí solo: si dependiera de un
+  // identificador que sólo existe dentro de ai-providers.js, la extracción
+  // estaría a medias y fallaría en cuanto alguien lo importase suelto.
+  for (const id of IDS_ESPERADOS) {
+    let cargado = null;
+    try {
+      cargado = require(path.join(dir, `${id}.js`));
+    } catch (error) {
+      assert.fail(`el módulo ${id}.js no carga por sí solo: ${error.message}`);
+    }
+    const exportado = Object.keys(cargado);
+    check(exportado.length === 1,
+      `${id}.js exporta exactamente una cosa (${exportado.join(', ')})`);
+  }
+
+  // Ningún módulo de adaptador puede volver a importar ai-providers.js: sería
+  // el ciclo que la extracción existe para evitar.
+  for (const id of IDS_ESPERADOS) {
+    const src = fs.readFileSync(path.join(dir, `${id}.js`), 'utf8');
+    assert(!/require\(['"]\.\.\/ai-providers['"]\)/.test(src),
+      `${id}.js no puede importar ai-providers.js: sería una dependencia circular`);
+  }
+  check(true, 'ningún adaptador importa el módulo que lo compone');
+
+  // Y la forma de cada adaptador, congelada: propiedades y aridad de funciones.
+  const FORMA = {
+    local: { requiresKey: false, privacy: 'private', metodos: ['chat', 'listModels', 'status'] },
+    openai: { requiresKey: true, privacy: 'cloud', metodos: ['chat', 'listModels'] },
+    anthropic: { requiresKey: true, privacy: 'cloud', metodos: ['chat', 'listModels'] },
+    groq: { requiresKey: true, privacy: 'cloud', metodos: ['chat', 'listModels'] },
+    moonshot: { requiresKey: true, privacy: 'cloud', metodos: ['chat', 'listModels'] },
+    alibaba: { requiresKey: true, privacy: 'cloud', metodos: ['chat', 'listModels', 'validateConfig', 'generateImage'] },
+    llamacpp: { requiresKey: false, privacy: 'private', metodos: ['chat', 'listModels', 'status'] }
+  };
+  for (const [id, esperado] of Object.entries(FORMA)) {
+    const c = PROVIDERS[id];
+    check(c.requiresKey === esperado.requiresKey && c.privacy === esperado.privacy,
+      `${id}: conserva requiresKey=${esperado.requiresKey} y privacy=${esperado.privacy}`);
+    const metodos = ['chat', 'listModels', 'status', 'validateConfig', 'generateImage']
+      .filter(m => typeof c[m] === 'function').sort();
+    check(JSON.stringify(metodos) === JSON.stringify([...esperado.metodos].sort()),
+      `${id}: conserva sus funciones (${metodos.join(', ')})`);
+  }
+}
+
 console.log('\n=== 13. Contrato uniforme y sin casos especiales ===');
 {
   const m = gestor();
@@ -615,11 +676,11 @@ console.log('\n=== 15. Un 2xx ilegible conserva la evidencia del 2xx ===');
   check(r.canAttempt === false, 'groq: el respaldo no lo vuelve utilizable');
 
   // El contrato se aplica a los tres adaptadores que analizan JSON de red.
-  const fuente = fs.readFileSync(path.join(__dirname, '../src/main/ai-providers.js'), 'utf8');
+  // Cada adaptador vive en su propio módulo desde la extracción.
   const conParseo = ['openai', 'groq', 'llamacpp'];
   for (const id of conParseo) {
-    const bloque = fuente.slice(fuente.indexOf(`  ${id}: {`), fuente.indexOf('\n  },', fuente.indexOf(`  ${id}: {`)));
-    assert(bloque.includes('probeDeRespuestaInvalida'),
+    const modulo = fs.readFileSync(path.join(__dirname, `../src/main/providers/${id}.js`), 'utf8');
+    assert(modulo.includes('probeDeRespuestaInvalida'),
       `${id} analiza JSON de red y debe declarar la sonda de respuesta inválida`);
   }
   check(true, `los tres adaptadores que analizan JSON de red aplican el mismo contrato (${conParseo.join(', ')})`);
