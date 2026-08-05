@@ -21,7 +21,7 @@ const adaptadorOpenai = {
   requiresKey: true,
   baseUrl: 'https://api.openai.com/v1',
   timeout: 120000, // 2 minutes
-  
+
   async chat({ model, messages, images = [], apiKey, sanitize = true, signal }) {
     if (!apiKey) throw new Error('API Key requerida para OpenAI');
     const selectedModel = model || 'gpt-3.5-turbo';

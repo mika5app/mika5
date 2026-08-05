@@ -19,7 +19,7 @@ const adaptadorLocal = {
   visualCapabilities: {
     vision: true
   },
-  
+
   async chat({ model, messages, images, signal }) {
     const imageList = Array.isArray(images) ? images : [];
     // La sonda es la única fuente de verdad para Ollama, y se consulta justo
@@ -62,7 +62,7 @@ const adaptadorLocal = {
       rawFinishReason: data?.done_reason
     });
   },
-  
+
   // Mismo contrato de cancelación que openai, groq y llamacpp: una señal
   // externa da PROVIDER_ABORTED y el plazo propio da PROVIDER_TIMEOUT, ambos
   // con `reachable: null` porque nadie llegó a saber si el servidor estaba.
