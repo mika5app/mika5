@@ -2805,12 +2805,15 @@ function ajustarAltoDesplegableProveedores() {
   const arriba = menu.getBoundingClientRect().top;
   // Sin suelo. Una versión anterior ponía `Math.max(120, ...)` para que el menú
   // no quedase ridículo en ventanas muy bajas, y eso rompía justo lo que esta
-  // función existe para garantizar: por debajo de cierta altura el suelo ganaba
-  // y el menú volvía a salirse por abajo. `BrowserWindow` no declara
-  // `minHeight`, así que esa altura es alcanzable de verdad, no teórica.
+  // función existe para garantizar: por debajo de cierta altura el suelo ganaba,
+  // el menú se comía el margen inferior y acababa saliéndose por abajo.
   //
-  // Un menú de 60 px es incómodo; uno que se sale de la pantalla es
-  // inutilizable, y además silencioso. Se prefiere lo primero.
+  // Que el resultado sea utilizable no lo arregla un suelo aquí, sino el límite
+  // de la ventana: `ALTO_MINIMO_VENTANA` en main.js está calculado para que a la
+  // altura mínima soportada quepa una fila entera de proveedor. Por debajo de
+  // eso Electron ya no deja encoger, así que el caso "menú de 20 px" no existe.
+  // El único `Math.max` que queda es contra 0, porque un `max-height` negativo
+  // no es CSS válido.
   const disponible = window.innerHeight - arriba - MARGEN_DESPLEGABLE;
   menu.style.maxHeight = `${Math.max(0, Math.round(disponible))}px`;
 }

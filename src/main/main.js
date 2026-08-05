@@ -29,12 +29,40 @@ if (process.platform === 'win32') {
   app.commandLine.appendSwitch('disable-software-rasterizer');
 }
 
+// Altura mínima de ventana soportada.
+//
+// No es un número de gusto. El primer elemento que deja de ser utilizable al
+// encoger la ventana es el desplegable de proveedores, así que la altura
+// mínima sale de SU geometría, medida con `getBoundingClientRect()` sobre el
+// renderer real, no estimada:
+//
+//    50 px  posición real del menú (`top: calc(100% + 8px)` bajo la cabecera)
+//  + 16 px  margen inferior declarado (`MARGEN_DESPLEGABLE` en app.js)
+//  + 18 px  relleno y borde propios del menú — 8+8 de padding y 1+1 de borde;
+//           con `box-sizing: border-box` entran dentro del `max-height`, así
+//           que restan área visible
+//  + 82 px  fila más alta medida: la de llama.cpp, cuya descripción ocupa dos
+//           líneas (81,59 px; las otras seis miden 64,80 px)
+//  + 39 px  diferencia medida entre el tamaño exterior de `BrowserWindow` y
+//           `window.innerHeight` en Windows (constante entre 60 y 820 px)
+//  = 205 px
+//
+// Se declara 220 para dejar holgura frente a marcos de ventana más altos que
+// los 39 px medidos aquí. La prueba no se fía de esta cuenta: redimensiona por
+// debajo del mínimo, lee el `window.innerHeight` efectivo tras el recorte de
+// Electron y comprueba la geometría resultante.
+const ALTO_MINIMO_VENTANA = 220;
+
 function createWindow() {
   const win = new BrowserWindow({
     title: 'MIKA5',
     icon: path.join(__dirname, "../renderer/assets/icon.png"),
     width: 1280,
     height: 820,
+    // Sin esto la ventana se puede encoger hasta dejar el desplegable de
+    // proveedores con altura cero: presente en el DOM, dentro del viewport y
+    // sin una sola opción pulsable.
+    minHeight: ALTO_MINIMO_VENTANA,
     // Fuera de macOS la barra de menú no aporta y roba una franja de alto; los
     // aceleradores de edición siguen activos porque el menú sí se registra.
     autoHideMenuBar: shouldHideMenuBar(process.platform),
@@ -558,3 +586,7 @@ ipcMain.handle("ollama:tags", () => aiManager.listModels());
 ipcMain.handle("ollama:chat", (_e, payload) => aiManager.chat(payload));
 // Mantener pull específico de Ollama para descargas locales
 ipcMain.handle("ollama:pull", (_e, model) => ollamaApi.pull(model));
+
+// Se exporta para que la suite compruebe la altura mínima contra el mismo
+// número que usa la ventana y no contra una copia que pueda quedarse atrás.
+module.exports = { ALTO_MINIMO_VENTANA };

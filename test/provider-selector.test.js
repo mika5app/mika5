@@ -34,6 +34,19 @@ const perfil = fs.mkdtempSync(path.join(os.tmpdir(), 'mika5-test-selector-'));
 app.setPath('userData', perfil);
 app.setPath('sessionData', perfil);
 
+// Chromium trata una ventana tapada por otra como ventana en segundo plano y
+// deja de propagar el nuevo tamaño al renderer: `getContentSize()` ya dice 261
+// mientras `window.innerHeight` sigue en 181, indefinidamente. Medido: al
+// crecer de 220 a 300 px el renderer no se enteraba ni tras cuatro segundos.
+//
+// Sin esto, la prueba mediría la geometría de la ventana ANTERIOR y sería
+// coherente consigo misma —el menú se dimensiona con ese mismo innerHeight
+// obsoleto—, así que pasaría sin haber comprobado la altura que dice comprobar.
+//
+// Es un ajuste del arnés, no del producto: lo fija el proceso de la prueba, que
+// es quien arranca Electron aquí. La aplicación no lo lleva.
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+
 // `app:quit` se prueba de verdad, hasta el handler de main.js. Sólo se
 // intercepta el efecto final para que la prueba no se mate a sí misma.
 let llamadasQuit = 0;
@@ -123,7 +136,7 @@ const stub = http.createServer((req, res) => {
 
 // Los módulos que hablan con Ollama se cargan DESPUÉS de fijar la variable:
 // `BASE` se resuelve una sola vez, al requerir el módulo.
-let PROVIDERS, AIProviderManager, getDb, ollamaApi, IDS_CANONICOS;
+let PROVIDERS, AIProviderManager, getDb, ollamaApi, IDS_CANONICOS, ALTO_MINIMO_VENTANA;
 
 function cerrarStub() {
   if (BASE_PREVIA === undefined) delete process.env.MIKA5_OLLAMA_BASE;
@@ -149,6 +162,33 @@ async function esperar(win, expresion, ms = 8000) {
 }
 
 const ev = (win, codigo) => win.webContents.executeJavaScript(`(async () => { ${codigo} })()`, true);
+
+/**
+ * Redimensiona y espera a que Electron TERMINE.
+ *
+ * Un plazo fijo no vale: el tamaño exterior, el de contenido y el
+ * `window.innerHeight` del renderer no cambian en el mismo instante, y medir
+ * en medio da la geometría de la ventana anterior. Se espera a que el
+ * renderer coincida con el tamaño de contenido y a que deje de moverse.
+ *
+ * Devuelve el tamaño EXTERIOR resultante, que no tiene por qué ser el pedido:
+ * si se pide menos que `minHeight`, Electron recorta y aquí se ve.
+ */
+async function redimensionar(win, ancho, alto) {
+  win.setSize(ancho, alto);
+  let previo = -1;
+  let ultimo = null;
+  for (let i = 0; i < 80; i++) {
+    await new Promise(r => setTimeout(r, 50));
+    const [, contenido] = win.getContentSize();
+    const [, exterior] = win.getSize();
+    const interior = await win.webContents.executeJavaScript('window.innerHeight', true);
+    ultimo = { exterior, contenido, interior };
+    if (interior === contenido && interior === previo) return ultimo;
+    previo = interior;
+  }
+  throw new Error(`el redimensionado a ${alto}px no se estabilizó: ${JSON.stringify(ultimo)}`);
+}
 
 async function ejecutar(win) {
   await esperar(win, "document.querySelectorAll('#providerOptions .provider-option').length > 0");
@@ -737,28 +777,47 @@ async function ejecutar(win) {
   check(final.vivos === final.total && final.total === IDS_CANONICOS.length,
     `el selector sigue completo y pulsable al final (${final.vivos}/${final.total})`);
 
-  // --- 11. El desplegable cabe en la ventana, sin altura mínima ------------
+  // --- 11. El desplegable es usable a TODA altura soportada ----------------
   //
   // Con siete proveedores la lista mide ~520 px: en una ventana baja no cabe.
   // Lo que se comprueba es que se recorta dentro de su propia caja y no por
-  // debajo de la pantalla, que se llega a todas las opciones, y que el hueco
-  // que deja libre es el margen declarado y no uno mayor.
+  // debajo de la pantalla, que cabe al menos una fila entera y accionable, que
+  // se llega a las siete opciones, y que el hueco que deja libre es
+  // exactamente el margen declarado — ni más ni menos.
   //
-  // La regresión concreta: el alto máximo era `calc(100vh - 96px)` en CSS. Ese
-  // 96 suponía dónde empieza el menú, que empieza en y=50, así que reservaba
-  // 46 px y los dejaba vacíos — media fila de proveedor perdida en toda ventana
-  // lo bastante baja como para recortar. Y una constante así deja de valer en
-  // silencio en cuanto la cabecera cambia de alto.
+  // Dos regresiones concretas cierra esto:
+  //
+  // 1. `max-height: calc(100vh - 96px)` en CSS. Ese 96 suponía dónde empieza el
+  //    menú, que empieza en y=50, así que reservaba 46 px y los dejaba vacíos:
+  //    media fila de proveedor perdida en toda ventana lo bastante baja como
+  //    para recortar. Lo caza la cota superior del hueco.
+  // 2. `Math.max(120, ...)` como suelo del alto del menú. Por debajo de cierta
+  //    altura ese suelo ganaba, el menú se comía el margen inferior y acababa
+  //    saliéndose. Lo caza la cota inferior del hueco: si el suelo está activo,
+  //    el menú baja de `innerHeight - MARGEN` por construcción.
+  //
+  // Y no hay umbral de escape. Una versión anterior sólo exigía alcanzar las
+  // siete opciones cuando quedaban ≥ 80 px libres, así que aceptaba un menú de
+  // altura cero como resultado válido. Ahora la altura mínima la impone
+  // `minHeight` en `BrowserWindow`, calculada desde la geometría real de una
+  // fila, y por eso las comprobaciones pueden exigirse SIEMPRE.
   const [anchoOriginal, altoOriginal] = win.getSize();
   const MARGEN = 16;
-  // Se baja hasta alturas absurdas a propósito. `BrowserWindow` no declara
-  // `minHeight`, así que el usuario puede llegar ahí: no es un caso teórico.
-  // Una versión anterior ponía un suelo de 120 px al alto del menú «para que no
-  // quedase ridículo», y por debajo de cierta altura ese suelo ganaba y el menú
-  // volvía a salirse por abajo — rompiendo lo único que esto garantiza.
-  for (const alto of [1000, 700, 600, 500, 420, 300, 240]) {
-    win.setSize(anchoOriginal, alto);
-    await new Promise(r => setTimeout(r, 350));
+
+  // Se pide una ventana muy por debajo del mínimo. Electron tiene que recortar.
+  const minima = await redimensionar(win, anchoOriginal, 100);
+  check(minima.exterior === ALTO_MINIMO_VENTANA,
+    `Electron aplica la altura mínima declarada (pedido 100, resultante ${minima.exterior}, minHeight ${ALTO_MINIMO_VENTANA})`);
+  check(minima.interior > 0 && minima.interior < ALTO_MINIMO_VENTANA,
+    `la altura interior efectiva del mínimo es ${minima.interior}px (exterior ${minima.exterior}px, marco ${minima.exterior - minima.interior}px)`);
+  console.log(`provider-selector: altura mínima soportada ${ALTO_MINIMO_VENTANA}px exteriores `
+    + `→ window.innerHeight ${minima.interior}px (marco ${minima.exterior - minima.interior}px)`);
+
+  // La primera altura de la lista es la mínima EFECTIVA, la que Electron dejó,
+  // no una que se dé por supuesta. Las demás son alturas mayores
+  // representativas.
+  for (const alto of [minima.exterior, 300, 420, 600, 1000]) {
+    const ventana = await redimensionar(win, anchoOriginal, alto);
     const g = await ev(win, `
       const menu = document.getElementById('providerOptions');
       menu.style.display = 'none';
@@ -766,16 +825,50 @@ async function ejecutar(win) {
       await new Promise(r => setTimeout(r, 200));
       const caja = menu.getBoundingClientRect();
       const opciones = [...menu.querySelectorAll('.provider-option')];
+      const alturasFila = opciones.map(n => n.getBoundingClientRect().height);
 
-      // Se recorre la lista como lo haría el usuario y se comprueba que cada
-      // opción llega a ser pulsable en algún momento del recorrido.
+      // Área realmente visible del menú. \`clientHeight\` es la caja de relleno:
+      // el borde queda fuera, el padding dentro, y el padding empuja a la
+      // primera fila hacia abajo, así que no puede darse por área útil.
+      const cs = getComputedStyle(menu);
+      const borde = parseFloat(cs.borderTopWidth) || 0;
+      const relleno = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+      const cliente = menu.clientHeight;
+      const contenido = menu.scrollHeight;
+      const recorta = contenido > cliente;
+      const visibleArriba = caja.top + borde;
+      const visibleAbajo = visibleArriba + cliente;
+
+      // Desplazamiento REAL, no un \`overflow-y: auto\` declarado que un
+      // antepasado con \`overflow: hidden\` deje sin efecto.
+      menu.scrollTop = contenido;
+      const scrollMax = menu.scrollTop;
+      menu.scrollTop = 0;
+
+      // Fila entera y accionable: una opción íntegramente dentro del área
+      // visible del menú Y que responde al hit-testing en su centro. Que la
+      // caja del menú quepa en el viewport no basta: un menú de altura cero
+      // también cabe.
+      await new Promise(r => setTimeout(r, 60));
+      let enteras = 0;
+      for (const n of opciones) {
+        const r = n.getBoundingClientRect();
+        if (r.height <= 0) continue;
+        if (r.top < visibleArriba - 0.5 || r.bottom > visibleAbajo + 0.5) continue;
+        const centro = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        if (centro && n.contains(centro)) enteras += 1;
+      }
+
+      // Recorrido completo, como lo haría el usuario: cada opción tiene que
+      // llegar a ser pulsable en algún momento del desplazamiento.
       const alcanzadas = new Set();
-      const pasos = Math.ceil(menu.scrollHeight / Math.max(1, menu.clientHeight)) + 2;
+      const pasos = Math.ceil(contenido / Math.max(1, cliente)) + 2;
       for (let i = 0; i <= pasos; i++) {
-        menu.scrollTop = (menu.scrollHeight / pasos) * i;
+        menu.scrollTop = (contenido / pasos) * i;
         await new Promise(r => setTimeout(r, 60));
         for (const n of opciones) {
           const r = n.getBoundingClientRect();
+          if (r.height <= 0) continue;
           const centro = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
           if (centro && n.contains(centro)) alcanzadas.add(n.getAttribute('onclick'));
         }
@@ -786,35 +879,71 @@ async function ejecutar(win) {
         ventana: window.innerHeight,
         top: Math.round(caja.top),
         bottom: Math.round(caja.bottom),
-        recorta: menu.scrollHeight > menu.clientHeight,
+        cliente, contenido, recorta, relleno, scrollMax,
+        util: cliente - relleno,
+        filaMax: Math.max(...alturasFila),
+        filaMin: Math.min(...alturasFila),
+        enteras,
         alcanzadas: alcanzadas.size,
         total: opciones.length
       };
     `);
+
+    const etiqueta = `${alto}px ext / innerHeight ${g.ventana}`;
+    check(g.ventana === ventana.interior,
+      `${etiqueta}: la prueba mide sobre el innerHeight efectivo (${g.ventana} == ${ventana.interior})`);
     check(g.bottom <= g.ventana,
-      `${alto}px: el desplegable no se sale por debajo (${g.bottom} <= ${g.ventana})`);
-    // Con la ventana muy baja el menú queda demasiado corto para pulsar nada,
-    // y eso se acepta: lo que no se acepta es que se salga de la pantalla. La
-    // alcanzabilidad de las siete se exige donde el menú tiene sitio para
-    // mostrar al menos una fila entera.
-    if (g.ventana - g.top - MARGEN >= 80) {
-      check(g.alcanzadas === g.total,
-        `${alto}px: se llega a las ${g.total} opciones (${g.alcanzadas})`);
-    }
-    // Cuando recorta, tiene que estar aprovechando el alto disponible: el hueco
-    // libre bajo el menú es el margen y no más. Sin esta comprobación, volver a
-    // una constante inventada pasaría desapercibido mientras «quepa».
+      `${etiqueta}: el desplegable no supera el borde inferior (${g.bottom} <= ${g.ventana})`);
+    // Espacio para una fila entera. Se compara contra la fila MÁS ALTA medida,
+    // no contra una constante: la de llama.cpp lleva la descripción a dos
+    // líneas y mide más que las otras seis.
+    check(g.util >= g.filaMax,
+      `${etiqueta}: cabe una fila entera (área útil ${g.util}px >= fila más alta ${g.filaMax.toFixed(2)}px)`);
+    check(g.enteras >= 1,
+      `${etiqueta}: al menos una fila completa es accionable de verdad (${g.enteras})`);
+    check(g.total === IDS_CANONICOS.length,
+      `${etiqueta}: el menú lista los ${IDS_CANONICOS.length} proveedores (${g.total})`);
+    check(g.alcanzadas === g.total,
+      `${etiqueta}: las ${g.total} opciones se alcanzan y pasan hit-testing (${g.alcanzadas})`);
+    check(g.recorta ? g.scrollMax > 0 : g.scrollMax === 0,
+      `${etiqueta}: el desplazamiento vertical existe justo cuando hace falta `
+      + `(contenido ${g.contenido}, visible ${g.cliente}, scrollTop máximo ${g.scrollMax})`);
     if (g.recorta) {
+      // El hueco bajo el menú tiene que ser EXACTAMENTE el margen declarado.
+      // Por debajo, el menú se está comiendo el margen (suelo artificial); por
+      // encima, está desperdiciando alto (constante inventada).
       const hueco = g.ventana - g.bottom;
+      check(hueco >= MARGEN,
+        `${etiqueta}: al recortar respeta el margen inferior (deja ${hueco}px, margen ${MARGEN})`);
       check(hueco <= MARGEN + 4,
-        `${alto}px: al recortar aprovecha el alto disponible (deja ${hueco}px, margen ${MARGEN})`);
+        `${etiqueta}: al recortar aprovecha el alto disponible (deja ${hueco}px, margen ${MARGEN})`);
     }
+    console.log(`provider-selector: ${etiqueta} — menú ${g.top}..${g.bottom}, `
+      + `visible ${g.cliente}px (útil ${g.util}px), contenido ${g.contenido}px, `
+      + `fila ${g.filaMin.toFixed(2)}..${g.filaMax.toFixed(2)}px, `
+      + `filas enteras ${g.enteras}, alcanzadas ${g.alcanzadas}/${g.total}`);
   }
+
+  // A la altura mínima el contenido no cabe: el desplazamiento es obligatorio,
+  // no opcional. Si algún día cupiese entero, esta comprobación avisa de que la
+  // premisa cambió en vez de dejar pasar un recorrido que no recorre nada.
+  const enMinima = await redimensionar(win, anchoOriginal, minima.exterior);
+  const scrollMinima = await ev(win, `
+    const menu = document.getElementById('providerOptions');
+    menu.style.display = 'none';
+    document.getElementById('providerTrigger').click();
+    await new Promise(r => setTimeout(r, 200));
+    const r = { contenido: menu.scrollHeight, visible: menu.clientHeight };
+    document.getElementById('providerTrigger').click();
+    return r;
+  `);
+  check(scrollMinima.contenido > scrollMinima.visible,
+    `a la altura mínima (innerHeight ${enMinima.interior}) el menú se desplaza por dentro `
+    + `(contenido ${scrollMinima.contenido} > visible ${scrollMinima.visible})`);
 
   // Redimensionar con el menú abierto tiene que reajustarlo, no dejarlo con el
   // alto de la ventana anterior.
-  win.setSize(anchoOriginal, 1000);
-  await new Promise(r => setTimeout(r, 300));
+  await redimensionar(win, anchoOriginal, 1000);
   const reajuste = await ev(win, `
     const menu = document.getElementById('providerOptions');
     menu.style.display = 'none';
@@ -822,8 +951,7 @@ async function ejecutar(win) {
     await new Promise(r => setTimeout(r, 200));
     return { antes: Math.round(menu.getBoundingClientRect().bottom) };
   `);
-  win.setSize(anchoOriginal, 480);
-  await new Promise(r => setTimeout(r, 500));
+  await redimensionar(win, anchoOriginal, 480);
   const despues = await ev(win, `
     const menu = document.getElementById('providerOptions');
     const caja = menu.getBoundingClientRect();
@@ -834,8 +962,7 @@ async function ejecutar(win) {
   check(despues.bottom <= despues.ventana,
     `encoger la ventana con el menú abierto lo reajusta (${despues.bottom} <= ${despues.ventana}, antes ${reajuste.antes})`);
 
-  win.setSize(anchoOriginal, altoOriginal);
-  await new Promise(r => setTimeout(r, 300));
+  await redimensionar(win, anchoOriginal, altoOriginal);
 }
 
 // El oyente se registra antes de cargar main.js, que es quien abre la ventana.
@@ -904,7 +1031,9 @@ stub.listen(0, '127.0.0.1', () => {
     return;
   }
 
-  require('../src/main/main.js');
+  // La altura mínima se lee del propio main.js: la prueba comprueba la ventana
+  // contra el número que la ventana usa, no contra una copia que envejezca.
+  ({ ALTO_MINIMO_VENTANA } = require('../src/main/main.js'));
   ({ PROVIDERS, AIProviderManager } = require('../src/main/ai-providers'));
   ({ getDb } = require('../src/main/db'));
   ({ ollamaApi } = require('../src/main/ollama'));
