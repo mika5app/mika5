@@ -116,6 +116,14 @@ Su ausencia significa **«no comprobado»**, nunca «caído». El registro no
 fabrica una sonda por defecto: inventarla afirmaría una conectividad que nadie
 verificó. La tienen `local` y `llamacpp`.
 
+Cuando está, devuelve **evidencia**, no una frase: `{ ok, probe }`, y en el
+fallo también el error tal cual. `llamacpp.status()` se tragaba el error y
+devolvía texto suelto; `clasificarError()` no encuentra nada estructurado en
+una cadena, así que todo caía en `PROVIDER_UNKNOWN_ERROR` y el registro decía
+«no verificado» donde lo cierto era «no hay nadie escuchando en el 8080».
+`getAvailability()` respeta la sonda que el adaptador declara en vez de
+volver a deducirla de lo que quede.
+
 ### `listModels()` devuelve evidencia
 
 ```js
@@ -128,9 +136,23 @@ cuyo catálogo está declarado en el código devuelve `probeNoIntentada()`.
 
 ### Cancelación
 
-`options.signal` es opcional y sólo lo aceptan los tres adaptadores que hacen
-red: `openai`, `groq`, `llamacpp`. Las llamadas de dos argumentos siguen
+`options.signal` es opcional y lo aceptan los cuatro adaptadores que hacen red:
+`openai`, `groq`, `llamacpp` y `local`. Las llamadas de dos argumentos siguen
 funcionando.
+
+`local` no hace fetch propio: delega en `ollamaApi`. `tags()`, `show()`,
+`status()` y `embed()` aceptan ahora la señal y la pasan a `fetchWithTimeout`,
+que ya sabía distinguir una cancelación externa de su propio plazo. Un solo
+plazo cubre el catálogo entero, sondas de visión incluidas: son N+1 peticiones
+en serie y darle a cada una la suya dejaría el total sin techo.
+`probeOllamaVision()` relanza las cancelaciones en vez de tragárselas —
+devolver `false` afirmaría que el modelo no acepta imágenes, y eso nadie lo
+comprobó.
+
+`test/ollama-cancellation.test.js` ejercita el adaptador real contra un
+servidor HTTP en puerto efímero, no un doble de `ollamaApi`, y comprueba que el
+servidor **vio cerrarse el socket**: descartar la promesa dejaría la petición
+viva y esa comprobación fallaría.
 
 ```
 cancelación externa  →  PROVIDER_ABORTED   reachable = null
@@ -159,12 +181,7 @@ que finge una capacidad que no tienen.
    permanece abierto, que es la única señal fiable de que `switchProvider()`
    terminó.
 
-2. **`local` no admite cancelación.** No tiene fetch propio: delega en
-   `ollamaApi.tags()`. `fetchWithTimeout` ya acepta `options.signal` y lo trata
-   bien; lo que falta es que `tags()`, `show()` y `status()` lo acepten y lo
-   propaguen.
-
-3. **`alibaba.js` recibe su configuración por inyección.** Su módulo exporta
+2. **`alibaba.js` recibe su configuración por inyección.** Su módulo exporta
    una factoría en lugar de un objeto, porque importar `alibaba-config` desde
    el adaptador y componerlo desde `ai-providers.js` cerraría un ciclo. Es una
    asimetría real frente a los otros seis.
@@ -215,11 +232,42 @@ que finge una capacidad que no tienen.
 
 | Suite | Comprobaciones |
 |---|---|
-| `test/provider-availability.test.js` | 325 |
-| `test/provider-registry.test.js` | 93 |
+| `test/provider-availability.test.js` | 371 |
+| `test/provider-registry.test.js` | 150 |
+| `test/provider-selector.test.js` | 118 |
+| `test/ollama-cancellation.test.js` | 35 |
 | `test/provider-credentials.test.js` | 30 |
-| `test/provider-selector.test.js` | 116 |
-| `npm run test:all` | 8/8 gates, exit 0, 42 s |
+| `npm run test:all` | 8/8 gates, exit 0, 106 s desde checkout limpio |
+
+Alcance de cada una, para no darles más crédito del que tienen:
+
+- `provider-selector` corre en Electron, con IPC, preload y maquetación de
+  Chromium reales, y activa el proveedor con un **clic** sobre la opción.
+- `provider-availability` extrae el cuerpo real de `loadRuntime()` y lo ejecuta
+  con `new Function` sobre un DOM simulado. El código es el de producción; el
+  entorno no. `t()` resuelve contra el diccionario español de verdad, así que
+  lo que se comprueba es el texto que el usuario lee, no que se llamase a
+  `t()`.
+- `ollama-cancellation` usa el adaptador real contra un servidor HTTP propio.
+- `provider-registry` compara valor a valor descriptor y adaptador, y recorre
+  `getProvider()`/`setProvider()` para los siete.
+
+## 9. Instalación y limpieza
+
+`npm ci` terminaba con código 0 y sin binario de Electron: `@electron/get`
+acierta en la caché y `extract-zip@2.0.1` → `yauzl@2.10.0` se detiene en la
+entrada 73 del zip y emite `end` como si el archivo hubiese acabado, con Node
+24. `scripts/ensure-electron-binary.js` lo verifica tras el postinstall y, si
+falta, extrae el zip ya cacheado con la herramienta del sistema — **tras
+comprobar su SHA-256** contra `checksums.json`, que es lo que `@electron/get`
+no hace cuando acierta en caché.
+
+El lanzador de pruebas mata sólo los procesos **de su propia ejecución**,
+identificados por el `--user-data-dir` único que crea con `mkdtemp`. Se
+resuelven los PID y se mata por PID. Barrer por nombre alcanzaría al Electron
+de cualquier otra aplicación del usuario, MIKA5 abierta incluida: verificado
+dejando cuatro Electron ajenos vivos durante una corrida completa de
+`test:all`, que terminaron con los mismos PID.
 
 ## 8. Lo que el selector ofrece
 
