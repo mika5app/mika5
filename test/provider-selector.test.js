@@ -25,6 +25,7 @@ const assert = require('assert');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
+const http = require('http');
 const { app } = require('electron');
 
 // userData aislado ANTES de cargar main.js: la prueba nunca lee ni escribe los
@@ -38,11 +39,98 @@ app.setPath('sessionData', perfil);
 let llamadasQuit = 0;
 app.quit = () => { llamadasQuit += 1; };
 
-require('../src/main/main.js');
-const { PROVIDERS, AIProviderManager } = require('../src/main/ai-providers');
-const { getDb } = require('../src/main/db');
+// ---------------------------------------------------------------------------
+// Ollama de prueba
+// ---------------------------------------------------------------------------
+//
+// Esta suite no puede hablar con el Ollama de la máquina. `local.listModels()`
+// pide el catálogo y luego sonda CADA modelo con `/api/show`, en serie: en un
+// equipo con trece modelos son trece peticiones por cada `switchProvider()`, y
+// la suite cambia de proveedor una decena de veces. El resultado dependía del
+// catálogo instalado y de la carga del equipo, y el plazo hubo que subirlo a
+// diez minutos para que cupiese.
+//
+// El bucle secuencial NO es una regresión de esta rama: v0.2.0 (tag 438d393)
+// hace exactamente lo mismo, modelo a modelo. Aquí no se cambia el
+// comportamiento del producto — sólo a dónde apunta la prueba.
+//
+// Los nombres del catálogo no pueden existir en un Ollama real. Ésa es la
+// prueba decisiva de aislamiento: si alguna petición hubiese llegado al 11434
+// de la máquina, el selector mostraría los modelos del usuario y no éstos.
+const CATALOGO_STUB = [
+  { name: 'mika5-stub-chat:test', size: 1073741824, digest: 'stubchat0001' },
+  { name: 'mika5-stub-vision:test', size: 2147483648, digest: 'stubvis00002' },
+  { name: 'mika5-stub-embed:test', size: 268435456, digest: 'stubemb00003' }
+];
+// Capacidades por modelo, fijas y declaradas: ni heurística por nombre ni azar.
+const CON_VISION = new Set(['mika5-stub-vision:test']);
 
-const IDS_CANONICOS = Object.keys(PROVIDERS);
+const peticionesStub = [];
+const BASE_PREVIA = process.env.MIKA5_OLLAMA_BASE;
+
+const stub = http.createServer((req, res) => {
+  let cuerpo = '';
+  req.on('data', trozo => { cuerpo += trozo; });
+  req.on('end', () => {
+    const ruta = req.url.split('?')[0];
+    peticionesStub.push({ metodo: req.method, ruta, cuerpo });
+
+    const responder = (codigo, objeto) => {
+      const texto = JSON.stringify(objeto);
+      res.writeHead(codigo, {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(texto)
+      });
+      res.end(texto);
+    };
+
+    if (req.method === 'GET' && ruta === '/api/tags') {
+      return responder(200, { models: CATALOGO_STUB });
+    }
+
+    if (req.method === 'POST' && ruta === '/api/show') {
+      // Se acepta el cuerpo que Ollama recibe de verdad. `ollamaApi.show()`
+      // manda `{ name }`; la API también admite `{ model }`. Un cuerpo sin
+      // ninguno de los dos es un 400, como en Ollama.
+      let pedido = null;
+      try {
+        const json = JSON.parse(cuerpo || '{}');
+        pedido = json.name || json.model || null;
+      } catch (_) { /* cuerpo ilegible: se trata como ausente */ }
+      if (!pedido) return responder(400, { error: 'model name is required' });
+      if (!CATALOGO_STUB.some(m => m.name === pedido)) {
+        return responder(404, { error: `model '${pedido}' not found` });
+      }
+      // Las dos formas que reconoce el detector: la clave `.vision.` de los
+      // modelos locales y el array `capabilities` de los proxied.
+      return responder(200, CON_VISION.has(pedido)
+        ? { capabilities: ['completion', 'vision'], model_info: { 'clip.vision.embedding_length': 1024 } }
+        : { capabilities: ['completion'], model_info: { 'general.architecture': 'llama' } });
+    }
+
+    if (req.method === 'POST' && ruta === '/api/chat') {
+      return responder(200, {
+        model: 'mika5-stub-chat:test',
+        message: { role: 'assistant', content: 'respuesta de prueba' },
+        done: true,
+        done_reason: 'stop'
+      });
+    }
+
+    responder(404, { error: 'not found' });
+  });
+});
+
+// Los módulos que hablan con Ollama se cargan DESPUÉS de fijar la variable:
+// `BASE` se resuelve una sola vez, al requerir el módulo.
+let PROVIDERS, AIProviderManager, getDb, ollamaApi, IDS_CANONICOS;
+
+function cerrarStub() {
+  if (BASE_PREVIA === undefined) delete process.env.MIKA5_OLLAMA_BASE;
+  else process.env.MIKA5_OLLAMA_BASE = BASE_PREVIA;
+  try { stub.close(); } catch (_) { /* ya cerrado */ }
+}
+
 const fallos = [];
 let comprobaciones = 0;
 
@@ -64,6 +152,74 @@ const ev = (win, codigo) => win.webContents.executeJavaScript(`(async () => { ${
 
 async function ejecutar(win) {
   await esperar(win, "document.querySelectorAll('#providerOptions .provider-option').length > 0");
+  assert.ok(IDS_CANONICOS.length >= 7,
+    'el registro canónico debe declarar al menos los siete proveedores');
+
+  // --- 0. Aislamiento: nada llegó al Ollama real ----------------------------
+  //
+  // No basta con que el stub haya recibido peticiones: hay que demostrar que no
+  // hubo además un segundo canal hacia el 11434 de la máquina. La prueba
+  // decisiva es el catálogo. Los nombres del stub no existen en ningún Ollama
+  // real, así que si el selector muestra exactamente esos y sólo esos, no hay
+  // ninguna respuesta del Ollama del usuario en el camino.
+
+  const baseEnUso = await ollamaApi.status();
+  check(baseEnUso.base === process.env.MIKA5_OLLAMA_BASE,
+    `ollama.js resuelve la base del stub (${baseEnUso.base})`);
+  check(!/:11434(\/|$)/.test(baseEnUso.base),
+    `la base en uso no es el puerto real de Ollama (${baseEnUso.base})`);
+
+  const rutasVistas = [...new Set(peticionesStub.map(p => `${p.metodo} ${p.ruta}`))];
+  check(peticionesStub.length > 0, `el stub recibió tráfico (${peticionesStub.length} peticiones)`);
+  check(rutasVistas.includes('GET /api/tags'), `el stub sirvió el catálogo (${rutasVistas.join(' | ')})`);
+  check(rutasVistas.includes('POST /api/show'), 'el stub sirvió la sonda de capacidades');
+  const CONOCIDAS = ['GET /api/tags', 'POST /api/show', 'POST /api/chat'];
+  const desconocidas = rutasVistas.filter(r => !CONOCIDAS.includes(r));
+  check(desconocidas.length === 0,
+    `no se pidió ninguna ruta fuera del contrato de Ollama (${desconocidas.join(' | ') || 'ninguna'})`);
+
+  // El cuerpo tiene que ser el que Ollama recibe de verdad, no uno inventado
+  // para que el doble responda: si `show()` dejase de mandar el nombre, la
+  // sonda devolvería 400 en producción y aquí seguiría pasando.
+  const cuerposShow = peticionesStub.filter(p => p.ruta === '/api/show');
+  const cuerposValidos = cuerposShow.filter(p => {
+    try {
+      const json = JSON.parse(p.cuerpo);
+      return typeof (json.name || json.model) === 'string';
+    } catch (_) { return false; }
+  });
+  check(cuerposShow.length > 0 && cuerposValidos.length === cuerposShow.length,
+    `cada /api/show llegó con el nombre del modelo (${cuerposValidos.length}/${cuerposShow.length})`);
+
+  const catalogo = await ev(win, `
+    const paso = { fase: 'inicio', error: null };
+    try {
+      paso.fase = 'setProvider';
+      await window.mika5.ai.setProvider('local');
+      paso.fase = 'loadRuntime';
+      await loadRuntime();
+      paso.fase = 'leer';
+    } catch (e) {
+      paso.error = String(e && e.message || e);
+    }
+    if (paso.error) return { error: paso.fase + ': ' + paso.error };
+    return [...document.getElementById('modelSelect').options].map(o => o.value || o.textContent.trim());
+  `);
+  if (catalogo && catalogo.error) throw new Error(`no se pudo activar local -> ${catalogo.error}`);
+  // Nota: esta sección usa `setProvider` + `loadRuntime` y no `switchProvider`
+  // a propósito. `switchProvider()` invocado inmediatamente después del
+  // arranque no resuelve —ni con un proveedor sin red— y bloquea el hilo del
+  // renderer hasta el punto de que ni un `setTimeout` de respaldo dispara; el
+  // mismo `switchProvider()` funciona más adelante en esta misma suite
+  // (sección 4). Es anterior a este cambio y está sin diagnosticar.
+  // `mika5-stub-embed:test` no aparece: el filtro de modelos de embedding del
+  // renderer lo descarta, y que lo descarte forma parte de lo que se comprueba.
+  check(catalogo.includes('mika5-stub-chat:test') && catalogo.includes('mika5-stub-vision:test'),
+    `el selector muestra el catálogo del stub (${catalogo.join(', ')})`);
+  check(!catalogo.includes('mika5-stub-embed:test'),
+    'el modelo de embedding del stub se filtra y no se ofrece para chatear');
+  check(catalogo.every(n => n === '' || /^mika5-stub-/.test(n)),
+    `ningún modelo del Ollama real se coló en el selector (${catalogo.join(', ')})`);
 
   // --- 1. El selector se abre y el desplegable se ve -------------------------
 
@@ -495,7 +651,16 @@ async function ejecutar(win) {
           && opciones.getBoundingClientRect().height > 0) break;
       await new Promise(r => setTimeout(r, 50));
     }
-    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    // Dos fotogramas para que el desplegable esté maquetado antes de medir,
+    // pero con plazo: Chromium no entrega requestAnimationFrame cuando la
+    // ventana no está pintando —minimizada, tapada o en segundo plano— y sin
+    // el respaldo esta espera no termina nunca. Ese cuelgue no se distingue de
+    // un fallo real: el gate se agotaba sin decir dónde.
+    await new Promise(r => {
+      const listo = () => { clearTimeout(plazo); r(); };
+      const plazo = setTimeout(r, 500);
+      requestAnimationFrame(() => requestAnimationFrame(listo));
+    });
     const nodos = [...document.querySelectorAll('#providerOptions .provider-option')];
     const vivos = nodos.filter(n => {
       const r = n.getBoundingClientRect();
@@ -508,7 +673,14 @@ async function ejecutar(win) {
     `el selector sigue completo y pulsable al final (${final.vivos}/${final.total})`);
 }
 
+// El oyente se registra antes de cargar main.js, que es quien abre la ventana.
 app.on('browser-window-created', (_e, win) => {
+  // Los errores del renderer no llegan solos a la salida del gate. Sin esto,
+  // una excepción dentro de `executeJavaScript` se manifiesta como un plazo
+  // agotado sin causa visible.
+  win.webContents.on('console-message', (_ev, nivel, mensaje) => {
+    if (nivel >= 2) console.error(`[renderer] ${mensaje}`);
+  });
   win.webContents.once('did-finish-load', async () => {
     // El arranque del renderer es asíncrono y se deja asentar antes de medir.
     await new Promise(r => setTimeout(r, 2000));
@@ -518,6 +690,8 @@ app.on('browser-window-created', (_e, win) => {
     } catch (e) {
       error = e;
     }
+
+    cerrarStub();
 
     if (error) {
       console.error('provider-selector: la prueba no pudo completarse:', error && error.stack || error);
@@ -535,21 +709,40 @@ app.on('browser-window-created', (_e, win) => {
   });
 });
 
-// Margen amplio a propósito, y por un coste medido, no por prudencia vaga.
-//
-// Cada `switchProvider()` dispara `loadRuntime()`, que para el proveedor local
-// pide el catálogo a Ollama y sondea CADA modelo con `/api/show` para saber si
-// acepta imágenes. En una máquina con trece modelos instalados eso son trece
-// peticiones por cambio de proveedor, y la suite cambia varias veces. Suelta
-// tarda menos de un minuto; dentro de `test:all`, con los siete gates
-// anteriores habiendo golpeado el mismo Ollama, se dispara.
-//
-// No se recorta la cobertura para que quepa en un plazo: el plazo se ajusta al
-// coste real. Si algún día se bloquea de verdad, diez minutos siguen siendo un
-// tope que corta.
+// Sólo cuando el stub escucha se fija la variable y se cargan los módulos. El
+// orden es la garantía: `BASE` se resuelve al requerir `ollama.js`, así que
+// cargarlo antes dejaría la suite hablando con el Ollama real.
+stub.listen(0, '127.0.0.1', () => {
+  process.env.MIKA5_OLLAMA_BASE = `http://127.0.0.1:${stub.address().port}`;
+
+  // Nadie puede haber cargado ya estos módulos con la base real. No se limpia
+  // la caché: se comprueba. Borrarla escondería el problema y dejaría dos
+  // copias del módulo vivas, cada una con su `BASE`.
+  const contaminados = ['../src/main/ollama', '../src/main/ai-providers', '../src/main/main']
+    .filter(m => require.cache[require.resolve(m)]);
+  if (contaminados.length) {
+    console.error(`provider-selector: módulos cargados antes de fijar la base: ${contaminados.join(', ')}`);
+    cerrarStub();
+    app.exit(3);
+    return;
+  }
+
+  require('../src/main/main.js');
+  ({ PROVIDERS, AIProviderManager } = require('../src/main/ai-providers'));
+  ({ getDb } = require('../src/main/db'));
+  ({ ollamaApi } = require('../src/main/ollama'));
+  IDS_CANONICOS = Object.keys(PROVIDERS);
+});
+
+// Plazo ajustado al coste real, que ahora es constante: el catálogo del stub
+// son tres modelos, así que `loadRuntime()` hace cuatro peticiones locales por
+// cambio de proveedor y ninguna sale de la máquina. Los diez minutos de antes
+// pagaban el catálogo del equipo y la carga de un Ollama compartido con los
+// siete gates anteriores; ya no hay nada de eso que pagar. Dos minutos dejan
+// margen de sobra al arranque de Chromium y siguen cortando de verdad si algo
+// se bloquea.
 setTimeout(() => {
   console.error('provider-selector: timeout global');
+  cerrarStub();
   app.exit(2);
-}, 600000);
-
-assert.ok(IDS_CANONICOS.length >= 7, 'el registro canónico debe declarar al menos los siete proveedores');
+}, 120000);

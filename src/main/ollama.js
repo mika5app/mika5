@@ -2,7 +2,38 @@
 const { spawn } = require("child_process");
 const http = require("http");
 
-const BASE = "http://127.0.0.1:11434";
+const BASE_POR_DEFECTO = "http://127.0.0.1:11434";
+
+// Base de Ollama. El valor por defecto es el de siempre y es el único que se
+// usa en producción: el comportamiento para el usuario no cambia. La variable
+// existe para que las pruebas levanten su propio servidor en un puerto efímero
+// y no golpeen el Ollama real de la máquina, que hace el gate lento y
+// dependiente del catálogo que cada equipo tenga instalado.
+//
+// Restringida a bucle local a propósito, y esto no es una formalidad: sin la
+// restricción, una variable de entorno bastaría para desviar a un host remoto
+// todo lo que el usuario cree que no sale de su máquina — prompts, documentos
+// adjuntos y contexto RAG. El modo local es privado por definición y esta
+// variable no puede ser la grieta por la que deje de serlo.
+function resolverBaseOllama(valor) {
+  if (!valor) return BASE_POR_DEFECTO;
+  let url;
+  try {
+    url = new URL(valor);
+  } catch (_) {
+    throw new Error('MIKA5_OLLAMA_BASE no es una URL válida');
+  }
+  if (url.protocol !== 'http:') {
+    throw new Error('MIKA5_OLLAMA_BASE debe usar http');
+  }
+  const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (host !== '127.0.0.1' && host !== '::1' && host !== 'localhost') {
+    throw new Error('MIKA5_OLLAMA_BASE sólo admite bucle local');
+  }
+  return `${url.protocol}//${url.host}`;
+}
+
+const BASE = resolverBaseOllama(process.env.MIKA5_OLLAMA_BASE);
 const FETCH_TIMEOUT = 600000; // 10 minutos para modelos muy grandes
 
 // Dynamic context window sizing
@@ -253,4 +284,4 @@ const ollamaApi = {
   }
 };
 
-module.exports = { ollamaApi, fetchWithTimeout };
+module.exports = { ollamaApi, fetchWithTimeout, resolverBaseOllama, BASE };
