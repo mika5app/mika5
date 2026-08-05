@@ -9,7 +9,7 @@
 const { ollamaApi } = require('../ollama');
 const { assertVisionSupported, normalizeChatResult } = require('../provider-capabilities');
 const { probeDeError, probeDeExito, sanearMensaje } = require('../provider-errors');
-const { formatBytes, detectCapabilities, probeOllamaVision, createAbortContext } = require('../provider-runtime');
+const { formatBytes, detectCapabilities, probeOllamaVision } = require('../provider-runtime');
 
 // MODO LOCAL - 100% Privado (delegado a ollama.js robusto)
 const adaptadorLocal = {
@@ -63,19 +63,21 @@ const adaptadorLocal = {
     });
   },
 
-  // Mismo contrato de cancelación que openai, groq y llamacpp: una señal
-  // externa da PROVIDER_ABORTED y el plazo propio da PROVIDER_TIMEOUT, ambos
-  // con `reachable: null` porque nadie llegó a saber si el servidor estaba.
-  // Antes `local` no podía cancelarse: no hace fetch propio, delega en
-  // ollamaApi, y ollamaApi no aceptaba señal.
+  // Cancelación, y NADA MÁS que cancelación.
   //
-  // El plazo cubre el catálogo COMPLETO, sondas de visión incluidas: son N+1
-  // peticiones en serie y darle a cada una su propio plazo dejaría el total
-  // sin techo.
+  // Una señal externa da PROVIDER_ABORTED; el plazo de `fetchWithTimeout`
+  // —diez minutos por petición, el mismo de v0.2.0— da PROVIDER_TIMEOUT. Los
+  // dos con `reachable: null`: nadie llegó a saber si el servidor estaba.
+  //
+  // Aquí NO se impone un plazo propio al catálogo entero. Una versión anterior
+  // de este cambio ponía 30 s al conjunto, y eso no era añadir cancelación sino
+  // cambiar el comportamiento: son N+1 peticiones en serie —una por modelo para
+  // la sonda de visión— y en una máquina lenta o con muchos modelos el catálogo
+  // volvía vacío donde v0.2.0 seguía esperando. El techo sigue siendo el de
+  // siempre, por petición.
   async listModels(_apiKey, _config, options = {}) {
-    const abortContext = createAbortContext(options.signal, 30000, 'Ollama');
     try {
-      const data = await ollamaApi.tags({ signal: abortContext.signal });
+      const data = await ollamaApi.tags({ signal: options.signal });
       const raw = data.models || data.tags || [];
 
       // Probe each model for vision capabilities via /api/show
@@ -94,7 +96,7 @@ const adaptadorLocal = {
         // Única fuente: la sonda. Si /api/show falla, el modelo queda sin visión
         // y adjuntar una imagen se bloqueará con un mensaje claro. Antes se caía
         // a detección por nombre y la imagen se perdía en silencio.
-        entry.supportsVision = await probeOllamaVision(name, { signal: abortContext.signal });
+        entry.supportsVision = await probeOllamaVision(name, { signal: options.signal });
         if (entry.supportsVision && !entry.capabilities.includes('👁️ Visión')) {
           entry.capabilities.push('👁️ Visión');
         }
@@ -105,12 +107,9 @@ const adaptadorLocal = {
       // Ollama contestó: eso es evidencia de conectividad. No pide
       // credencial, así que `authenticated` se queda en null.
       return { models, probe: probeDeExito({ authenticated: null }) };
-    } catch (e) {
-      const error = abortContext.normalize(e);
+    } catch (error) {
       console.warn('Ollama no disponible:', sanearMensaje(error && error.message));
       return { models: [], probe: probeDeError(error) };
-    } finally {
-      abortContext.cleanup();
     }
   },
 

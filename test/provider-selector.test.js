@@ -197,32 +197,31 @@ async function ejecutar(win) {
   // que se quiere verificar deja sin comprobar justo lo que importa.
   const catalogo = await ev(win, `
     const desplegable = document.getElementById('providerOptions');
-    // Se abre con el disparador, como lo abre el usuario, para que el cierre
-    // sea despues una senal fiable: switchProvider() lo cierra al terminar,
-    // DESPUES de esperar a loadRuntime(). Sin abrirlo antes no hay forma de
-    // saber cuando acabo, y el cierre diferido caia encima de la seccion
-    // siguiente dejandola medida a mitad de camino.
-    document.getElementById('providerTrigger').click();
-    const opcion = [...desplegable.querySelectorAll('.provider-option')]
-      .find(n => (n.getAttribute('onclick') || '').includes("switchProvider('local')"));
-    if (!opcion) return { error: 'no existe la opción local en el markup' };
-    opcion.click();
 
-    // Esperar a que el desplegable este cerrado NO sirve como senal de fin: el
-    // clic sobre la opcion burbujea hasta el oyente de document, que lo cierra
-    // en el acto, mucho antes de que switchProvider() termine. La senal valida
-    // es que se pueda reabrir y SIGA abierto: mientras switchProvider() no haya
-    // llegado a su ultima linea, su cierre diferido lo vuelve a cerrar solo.
-    let asentado = false;
-    for (let i = 0; i < 100 && !asentado; i++) {
+    // La senal de fin es la PROMESA del manejador, no un efecto que se le
+    // parezca. Se envuelve switchProvider para capturarla y despues se pulsa de
+    // verdad: el clic entra por el atributo onclick del markup y ejecuta la
+    // funcion entera, sin que la prueba la invoque por su cuenta.
+    //
+    // Antes esto esperaba a estados observables y los dos candidatos enganaban.
+    // Que el desplegable este cerrado no vale: el clic burbujea hasta el oyente
+    // de document, que lo cierra al instante. Que se pueda reabrir y siga
+    // abierto tampoco: con un plazo corto, un switchProvider que termine
+    // despues cierra el menu cuando ya nadie mira.
+    const original = window.switchProvider;
+    let promesa = null;
+    window.switchProvider = (...args) => { promesa = original(...args); return promesa; };
+    try {
       document.getElementById('providerTrigger').click();
-      await new Promise(r => setTimeout(r, 100));
-      if (desplegable.style.display === 'block') {
-        asentado = true;
-        document.getElementById('providerTrigger').click();
-      }
+      const opcion = [...desplegable.querySelectorAll('.provider-option')]
+        .find(n => (n.getAttribute('onclick') || '').includes("switchProvider('local')"));
+      if (!opcion) return { error: 'no existe la opción local en el markup' };
+      opcion.click();
+      if (!promesa) return { error: 'el onclick del markup no llamó a switchProvider' };
+      await promesa;
+    } finally {
+      window.switchProvider = original;
     }
-    if (!asentado) return { error: 'switchProvider() nunca dejo de cerrar el desplegable' };
     return [...document.getElementById('modelSelect').options].map(o => o.value || o.textContent.trim());
   `);
   if (catalogo && catalogo.error) throw new Error(`no se pudo activar local -> ${catalogo.error}`);
@@ -238,6 +237,46 @@ async function ejecutar(win) {
   // disparador vuelva a abrirlo, porque alterna leyendo `style.display`.
   check(trasClic.desplegable === 'none',
     `elegir un proveedor cierra el desplegable (display=${trasClic.desplegable || '(vacío)'})`);
+
+  // El desplegable que el usuario reabre no puede cerrarse solo.
+  //
+  // `switchProvider()` cerraba el menú en su última línea, después de esperar a
+  // `loadRuntime()`. Con un proveedor cloud lento eso son segundos, y en ese
+  // hueco el cierre quedaba pendiente: reabrir el menú y verlo cerrarse solo.
+  // Aquí se reproduce con una espera artificialmente larga en el runtime, que
+  // es lo que la hacía visible, y se comprueba que el menú sigue abierto.
+  const carrera = await ev(win, `
+    const desplegable = document.getElementById('providerOptions');
+    const runtimeOriginal = window.loadRuntime;
+    const switchOriginal = window.switchProvider;
+    window.loadRuntime = async (...args) => {
+      await new Promise(r => setTimeout(r, 800));
+      return runtimeOriginal(...args);
+    };
+    let promesa = null;
+    window.switchProvider = (...args) => { promesa = switchOriginal(...args); return promesa; };
+    try {
+      document.getElementById('providerTrigger').click();
+      const opcion = [...desplegable.querySelectorAll('.provider-option')]
+        .find(n => (n.getAttribute('onclick') || '').includes("switchProvider('local')"));
+      opcion.click();
+      // El usuario vuelve a abrir el menú mientras el runtime sigue cargando.
+      await new Promise(r => setTimeout(r, 100));
+      document.getElementById('providerTrigger').click();
+      const alReabrir = desplegable.style.display;
+      await promesa;
+      const trasTerminar = desplegable.style.display;
+      document.getElementById('providerTrigger').click();
+      return { alReabrir, trasTerminar };
+    } finally {
+      window.loadRuntime = runtimeOriginal;
+      window.switchProvider = switchOriginal;
+    }
+  `);
+  check(carrera.alReabrir === 'block',
+    `el desplegable se puede reabrir mientras el proveedor carga (${carrera.alReabrir})`);
+  check(carrera.trasTerminar === 'block',
+    `y sigue abierto cuando switchProvider() termina (${carrera.trasTerminar})`);
   // `mika5-stub-embed:test` no aparece: el filtro de modelos de embedding del
   // renderer lo descarta, y que lo descarte forma parte de lo que se comprueba.
   check(catalogo.includes('mika5-stub-chat:test') && catalogo.includes('mika5-stub-vision:test'),

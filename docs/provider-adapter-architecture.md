@@ -142,26 +142,34 @@ funcionando.
 
 `local` no hace fetch propio: delega en `ollamaApi`. `tags()`, `show()`,
 `status()` y `embed()` aceptan ahora la señal y la pasan a `fetchWithTimeout`,
-que ya sabía distinguir una cancelación externa de su propio plazo. Un solo
-plazo cubre el catálogo entero, sondas de visión incluidas: son N+1 peticiones
-en serie y darle a cada una la suya dejaría el total sin techo.
+que ya sabía distinguir una cancelación externa de su propio plazo.
 `probeOllamaVision()` relanza las cancelaciones en vez de tragárselas —
 devolver `false` afirmaría que el modelo no acepta imágenes, y eso nadie lo
 comprobó.
 
+**`local` no impone ningún plazo propio, y es deliberado.** Una versión
+anterior de este cambio ponía 30 s al catálogo entero. Eso no era añadir
+cancelación: era cambiar el comportamiento. El catálogo son N+1 peticiones en
+serie —una `/api/show` por modelo— y en una máquina lenta o con muchos modelos
+volvía vacío donde v0.2.0 seguía esperando. El techo sigue siendo el de
+siempre: los diez minutos por petición de `fetchWithTimeout`, idénticos a
+v0.2.0. Lo único que se añadió a ese plazo es un `code` en su error, porque sin
+él un plazo vencido acababa clasificado como `PROVIDER_UNKNOWN_ERROR`.
+
+```
+cancelación externa   →  PROVIDER_ABORTED   reachable = null
+plazo de la petición  →  PROVIDER_TIMEOUT   reachable = null
+```
+
 `test/ollama-cancellation.test.js` ejercita el adaptador real contra un
 servidor HTTP en puerto efímero, no un doble de `ollamaApi`, y comprueba que el
 servidor **vio cerrarse el socket**: descartar la promesa dejaría la petición
-viva y esa comprobación fallaría.
+viva y esa comprobación fallaría. También falla si `local` vuelve a crear un
+plazo propio.
 
-```
-cancelación externa  →  PROVIDER_ABORTED   reachable = null
-plazo interno        →  PROVIDER_TIMEOUT   reachable = null
-```
-
-El combinador es `createAbortContext()`, que ya existía y está probado: une la
-señal externa con un plazo propio, recuerda cuál disparó y limpia temporizador
-y oyente en `cleanup()`. **No se usa `AbortSignal.any`.**
+`openai`, `groq` y `llamacpp` sí usan `createAbortContext()`, que une la señal
+externa con el plazo que esos adaptadores ya declaraban, recuerda cuál disparó
+y libera temporizador y oyente en `cleanup()`. **No se usa `AbortSignal.any`.**
 
 `anthropic`, `moonshot` y `alibaba` no reciben señal: sería una interfaz vacía
 que finge una capacidad que no tienen.
@@ -170,16 +178,10 @@ que finge una capacidad que no tienen.
 
 ## 5. Limitaciones conocidas
 
-1. **El desplegable se cierra solo si se reabre demasiado pronto.**
-   `switchProvider()` pone `providerOptions.style.display = 'none'` en su
-   última línea, **después** de esperar a `loadRuntime()`. El clic sobre la
-   opción ya lo había cerrado antes, al burbujear hasta el oyente de
-   `document`, así que ese cierre final llega tarde y sin nada que cerrar…
-   salvo si el usuario ha vuelto a abrirlo mientras tanto. Con un proveedor
-   cloud lento la ventana es de segundos: se abre el desplegable y se cierra
-   solo. La sección 0 de `provider-selector.test.js` reabre en bucle hasta que
-   permanece abierto, que es la única señal fiable de que `switchProvider()`
-   terminó.
+1. **Ninguna pendiente de las anteriores.** La carrera del desplegable —se
+   cerraba solo si el usuario lo reabría mientras el proveedor cargaba— está
+   corregida: `switchProvider()` cierra el menú al principio, antes de
+   cualquier espera, no en su última línea.
 
 2. **`alibaba.js` recibe su configuración por inyección.** Su módulo exporta
    una factoría en lugar de un objeto, porque importar `alibaba-config` desde
@@ -233,9 +235,10 @@ que finge una capacidad que no tienen.
 | Suite | Comprobaciones |
 |---|---|
 | `test/provider-availability.test.js` | 371 |
+| `test/kill-survivors.test.js` | 17 |
 | `test/provider-registry.test.js` | 150 |
-| `test/provider-selector.test.js` | 118 |
-| `test/ollama-cancellation.test.js` | 35 |
+| `test/provider-selector.test.js` | 120 |
+| `test/ollama-cancellation.test.js` | 37 |
 | `test/provider-credentials.test.js` | 30 |
 | `npm run test:all` | 8/8 gates, exit 0, 106 s desde checkout limpio |
 
@@ -263,11 +266,16 @@ comprobar su SHA-256** contra `checksums.json`, que es lo que `@electron/get`
 no hace cuando acierta en caché.
 
 El lanzador de pruebas mata sólo los procesos **de su propia ejecución**,
-identificados por el `--user-data-dir` único que crea con `mkdtemp`. Se
-resuelven los PID y se mata por PID. Barrer por nombre alcanzaría al Electron
-de cualquier otra aplicación del usuario, MIKA5 abierta incluida: verificado
-dejando cuatro Electron ajenos vivos durante una corrida completa de
-`test:all`, que terminaron con los mismos PID.
+identificados por el `--user-data-dir` único que crea con `mkdtemp`. La ruta
+viaja por variable de entorno: incrustarla en el script de PowerShell con
+`JSON.stringify` duplicaba las barras —`C:\Users\...`— y PowerShell no
+interpreta `` como escape, así que la comparación no casaba nunca y la
+limpieza no mataba nada, en silencio. Se resuelven los PID y se mata por PID,
+excluyendo el del propio PowerShell.
+
+`test/kill-survivors.test.js` lanza dos procesos reales —uno con el perfil de
+la ejecución y otro ajeno—, limpia, y comprueba que muere exactamente el
+primero. Un doble de `exec` no sirve: con el escapado roto también pasaba.
 
 ## 8. Lo que el selector ofrece
 

@@ -98,14 +98,33 @@ function killSurvivors(profileDir, { exec = child_process.execFileSync, log = co
   if (!profileDir || !profileDir.includes(PROFILE_PREFIX)) return 0;
   try {
     if (process.platform === 'win32') {
-      const script =
-        `$objetivo = ${JSON.stringify(profileDir)}; ` +
-        '$p = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | ' +
-        'Where-Object { $_.CommandLine -and $_.CommandLine.Contains($objetivo) }); ' +
-        'if ($p.Count) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }; ' +
-        '$p.Count';
-      const salida = exec('powershell', ['-NoProfile', '-NonInteractive', '-Command', script],
-        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+      // La ruta viaja por VARIABLE DE ENTORNO, no incrustada en el script.
+      //
+      // Incrustarla con JSON.stringify duplicaba las barras —`C:\\Users\\...`—
+      // y PowerShell no interpreta `\` como escape: la cadena buscada llevaba
+      // barras dobles y no casaba con ninguna línea de comandos real. La
+      // limpieza no mataba nada y lo hacía en silencio, que es peor que no
+      // intentarlo.
+      //
+      // Por entorno tampoco aparece la ruta en la línea de comandos del propio
+      // PowerShell, así que no puede seleccionarse a sí mismo. Aun así se
+      // excluye `$PID` de forma explícita: matarse antes de imprimir el
+      // resultado haría fallar a `execFileSync` y el `catch` devolvería cero
+      // como si no hubiera habido supervivientes.
+      const script = [
+        '$objetivo = $env:MIKA5_TEST_PROFILE_DIR;',
+        'if (-not $objetivo) { 0; exit }',
+        '$p = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |',
+        '  Where-Object { $_.ProcessId -ne $PID -and $_.ParentProcessId -ne $PID -and',
+        '                 $_.CommandLine -and $_.CommandLine.Contains($objetivo) });',
+        'foreach ($proc in $p) { Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue }',
+        '$p.Count'
+      ].join(' ');
+      const salida = exec('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        env: { ...process.env, MIKA5_TEST_PROFILE_DIR: profileDir }
+      });
       return Number(String(salida).trim()) || 0;
     }
     // En POSIX el patrón sigue siendo la ruta única del perfil.

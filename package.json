@@ -23,7 +23,7 @@
     "postinstall": "electron-builder install-app-deps && node scripts/ensure-electron-binary.js",
     "icons:mac": "bash scripts/gen-icns.sh",
     "icons:win": "node scripts/gen-ico.js",
-    "test": "node test/rag.test.js && node test/vision.test.js && npm run test:alibaba && npm run test:provider-capabilities && npm run test:provider-availability && npm run test:provider-credentials && npm run test:provider-registry && npm run test:request-context && npm run test:provider-cancellation && npm run test:ollama-cancellation && npm run test:xlsx-vendored && npm run test:cloud-consent && npm run test:network-security && npm run test:knowledge-cli && npm run test:ci-gates && npm run test:palette && npm run test:visual-ui-shell && npm run test:visual-ui-conversation && npm run test:electron-test-isolation && npm run test:visual-ui-polish && npm run test:ipc-contracts && npm run test:website-i18n",
+    "test": "node test/rag.test.js && node test/vision.test.js && npm run test:alibaba && npm run test:provider-capabilities && npm run test:provider-availability && npm run test:provider-credentials && npm run test:provider-registry && npm run test:request-context && npm run test:provider-cancellation && npm run test:ollama-cancellation && npm run test:xlsx-vendored && npm run test:cloud-consent && npm run test:network-security && npm run test:knowledge-cli && npm run test:ci-gates && npm run test:palette && npm run test:visual-ui-shell && npm run test:visual-ui-conversation && npm run test:electron-test-isolation && npm run test:kill-survivors && npm run test:visual-ui-polish && npm run test:ipc-contracts && npm run test:website-i18n",
     "test:all": "bash scripts/run-stage0a-gates.sh",
     "test:db": "node scripts/run-electron-test.js test/db.test.js",
     "test:rag": "node test/rag.test.js",
@@ -55,7 +55,8 @@
     "test:print-pdf-electron": "node scripts/run-electron-test.js test/print-pdf-electron.test.js",
     "test:provider-selector": "node scripts/run-electron-test.js test/provider-selector.test.js",
     "test:ollama-cancellation": "node test/ollama-cancellation.test.js",
-    "test:xlsx-vendored": "node test/xlsx-vendored.test.js"
+    "test:xlsx-vendored": "node test/xlsx-vendored.test.js",
+    "test:kill-survivors": "node test/kill-survivors.test.js"
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",
@@ -64,7 +65,7 @@
     "marked": "^17.0.4",
     "pdf-parse": "^2.4.5",
     "pdfjs-dist": "^5.4.296",
-    "uuid": "^9.0.1",
+    "uuid": "11.1.1",
     "xlsx": "file:vendor/xlsx-0.20.3.tgz"
   },
   "devDependencies": {

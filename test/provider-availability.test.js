@@ -263,18 +263,26 @@ console.log('\n=== 3. Timeout y abort contra el listModels real de llamacpp ==='
       `${id}: la llamada sin tercer argumento sigue devolviendo { models, probe }`);
   }
 
-  // Sin AbortSignal.any: el combinador es `createAbortContext()`, que ya
-  // existía, está probado y limpia su temporizador y su oyente.
+  // Sin AbortSignal.any en ninguno: el combinador es `createAbortContext()`,
+  // que ya existía y está probado.
   for (const id of CON_SENAL) {
     const modulo = fs.readFileSync(path.join(__dirname, `../src/main/providers/${id}.js`), 'utf8');
     // Sólo líneas de código: los comentarios pueden nombrar lo que se evitó.
     const codigo = modulo.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
     assert(!/AbortSignal\.any/.test(codigo),
       `${id}: no puede depender de AbortSignal.any sin comprobar su disponibilidad`);
-    assert(/abortContext\.cleanup\(\)/.test(modulo),
-      `${id}: debe limpiar temporizador y oyente en cleanup()`);
+    // Quien crea un contexto tiene que liberarlo. `local` no crea ninguno: se
+    // limita a pasar la señal a `ollamaApi`, que es lo que hay que hacer para
+    // no imponerle al catálogo un plazo que v0.2.0 no tenía.
+    if (/createAbortContext\(/.test(codigo)) {
+      assert(/abortContext\.cleanup\(\)/.test(modulo),
+        `${id}: crea un contexto de cancelación y debe liberarlo en cleanup()`);
+    } else {
+      assert(/options\.signal|\{ signal/.test(codigo),
+        `${id}: si no crea contexto, tiene que propagar la señal que recibe`);
+    }
   }
-  check(true, 'ningún adaptador usa AbortSignal.any y los tres limpian sus recursos');
+  check(true, 'ningún adaptador usa AbortSignal.any, y quien crea un contexto lo libera');
 }
 
 console.log('\n=== 4. La evidencia sólo viene de la sonda declarada ===');

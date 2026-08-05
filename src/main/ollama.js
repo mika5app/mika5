@@ -66,10 +66,17 @@ function fetchWithTimeout(url, options = {}) {
       fn();
     }
 
-    // Timeout de seguridad total
+    // Timeout de seguridad total. El código va en el error, no sólo en el
+    // texto: sin él `clasificarError()` no encuentra nada estructurado y un
+    // plazo vencido acababa como PROVIDER_UNKNOWN_ERROR, indistinguible de un
+    // fallo que nadie supo explicar.
     const timeoutId = setTimeout(() => {
       controller.abort();
-      finish(() => reject(new Error('Timeout: La operación excedió 10 minutos')));
+      finish(() => {
+        const vencido = new Error('Timeout: La operación excedió 10 minutos');
+        vencido.code = 'PROVIDER_TIMEOUT';
+        reject(vencido);
+      });
     }, FETCH_TIMEOUT);
 
     const req = http.request(

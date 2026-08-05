@@ -251,27 +251,35 @@ console.log('\n=== La limpieza sólo alcanza a los procesos de esta ejecución =
 // Electron de cualquier otra aplicación del usuario, MIKA5 abierta de verdad
 // incluida. El perfil temporal es único por ejecución: identifica exactamente
 // los procesos propios y ningún otro.
+// Aquí sólo se comprueba la FORMA de la selección. Que mate de verdad al
+// superviviente propio y respete al ajeno se comprueba con procesos reales en
+// test/kill-survivors.test.js: un doble de `exec` que siempre devuelve "2"
+// verifica el texto del comando y nada más — y con la primera versión, que
+// incrustaba la ruta con JSON.stringify y no casaba nunca, ese doble pasaba
+// mientras la limpieza no mataba nada.
 {
   const llamadas = [];
-  const execFalso = (comando, args) => {
-    llamadas.push({ comando, args });
+  const execFalso = (comando, args, opciones) => {
+    llamadas.push({ comando, args, opciones });
     return '2';
   };
 
   const perfilPropio = path.join(os.tmpdir(), 'mika5-electron-test-abc123');
   const matados = launcher.killSurvivors(perfilPropio, { exec: execFalso, log: () => {} });
-  check(matados === 2, `mata los procesos que quedaron de esta ejecución (${matados})`);
+  check(matados === 2, `informa de los procesos terminados (${matados})`);
 
-  // Se mira el argumento crudo, no su serialización: en Windows la ruta viaja
-  // con barras escapadas y compararla ya escapada sería comprobar el escapado,
-  // no la selección.
   const orden = llamadas.flatMap(l => l.args).join(' ');
-  check(orden.includes(path.basename(perfilPropio)),
-    'la selección se hace por el directorio de perfil único de la ejecución');
+  const entorno = llamadas.map(l => (l.opciones && l.opciones.env) || {});
+  check(entorno.some(e => e.MIKA5_TEST_PROFILE_DIR === perfilPropio),
+    'la ruta viaja por entorno, sin escapado que pueda romperla');
+  check(!orden.includes(perfilPropio),
+    'y no se incrusta en el script, donde JSON.stringify duplicaba las barras');
   check(!/Name\s*=\s*.?electron/i.test(orden),
     'no se selecciona por nombre de proceso, que alcanzaría a aplicaciones ajenas');
   check(/Stop-Process -Id|pkill/.test(orden),
     'se termina por identificador de proceso resuelto, no por patrón suelto');
+  check(/ProcessId -ne \$PID/.test(orden),
+    'el PowerShell ejecutor queda excluido: matarse a sí mismo ocultaría el resultado');
 
   // Sin un perfil reconocible no se mata nada: un patrón corto o vacío podría
   // coincidir con cualquier cosa.
@@ -281,6 +289,9 @@ console.log('\n=== La limpieza sólo alcanza a los procesos de esta ejecución =
     check(r === 0 && llamadas.length === 0,
       `un perfil no reconocible (${JSON.stringify(invalido)}) no dispara ninguna terminación`);
   }
+
+  check(fs.existsSync(path.join(ROOT, 'test/kill-survivors.test.js')),
+    'existe la prueba con procesos reales, que es la que demuestra que mata');
 }
 
 console.log(`\n${'='.repeat(40)}`);

@@ -2783,6 +2783,16 @@ function updatePrivacyUI() {
 }
 
 async function switchProvider(providerId) {
+  // El desplegable se cierra AQUÍ, antes de cualquier espera.
+  //
+  // Estaba al final, después de `await loadRuntime()`. Con un proveedor cloud
+  // lento eso son segundos, y en ese hueco el cierre quedaba pendiente: si el
+  // usuario volvía a abrir el menú mientras tanto, se le cerraba solo en cuanto
+  // llegaba la respuesta. Además el menú se quedaba abierto durante toda la
+  // carga, cuando la elección ya estaba hecha.
+  const opts = el('providerOptions');
+  if (opts) opts.style.display = 'none';
+
   try {
     const result = await window.mika5.ai.setProvider(providerId);
     currentProvider = providerId;
@@ -2791,14 +2801,10 @@ async function switchProvider(providerId) {
     // El plan visual pendiente pertenece al proveedor anterior: no se arrastra.
     pendingVisualAction = null;
     providerPrivacy = result.privacy;
-    
+
     updatePrivacyUI();
     await loadRuntime();
-    
-    // Close the provider dropdown
-    const opts = el('providerOptions');
-    if (opts) opts.style.display = 'none';
-    
+
     if (result.privacy === 'cloud') {
       showToast(t('toast.cloudMode'), 'warning');
     } else {

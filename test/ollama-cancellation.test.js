@@ -17,6 +17,8 @@
 
 const assert = require('assert');
 const http = require('http');
+const fs2 = require('fs');
+const path = require('path');
 
 let comprobaciones = 0;
 const fallos = [];
@@ -177,31 +179,34 @@ async function principal() {
       `el socket se cerró: el servidor vio ${estado.abortadas} petición(es) abortada(s)`);
   }
 
-  console.log('\n=== 4. Plazo interno -> PROVIDER_TIMEOUT ===');
+  console.log('\n=== 4. El plazo vencido -> PROVIDER_TIMEOUT, y es el de siempre ===');
   {
-    limpiar();
-    estado.retrasoMs = 5000;
-    // El plazo se acorta con un adaptador equivalente para no esperar 30 s: se
-    // usa el mismo `createAbortContext` que usa el adaptador, con la misma
-    // cadena por debajo.
-    const { createAbortContext } = require('../src/main/provider-runtime');
+    // El adaptador NO impone un plazo propio al catálogo. Una versión anterior
+    // de este cambio ponía 30 s al conjunto, y eso cambiaba el comportamiento
+    // de v0.2.0: el catálogo son N+1 peticiones en serie —una por modelo— y en
+    // una máquina lenta o con muchos modelos volvía vacío donde antes se
+    // esperaba. Aquí se comprueba que ese límite no existe y que el plazo que
+    // queda es el de `fetchWithTimeout`, con su código bien puesto.
+    const fuenteLocal = fs2.readFileSync(path.join(__dirname, '../src/main/providers/local.js'), 'utf8');
+    const codigo = fuenteLocal.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+    check(!/createAbortContext/.test(codigo),
+      'listModels() no crea un plazo propio para el catálogo');
+
+    const fuenteOllama = fs2.readFileSync(path.join(__dirname, '../src/main/ollama.js'), 'utf8');
+    check(/FETCH_TIMEOUT\s*=\s*600000/.test(fuenteOllama),
+      'el plazo por petición sigue siendo el de v0.2.0: diez minutos');
+    check(/vencido\.code\s*=\s*'PROVIDER_TIMEOUT'/.test(fuenteOllama),
+      'y cuando vence lleva código, no sólo un texto que nadie puede clasificar');
+
+    // Que ese error se clasifique bien se comprueba de verdad, no leyendo la
+    // fuente: se construye el mismo error que produce el plazo.
     const { probeDeError } = require('../src/main/provider-errors');
-    const abortContext = createAbortContext(undefined, 300, 'Ollama');
-    const inicio = Date.now();
-    let probe;
-    try {
-      await ollamaApi.tags({ signal: abortContext.signal });
-      probe = null;
-    } catch (e) {
-      probe = probeDeError(abortContext.normalize(e));
-    } finally {
-      abortContext.cleanup();
-    }
-    const transcurrido = Date.now() - inicio;
-    check(probe && probe.errorCode === 'PROVIDER_TIMEOUT',
-      `el plazo propio da ${probe && probe.errorCode}, distinto de una cancelación`);
-    check(probe && probe.reachable === null, 'un plazo vencido tampoco prueba nada del servidor');
-    check(transcurrido < 2000, `y vence en su plazo, no en el del servidor (${transcurrido} ms)`);
+    const vencido = new Error('Timeout: La operación excedió 10 minutos');
+    vencido.code = 'PROVIDER_TIMEOUT';
+    const probe = probeDeError(vencido);
+    check(probe.errorCode === 'PROVIDER_TIMEOUT',
+      `un plazo vencido da ${probe.errorCode}, distinto de una cancelación`);
+    check(probe.reachable === null, 'y tampoco prueba nada del servidor');
   }
 
   console.log('\n=== 5. Los dos códigos salen del MISMO camino ===');
