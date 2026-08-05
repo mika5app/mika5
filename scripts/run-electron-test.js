@@ -79,6 +79,46 @@ function sleepSync(ms) {
 }
 
 /**
+ * Mata los procesos que hayan sobrevivido A ESTA ejecución, y sólo ésos.
+ *
+ * Por qué así: una prueba que agota su plazo o un runner al que matan desde
+ * fuera dejan Electron vivos, y esos huérfanos se acumulan y ralentizan las
+ * siguientes corridas hasta hacerlas fallar. La tentación es barrer por nombre
+ * —«mata todo lo que se llame electron.exe»— y eso mata también el Electron de
+ * cualquier otra aplicación del usuario, incluida MIKA5 abierta de verdad.
+ *
+ * El identificador exacto es el `--user-data-dir`: `createProfileDir()` crea uno
+ * distinto por ejecución con `mkdtemp`, así que aparece en la línea de comandos
+ * de los procesos de esta corrida y de ninguna otra. Se resuelven primero los
+ * PID y se mata por PID, nunca por nombre.
+ */
+function killSurvivors(profileDir, { exec = child_process.execFileSync, log = console.warn } = {}) {
+  // Sin un directorio único no se mata nada: un patrón corto podría coincidir
+  // con procesos ajenos, que es justo lo que se quiere evitar.
+  if (!profileDir || !profileDir.includes(PROFILE_PREFIX)) return 0;
+  try {
+    if (process.platform === 'win32') {
+      const script =
+        `$objetivo = ${JSON.stringify(profileDir)}; ` +
+        '$p = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | ' +
+        'Where-Object { $_.CommandLine -and $_.CommandLine.Contains($objetivo) }); ' +
+        'if ($p.Count) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }; ' +
+        '$p.Count';
+      const salida = exec('powershell', ['-NoProfile', '-NonInteractive', '-Command', script],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+      return Number(String(salida).trim()) || 0;
+    }
+    // En POSIX el patrón sigue siendo la ruta única del perfil.
+    exec('pkill', ['-f', '--', profileDir], { stdio: 'ignore' });
+    return 1;
+  } catch (_) {
+    // `pkill` devuelve 1 cuando no había nada que matar, y no poder limpiar no
+    // puede cambiar el resultado de la prueba.
+    return 0;
+  }
+}
+
+/**
  * En Windows el proceso puede soltar los ficheros del perfil un instante
  * después de salir: un único intento de borrado falla con EBUSY/EPERM. Se
  * reintenta un número acotado de veces y, si aun así no se puede, se avisa sin
@@ -134,6 +174,11 @@ function runElectronTest(testFile, extraArgs = [], deps = {}) {
     }
     return typeof resultado?.status === 'number' ? resultado.status : 1;
   } finally {
+    // Antes de borrar: los supervivientes de esta corrida mantienen abiertos
+    // los ficheros del perfil, así que matarlos primero también evita los
+    // reintentos por EBUSY de aquí abajo.
+    const restantes = killSurvivors(profileDir, { log });
+    if (restantes > 0) log(`run-electron-test: ${restantes} proceso(s) de esta ejecución seguían vivos; terminados`);
     removeProfileDir(profileDir, { rm, sleep, log });
   }
 }
@@ -159,6 +204,7 @@ module.exports = {
   createProfileDir,
   resolveElectronBinary,
   removeProfileDir,
+  killSurvivors,
   runElectronTest,
   main
 };

@@ -242,6 +242,47 @@ check(nombresDeclarados === 8 && comandosDeclarados === 8,
 check(fs.existsSync(path.join(ROOT, 'scripts/run-electron-test.js')),
   'el lanzador existe en la ruta que declaran los scripts');
 
+// =====================================================================
+console.log('\n=== La limpieza sólo alcanza a los procesos de esta ejecución ===');
+// =====================================================================
+
+// Una prueba que agota su plazo deja Electron vivos, y esos huérfanos hunden
+// las corridas siguientes. Barrer por nombre lo arregla y mata de paso el
+// Electron de cualquier otra aplicación del usuario, MIKA5 abierta de verdad
+// incluida. El perfil temporal es único por ejecución: identifica exactamente
+// los procesos propios y ningún otro.
+{
+  const llamadas = [];
+  const execFalso = (comando, args) => {
+    llamadas.push({ comando, args });
+    return '2';
+  };
+
+  const perfilPropio = path.join(os.tmpdir(), 'mika5-electron-test-abc123');
+  const matados = launcher.killSurvivors(perfilPropio, { exec: execFalso, log: () => {} });
+  check(matados === 2, `mata los procesos que quedaron de esta ejecución (${matados})`);
+
+  // Se mira el argumento crudo, no su serialización: en Windows la ruta viaja
+  // con barras escapadas y compararla ya escapada sería comprobar el escapado,
+  // no la selección.
+  const orden = llamadas.flatMap(l => l.args).join(' ');
+  check(orden.includes(path.basename(perfilPropio)),
+    'la selección se hace por el directorio de perfil único de la ejecución');
+  check(!/Name\s*=\s*.?electron/i.test(orden),
+    'no se selecciona por nombre de proceso, que alcanzaría a aplicaciones ajenas');
+  check(/Stop-Process -Id|pkill/.test(orden),
+    'se termina por identificador de proceso resuelto, no por patrón suelto');
+
+  // Sin un perfil reconocible no se mata nada: un patrón corto o vacío podría
+  // coincidir con cualquier cosa.
+  for (const invalido of ['', null, undefined, path.join(os.tmpdir(), 'otra-cosa'), '/']) {
+    llamadas.length = 0;
+    const r = launcher.killSurvivors(invalido, { exec: execFalso, log: () => {} });
+    check(r === 0 && llamadas.length === 0,
+      `un perfil no reconocible (${JSON.stringify(invalido)}) no dispara ninguna terminación`);
+  }
+}
+
 console.log(`\n${'='.repeat(40)}`);
 console.log(`Electron test isolation tests passed (${passed} comprobaciones)`);
 console.log(`${'='.repeat(40)}`);
