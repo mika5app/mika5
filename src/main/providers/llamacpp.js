@@ -70,12 +70,18 @@ const adaptadorLlamacpp = {
   // El fallo se sigue capturando —la lista vacía es una respuesta válida—,
   // pero ahora se conserva POR QUÉ está vacía. Antes se perdía y una caída
   // de red era indistinguible de un servidor sin modelos cargados.
-  async listModels() {
+  // Tercer parámetro opcional y retrocompatible. El plazo interno de tres
+  // segundos se conserva; ahora convive con una cancelación externa y las dos
+  // se distinguen: PROVIDER_ABORTED frente a PROVIDER_TIMEOUT.
+  async listModels(_apiKey, _config, options = {}) {
+    const abortContext = createAbortContext(options.signal, 3000, 'llama.cpp');
     let res;
     try {
-      res = await fetch(`${this.baseUrl}/models`, { signal: AbortSignal.timeout(3000) });
+      res = await fetch(`${this.baseUrl}/models`, { signal: abortContext.signal });
     } catch (error) {
-      return { models: [], probe: probeDeError(error) };
+      return { models: [], probe: probeDeError(abortContext.normalize(error)) };
+    } finally {
+      abortContext.cleanup();
     }
     if (!res.ok) {
       return { models: [], probe: probeDeError(errorDeRespuesta(res.status, 'llama.cpp')) };

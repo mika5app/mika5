@@ -191,22 +191,87 @@ console.log('\n=== 3. Timeout y abort contra el listModels real de llamacpp ==='
   check(abortado.errorCode === 'PROVIDER_ABORTED' && abortado.reachable === null,
     'un abort no prueba nada sobre el servidor: reachable queda en null');
 
-  // Corrección de una afirmación anterior. La prueba de arriba ejercita el
-  // CLASIFICADOR, no una cancelación real: hoy NINGÚN `listModels()` acepta
-  // una señal externa, así que `PROVIDER_ABORTED` es inalcanzable por esa vía.
-  // Se deja constatado para que deje de serlo el día que un adaptador la
-  // admita, en lugar de dar por probado algo que no ocurre.
-  const conSenal = Object.entries(PROVIDERS).filter(([, c]) => {
-    const fuente = String(c.listModels);
-    const firma = fuente.slice(0, fuente.indexOf(')') + 1);
-    return /signal|abortSignal|\bopts\b|\boptions\b/i.test(firma);
-  });
-  check(conSenal.length === 0,
-    `ningún adaptador admite todavía señal externa en listModels() (${conSenal.map(([i]) => i).join(', ') || 'ninguno'})`);
-  check(PROVIDERS.local.listModels.length === 0 && PROVIDERS.llamacpp.listModels.length === 0,
-    'los dos runtimes locales declaran listModels() sin parámetros: no hay dónde pasar una señal');
-  check(String(PROVIDERS.llamacpp.listModels).includes('AbortSignal.timeout'),
-    'la única cancelación que existe hoy es el timeout interno de llama.cpp, que produce PROVIDER_TIMEOUT');
+  // Cancelación REAL atravesando listModels() de un adaptador de red. Antes
+  // esto no se podía probar: ningún adaptador aceptaba señal externa y
+  // `PROVIDER_ABORTED` era inalcanzable por esa vía.
+  const CON_SENAL = ['openai', 'groq', 'llamacpp'];
+  for (const id of CON_SENAL) {
+    const firma = String(PROVIDERS[id].listModels);
+    check(/options\s*=\s*\{\}/.test(firma.slice(0, firma.indexOf(')') + 1)),
+      `${id}: listModels() acepta un tercer parámetro de opciones`);
+  }
+  for (const id of ['anthropic', 'moonshot', 'alibaba']) {
+    const firma = String(PROVIDERS[id].listModels);
+    check(!/options/.test(firma.slice(0, firma.indexOf(')') + 1)),
+      `${id}: no se le añade una señal ficticia, porque no hace red`);
+  }
+
+  // Cancelación externa: el servidor tarda, se aborta desde fuera.
+  srv.guionizar({ status: 200, cuerpo: MODELOS_HTTP, retrasoMs: 5000 });
+  {
+    const control = new AbortController();
+    setTimeout(() => control.abort(), 150);
+    const inicio = Date.now();
+    const r = await conAdaptador('openai', { baseUrl: BASE_SINTETICA }, () =>
+      PROVIDERS.openai.listModels('clave', undefined, { signal: control.signal }));
+    check(r.probe.errorCode === 'PROVIDER_ABORTED',
+      `cancelar desde fuera atraviesa listModels() y da ${r.probe.errorCode}`);
+    check(r.probe.reachable === null,
+      'una cancelación no prueba nada sobre el servidor');
+    check(Date.now() - inicio < 3000,
+      'y corta de verdad, sin esperar a que el servidor responda');
+  }
+
+  // Plazo interno: nadie cancela, el servidor no contesta a tiempo.
+  {
+    const inicio = Date.now();
+    const r = await conAdaptador('llamacpp', { baseUrl: BASE_SINTETICA }, () =>
+      PROVIDERS.llamacpp.listModels(undefined, undefined, {}));
+    check(r.probe.errorCode === 'PROVIDER_TIMEOUT',
+      `el plazo interno da ${r.probe.errorCode}, distinto de una cancelación`);
+    check(Date.now() - inicio < 4500, 'y vence en su propio plazo, no en el del servidor');
+  }
+
+  // La distinción es el punto: mismo camino, dos códigos según quién corte.
+  {
+    const control = new AbortController();
+    setTimeout(() => control.abort(), 100);
+    const cancelado = await conAdaptador('llamacpp', { baseUrl: BASE_SINTETICA }, () =>
+      PROVIDERS.llamacpp.listModels(undefined, undefined, { signal: control.signal }));
+    check(cancelado.probe.errorCode === 'PROVIDER_ABORTED',
+      'el mismo adaptador da ABORTED cuando corta el usuario y TIMEOUT cuando vence el plazo');
+  }
+
+  // Una señal ya abortada corta antes de salir a la red.
+  {
+    const yaAbortada = AbortSignal.abort();
+    const r = await conAdaptador('openai', { baseUrl: BASE_SINTETICA }, () =>
+      PROVIDERS.openai.listModels('clave', undefined, { signal: yaAbortada }));
+    check(r.probe.errorCode === 'PROVIDER_ABORTED',
+      'una señal ya abortada no llega a hacer la petición');
+  }
+
+  // Retrocompatibilidad: las llamadas de dos argumentos siguen funcionando.
+  srv.guionizar({ status: 200, cuerpo: MODELOS_HTTP });
+  for (const id of CON_SENAL) {
+    const r = await conAdaptador(id, { baseUrl: BASE_SINTETICA }, () =>
+      PROVIDERS[id].listModels(id === 'llamacpp' ? undefined : 'clave'));
+    check(r && Array.isArray(r.models) && r.probe,
+      `${id}: la llamada sin tercer argumento sigue devolviendo { models, probe }`);
+  }
+
+  // Sin AbortSignal.any: el combinador es `createAbortContext()`, que ya
+  // existía, está probado y limpia su temporizador y su oyente.
+  for (const id of CON_SENAL) {
+    const modulo = fs.readFileSync(path.join(__dirname, `../src/main/providers/${id}.js`), 'utf8');
+    // Sólo líneas de código: los comentarios pueden nombrar lo que se evitó.
+    const codigo = modulo.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+    assert(!/AbortSignal\.any/.test(codigo),
+      `${id}: no puede depender de AbortSignal.any sin comprobar su disponibilidad`);
+    assert(/abortContext\.cleanup\(\)/.test(modulo),
+      `${id}: debe limpiar temporizador y oyente en cleanup()`);
+  }
+  check(true, 'ningún adaptador usa AbortSignal.any y los tres limpian sus recursos');
 }
 
 console.log('\n=== 4. La evidencia sólo viene de la sonda declarada ===');

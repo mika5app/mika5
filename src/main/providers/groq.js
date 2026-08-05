@@ -80,12 +80,16 @@ const adaptadorGroq = {
   // deliberada y se conserva, pero la sonda registra qué ocurrió de verdad:
   // sin ella, un catálogo de respaldo era indistinguible de uno obtenido por
   // red y se leía como prueba de que el servidor respondía.
-  async listModels(apiKey) {
+  // Tercer parámetro opcional y retrocompatible. Con `options.signal`, una
+  // cancelación externa da PROVIDER_ABORTED y el plazo interno PROVIDER_TIMEOUT.
+  async listModels(apiKey, _config, options = {}) {
     if (!apiKey) return { models: [], probe: probeNoIntentada() };
     let probe = probeNoIntentada();
+    const abortContext = createAbortContext(options.signal, 30000, 'Groq');
     try {
       const res = await fetch(`${this.baseUrl}/models`, {
-        headers: { 'Authorization': `Bearer ${apiKey}` }
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+        signal: abortContext.signal
       });
       if (res.ok) {
         // Mismo contrato que el resto: un 2xx ilegible conserva la evidencia
@@ -109,7 +113,9 @@ const adaptadorGroq = {
         probe = probeDeError(errorDeRespuesta(res.status, 'Groq'));
       }
     } catch (error) {
-      probe = probeDeError(error);
+      probe = probeDeError(abortContext.normalize(error));
+    } finally {
+      abortContext.cleanup();
     }
     // Fallback estático si el endpoint falla
     return {

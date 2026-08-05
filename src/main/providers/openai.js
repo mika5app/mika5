@@ -81,15 +81,24 @@ const adaptadorOpenai = {
   // sobre conectividad y credencial: nadie la deduce del tamaño del catálogo.
   // Un 200 con lista vacía prueba que el servidor respondió y aceptó la
   // clave, y aun así no deja nada utilizable.
-  async listModels(apiKey) {
+  // Tercer parámetro opcional y retrocompatible: las llamadas existentes sin
+  // `options` siguen funcionando igual. Con `options.signal`, una cancelación
+  // externa produce PROVIDER_ABORTED y el plazo interno produce
+  // PROVIDER_TIMEOUT: `createAbortContext()` distingue los dos y limpia su
+  // temporizador y su oyente en `cleanup()`. No se usa AbortSignal.any.
+  async listModels(apiKey, _config, options = {}) {
     if (!apiKey) return { models: [], probe: probeNoIntentada() };
+    const abortContext = createAbortContext(options.signal, this.timeout || 30000, 'OpenAI');
     let res;
     try {
       res = await fetch(`${this.baseUrl}/models`, {
-        headers: { 'Authorization': `Bearer ${apiKey}` }
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+        signal: abortContext.signal
       });
     } catch (error) {
-      return { models: [], probe: probeDeError(error) };
+      return { models: [], probe: probeDeError(abortContext.normalize(error)) };
+    } finally {
+      abortContext.cleanup();
     }
     if (!res.ok) {
       return {

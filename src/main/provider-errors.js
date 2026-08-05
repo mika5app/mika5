@@ -36,7 +36,9 @@ const CODIGOS_DE_TRANSPORTE = new Set([
 ]);
 
 const CODIGOS_DE_TIMEOUT = new Set([
-  'ETIMEDOUT', 'ESOCKETTIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT'
+  'ETIMEDOUT', 'ESOCKETTIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT',
+  // El que produce createAbortContext() al vencer su propio plazo.
+  'PROVIDER_TIMEOUT'
 ]);
 
 /** Error de proveedor con clasificación explícita. */
