@@ -163,13 +163,26 @@ async function esperar(win, expresion, ms = 8000) {
 
 const ev = (win, codigo) => win.webContents.executeJavaScript(`(async () => { ${codigo} })()`, true);
 
+// Desacuerdo tolerado entre `getContentSize()` y `window.innerHeight`.
+//
+// Con escalado fraccionario los dos redondean el mismo tamaño físico de forma
+// distinta y se quedan separados PARA SIEMPRE, no un instante: medido a
+// scaleFactor 1.25, pedir 222 px deja contenido 185 e innerHeight 186. Exigir
+// igualdad exacta colgaba la espera hasta agotar el plazo.
+//
+// El margen sigue siendo diminuto frente a lo que esta espera existe para
+// detectar: cuando Chromium deja de propagar el tamaño a una ventana tapada, la
+// diferencia medida fue de 80 px, no de uno.
+const DESFASE_DPI = 2;
+
 /**
  * Redimensiona y espera a que Electron TERMINE.
  *
  * Un plazo fijo no vale: el tamaño exterior, el de contenido y el
  * `window.innerHeight` del renderer no cambian en el mismo instante, y medir
- * en medio da la geometría de la ventana anterior. Se espera a que el
- * renderer coincida con el tamaño de contenido y a que deje de moverse.
+ * en medio da la geometría de la ventana anterior. Se espera a que el renderer
+ * concuerde con el tamaño de contenido —dentro del desfase de redondeo por
+ * DPI— y a que deje de moverse.
  *
  * Devuelve el tamaño EXTERIOR resultante, que no tiene por qué ser el pedido:
  * si se pide menos que `minHeight`, Electron recorta y aquí se ve.
@@ -184,7 +197,7 @@ async function redimensionar(win, ancho, alto) {
     const [, exterior] = win.getSize();
     const interior = await win.webContents.executeJavaScript('window.innerHeight', true);
     ultimo = { exterior, contenido, interior };
-    if (interior === contenido && interior === previo) return ultimo;
+    if (Math.abs(interior - contenido) <= DESFASE_DPI && interior === previo) return ultimo;
     previo = interior;
   }
   throw new Error(`el redimensionado a ${alto}px no se estabilizó: ${JSON.stringify(ultimo)}`);
@@ -805,13 +818,28 @@ async function ejecutar(win) {
   const MARGEN = 16;
 
   // Se pide una ventana muy por debajo del mínimo. Electron tiene que recortar.
+  //
+  // La relación es `>=`, no `===`, y no por comodidad: `minHeight` se declara en
+  // píxeles independientes de dispositivo y el mínimo se impone en píxeles
+  // FÍSICOS, así que con escalado fraccionario el recorte cae en el primer valor
+  // representable por encima del declarado. Medido a scaleFactor 1.25: pedir 100
+  // devuelve 222 exteriores para un `minHeight` de 220. Exigir 220 exacto ataba
+  // la prueba a una pantalla sin escalar.
+  //
+  // Lo que no se relaja es la garantía: la altura interior resultante, sea la
+  // que sea, tiene que dar de sí para una fila entera, y eso lo comprueba el
+  // bucle de abajo midiendo geometría real.
   const minima = await redimensionar(win, anchoOriginal, 100);
-  check(minima.exterior === ALTO_MINIMO_VENTANA,
+  const dpr = await win.webContents.executeJavaScript('window.devicePixelRatio', true);
+  check(minima.exterior >= ALTO_MINIMO_VENTANA,
     `Electron aplica la altura mínima declarada (pedido 100, resultante ${minima.exterior}, minHeight ${ALTO_MINIMO_VENTANA})`);
-  check(minima.interior > 0 && minima.interior < ALTO_MINIMO_VENTANA,
+  check(minima.exterior > 100,
+    `la ventana no baja de lo pedido por debajo del mínimo (pedido 100, resultante ${minima.exterior})`);
+  check(minima.interior > 0 && minima.interior < minima.exterior,
     `la altura interior efectiva del mínimo es ${minima.interior}px (exterior ${minima.exterior}px, marco ${minima.exterior - minima.interior}px)`);
-  console.log(`provider-selector: altura mínima soportada ${ALTO_MINIMO_VENTANA}px exteriores `
-    + `→ window.innerHeight ${minima.interior}px (marco ${minima.exterior - minima.interior}px)`);
+  console.log(`provider-selector: mínimo declarado ${ALTO_MINIMO_VENTANA}px → ventana real `
+    + `${minima.exterior}px exteriores → window.innerHeight ${minima.interior}px `
+    + `(marco ${minima.exterior - minima.interior}px, devicePixelRatio ${dpr})`);
 
   // La primera altura de la lista es la mínima EFECTIVA, la que Electron dejó,
   // no una que se dé por supuesta. Las demás son alturas mayores
