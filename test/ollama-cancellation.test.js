@@ -229,11 +229,21 @@ async function principal() {
     check(estado.abortadas >= 1,
       `al vencer se cierra el socket: el servidor lo vio (${estado.abortadas})`);
 
-    // El texto nombra los diez minutos reales de producción, no el plazo corto
-    // de la prueba: un mensaje que dijera otra cosa en el log de un usuario
-    // sería desinformación.
-    check(/10 minutos/.test(lanzado.message),
-      `el mensaje nombra el plazo de producción ("${lanzado.message}")`);
+    // El mensaje describe el plazo QUE VENCIÓ, no la constante. Antes decía
+    // siempre «10 minutos», también tras un plazo de 300 ms: un texto que no
+    // coincide con el hecho es peor que no tenerlo.
+    check(/300 ms/.test(lanzado.message),
+      `el mensaje nombra el plazo real que venció ("${lanzado.message}")`);
+
+    // Y en producción, donde el plazo es la constante, el texto es el de
+    // siempre: la opción de prueba no cambia lo que lee el usuario.
+    const { fetchWithTimeout: fwt } = require('../src/main/ollama');
+    const fuente = String(fwt);
+    check(/describirPlazo\(plazoMs\)/.test(fuente),
+      'el texto se compone del plazo vencido, no de una constante fija');
+    const { describirPlazo } = require('../src/main/ollama');
+    check(typeof describirPlazo === 'function' && describirPlazo(600000) === '10 minutos',
+      `con el plazo de producción el mensaje sigue diciendo «10 minutos» (${typeof describirPlazo === 'function' ? describirPlazo(600000) : 'no exportada'})`);
   }
 
   console.log('\n=== 5. Los dos códigos salen del MISMO camino ===');
