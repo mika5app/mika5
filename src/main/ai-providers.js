@@ -747,10 +747,14 @@ function impideUso(errorCode) {
  * Log del proceso principal. El detalle saneado se queda aquí: al renderer
  * sólo cruzan `errorCode` y `httpStatus`, nunca el texto de un error.
  */
-function registrarFalloDeProveedor(providerId, operacion, error) {
+// `codigoDeclarado` gana cuando el adaptador ya clasificó el fallo: es quien
+// tuvo delante el error estructurado. Volver a deducirlo aquí, sobre lo que
+// haya sobrevivido, escribía PROVIDER_UNKNOWN_ERROR en el registro mientras el
+// estado calculado decía otra cosa — dos versiones del mismo fallo.
+function registrarFalloDeProveedor(providerId, operacion, error, codigoDeclarado = null) {
   const d = describirError(error);
   const detalle = d.logMessage ? ` — ${d.logMessage}` : '';
-  console.warn(`[provider:${providerId}] ${operacion}: ${d.errorCode}${detalle}`);
+  console.warn(`[provider:${providerId}] ${operacion}: ${codigoDeclarado || d.errorCode}${detalle}`);
 }
 
 /**
@@ -1372,11 +1376,17 @@ class AIProviderManager {
         sonda = { ok: false, error };
       }
       if (sonda && sonda.ok) {
-        incorporar(probeDeExito({ authenticated: null }));
+        // La sonda puede declarar su propia evidencia; si no, se asume lo
+        // mínimo que prueba un `ok`: contestó, y no dijo nada de credencial.
+        incorporar((sonda && sonda.probe) || probeDeExito({ authenticated: null }));
       } else {
         const fallo = (sonda && (sonda.error || sonda.message)) || null;
-        registrarFalloDeProveedor(providerId, 'status', fallo);
-        const probe = probeDeError(fallo);
+        // El adaptador puede haber clasificado ya el fallo con los campos
+        // estructurados que tenía delante. Reclasificar aquí a partir de lo que
+        // quede sería tirar esa evidencia: un mensaje de texto no distingue un
+        // ECONNREFUSED de un 503.
+        const probe = (sonda && sonda.probe) || probeDeError(fallo);
+        registrarFalloDeProveedor(providerId, 'status', fallo, probe.errorCode);
         // Una sonda que falla sin código reconocible sigue significando que no
         // se pudo hablar con el servidor: para eso está la sonda.
         if (probe.reachable === null) probe.reachable = false;

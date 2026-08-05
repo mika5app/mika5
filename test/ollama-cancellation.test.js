@@ -101,6 +101,36 @@ async function principal() {
   const { adaptadorLocal } = require('../src/main/providers/local');
   const { probeOllamaVision } = require('../src/main/provider-runtime');
 
+  console.log('\n=== 0. La base sólo puede apuntar a bucle local ===');
+  {
+    const { resolverBaseOllama } = require('../src/main/ollama');
+    check(resolverBaseOllama(undefined) === 'http://127.0.0.1:11434',
+      'sin variable, la base es exactamente la de siempre');
+    check(resolverBaseOllama('') === 'http://127.0.0.1:11434',
+      'una variable vacía tampoco cambia el valor por defecto');
+    for (const permitido of ['http://127.0.0.1:9999', 'http://localhost:1234', 'http://[::1]:8080']) {
+      check(resolverBaseOllama(permitido).startsWith('http://'), `se admite ${permitido}`);
+    }
+    // Esto es lo que de verdad se está impidiendo: que una variable de entorno
+    // baste para mandar a un host remoto todo lo que el usuario cree que no
+    // sale de su máquina — prompts, adjuntos y contexto RAG. El modo local es
+    // privado por definición.
+    const PROHIBIDOS = [
+      'http://evil.example.com:11434',
+      'http://8.8.8.8:11434',
+      'http://192.168.1.50:11434',
+      'http://127.0.0.1.evil.com:11434',
+      'https://127.0.0.1:11434',
+      'file:///etc/passwd',
+      'no-es-una-url'
+    ];
+    for (const prohibido of PROHIBIDOS) {
+      let rechazado = false;
+      try { resolverBaseOllama(prohibido); } catch (_) { rechazado = true; }
+      check(rechazado, `se rechaza ${prohibido}`);
+    }
+  }
+
   console.log('\n=== 1. La base es la del servidor sintético ===');
   {
     estado.retrasoMs = 0;

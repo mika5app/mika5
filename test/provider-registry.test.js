@@ -256,6 +256,76 @@ console.log('\n=== 10. Los siete incorporados están registrados ===');
     check(PROVIDERS[id] === registroDeProveedores.getAdapter(id),
       `${id}: PROVIDERS y el registro apuntan al mismo objeto`);
   }
+
+  // --- Equivalencia EXACTA campo a campo -----------------------------------
+  //
+  // La migración cambió de dónde salen los metadatos: `getProvider()` devolvía
+  // `adapter.name`/`adapter.privacy`/`adapter.requiresKey` y ahora devuelve
+  // `descriptor.displayName` y `descriptor.traits.*`. Que el registro se
+  // construya del adaptador no basta como argumento: `requiresKey` se normaliza
+  // con `=== true` al registrar, así que un adaptador que declarase `undefined`
+  // o `1` daría un valor distinto por cada vía. Aquí se comparan los valores
+  // reales, uno a uno, en vez de razonar sobre cómo se construyen.
+  for (const id of IDS) {
+    const adaptador = PROVIDERS[id];
+    const descriptor = registroDeProveedores.get(id);
+
+    check(descriptor.displayName === adaptador.name,
+      `${id}: displayName es exactamente adapter.name (${JSON.stringify(descriptor.displayName)} === ${JSON.stringify(adaptador.name)})`);
+    check(descriptor.traits.privacy === adaptador.privacy,
+      `${id}: traits.privacy es exactamente adapter.privacy (${descriptor.traits.privacy} === ${adaptador.privacy})`);
+    check(descriptor.traits.requiresKey === adaptador.requiresKey,
+      `${id}: traits.requiresKey es exactamente adapter.requiresKey (${descriptor.traits.requiresKey} === ${adaptador.requiresKey})`);
+    check(descriptor.traits.visualCapabilities === adaptador.visualCapabilities,
+      `${id}: traits.visualCapabilities es el mismo objeto que el del adaptador`);
+
+    // Y el tipo importa tanto como el valor: `requiresKey` se normaliza al
+    // registrar, así que un adaptador que no lo declarase booleano rompería la
+    // equivalencia sin que la comparación estricta de arriba lo dijese claro.
+    check(typeof adaptador.requiresKey === 'boolean',
+      `${id}: el adaptador declara requiresKey como booleano, no como valor coercible`);
+  }
+
+  // Lo que el usuario ve: `getProvider()` tiene que devolver, campo a campo, lo
+  // mismo que devolvía leyendo el adaptador directamente.
+  {
+    const { AIProviderManager } = require('../src/main/ai-providers');
+    const almacen = new Map();
+    const dbFalsa = {
+      prepare: (sql) => ({
+        get: (clave) => (almacen.has(clave) ? { value: almacen.get(clave) } : undefined),
+        all: () => [...almacen].map(([key, value]) => ({ key, value })),
+        run: (clave, valor) => { almacen.set(clave, valor); }
+      })
+    };
+    const gestor = new AIProviderManager(dbFalsa);
+    for (const id of IDS) {
+      gestor.setProvider(id);
+      const visto = gestor.getProvider();
+      const adaptador = PROVIDERS[id];
+      check(visto.id === id && visto.name === adaptador.name
+        && visto.privacy === adaptador.privacy
+        && visto.requiresKey === adaptador.requiresKey,
+        `${id}: getProvider() devuelve los mismos valores que el adaptador (${visto.name} / ${visto.privacy} / ${visto.requiresKey})`);
+      check(visto.privacyLabel === (adaptador.privacy === 'private' ? 'Privado' : 'Cloud'),
+        `${id}: la etiqueta de privacidad no cambió (${visto.privacyLabel})`);
+      // `setProvider()` devuelve la privacidad por su cuenta: también tiene que
+      // coincidir, porque es la que el renderer usa para pintar el indicador.
+      const devuelto = gestor.setProvider(id);
+      check(devuelto.privacy === adaptador.privacy,
+        `${id}: setProvider() devuelve la misma privacidad (${devuelto.privacy})`);
+    }
+
+    // El cambio observable que sí hubo, declarado: antes `setApiKey()` con un
+    // proveedor inexistente reventaba con TypeError al leer `.requiresKey` de
+    // `undefined`; ahora rechaza con un error propio. Se comprueba para que
+    // quede escrito, no por accidente.
+    let fallo = null;
+    try { gestor.setApiKey('proveedor-que-no-existe', 'x'); } catch (e) { fallo = e; }
+    check(fallo instanceof Error && !(fallo instanceof TypeError)
+      && /no válido/i.test(fallo.message),
+      `setApiKey() con proveedor desconocido da un error propio, no un TypeError (${fallo && fallo.message})`);
+  }
 }
 
 console.log('\n=== 11. validarAdaptador() es reutilizable y no muta ===');

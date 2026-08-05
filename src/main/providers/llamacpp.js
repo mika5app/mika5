@@ -111,13 +111,23 @@ const adaptadorLlamacpp = {
     };
   },
 
+  // La sonda devuelve EVIDENCIA, no una frase. Antes tragaba el error real y
+  // devolvía texto suelto: `clasificarError()` no encuentra nada estructurado
+  // en una cadena, así que todo caía en PROVIDER_UNKNOWN_ERROR y el registro
+  // decía «no verificado» donde lo cierto era «no hay nadie escuchando en el
+  // 8080». Distinguir esas dos cosas es justo para lo que existen los ocho
+  // estados. El HTTP no-2xx tampoco es lo mismo: prueba que el servidor está
+  // ahí, y su código tiene que llegar entero al contrato.
   async status() {
     try {
       const res = await fetch(`${this.baseUrl}/models`, { signal: AbortSignal.timeout(3000) });
-      if (res.ok) return { ok: true, message: 'llama.cpp server activo' };
-      return { ok: false, message: 'llama.cpp responde con error' };
-    } catch (_) {
-      return { ok: false, message: 'llama.cpp no está corriendo. Inicia con: ./server -m modelo.gguf --port 8080' };
+      if (res.ok) return { ok: true, probe: probeDeExito({ authenticated: null }) };
+      const error = errorDeRespuesta(res, 'llama.cpp');
+      return { ok: false, error, probe: probeDeError(error) };
+    } catch (error) {
+      // ECONNREFUSED, timeout o fallo de transporte: el error se pasa tal cual
+      // para que lo clasifique quien sabe hacerlo.
+      return { ok: false, error, probe: probeDeError(error) };
     }
   }
 };

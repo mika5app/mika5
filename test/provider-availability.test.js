@@ -483,8 +483,12 @@ console.log('\n=== 10. El renderer traduce desde el código, no desde el proveed
 
 console.log('\n=== 10 bis. loadRuntime() sólo puebla el selector con canAttempt ===');
 {
-  // Se ejecuta el `loadRuntime()` real del renderer, no una copia ni una
-  // aserción sobre su texto: lo que se comprueba es la decisión que toma.
+  // Alcance de esta prueba, para no venderla por más de lo que es: se extrae
+  // el CUERPO real de `loadRuntime()` de app.js y se ejecuta con `new Function`
+  // contra un DOM simulado. El código es el de producción y la decisión que se
+  // mide es la suya, pero el entorno no lo es: no hay Chromium, ni maquetación,
+  // ni IPC. Que el desplegable se vea y se pueda pulsar se comprueba en
+  // test/provider-selector.test.js, que sí corre en Electron.
   //
   // La regresión concreta: la condición era
   //   `disp.canAttempt || (disp.configured && disp.reachable !== false
@@ -510,11 +514,24 @@ console.log('\n=== 10 bis. loadRuntime() sólo puebla el selector con canAttempt
       }
       return nodos.get(id);
     };
+    // `t()` devuelve el diccionario español de verdad, no la clave: si no, la
+    // comprobación del texto mostrado sólo verificaría que se llamó a t(), que
+    // es exactamente lo que no vale como evidencia.
+    const diccionario = require('./helpers/renderer-source') && (() => {
+      const fuenteI18n = fs.readFileSync(path.join(__dirname, '../src/renderer/i18n.js'), 'utf8');
+      const traducciones = new Function(`${fuenteI18n}\nreturn MIKA5_TRANSLATIONS;`)();
+      return traducciones.es;
+    })();
     return {
       nodos,
+      diccionario,
       globales: {
         el: nodo,
-        t: (clave) => clave,
+        t: (clave) => {
+          const texto = diccionario[clave];
+          if (texto === undefined) throw new Error(`clave sin traducción: ${clave}`);
+          return texto;
+        },
         document: {
           createElement: () => ({
             value: '', textContent: '', dataset: {}, appendChild() {}
@@ -536,16 +553,21 @@ console.log('\n=== 10 bis. loadRuntime() sólo puebla el selector con canAttempt
   };
 
   const ejecutarLoadRuntime = async (disp) => {
-    const { nodos, globales } = construirEntorno(disp);
+    const { nodos, globales, diccionario } = construirEntorno(disp);
     const nombres = Object.keys(globales);
     const cuerpo = renderer.slice('loadRuntime');
     const fabrica = new Function(...nombres, `${cuerpo}\nreturn loadRuntime;`);
     await fabrica(...nombres.map(n => globales[n]))();
     const select = nodos.get('modelSelect');
+    const pill = nodos.get('rtStatus');
     return {
       opciones: select.hijos.length,
       valores: select.hijos.map(h => h.value),
-      deshabilitado: select.disabled === true
+      textos: select.hijos.map(h => h.textContent),
+      deshabilitado: select.disabled === true,
+      estadoPill: pill.dataset.providerState,
+      textoPill: pill.textContent,
+      diccionario
     };
   };
 
@@ -560,29 +582,64 @@ console.log('\n=== 10 bis. loadRuntime() sólo puebla el selector con canAttempt
   check(intentable.opciones === 2 && !intentable.deshabilitado,
     `canAttempt ofrece el catálogo y deja elegir (${intentable.opciones} opciones, deshabilitado=${intentable.deshabilitado})`);
 
-  // Los tres estados de la regresión: servidor vivo, credencial válida, y aun
-  // así el proveedor no se puede usar.
-  const NO_UTILIZABLES = [
-    { uiState: 'rate-limited', errorCode: 'PROVIDER_RATE_LIMIT', httpStatus: 429 },
-    { uiState: 'authorization-forbidden', errorCode: 'PROVIDER_FORBIDDEN', httpStatus: 403 },
-    { uiState: 'provider-error', errorCode: 'PROVIDER_HTTP_500', httpStatus: 500 }
+  // LOS OCHO estados del contrato, no una muestra. Cada uno declara si puede
+  // intentarse, y de ahí sale lo que ve el usuario.
+  const OCHO_ESTADOS = [
+    { uiState: 'connected', canAttempt: true, errorCode: null, httpStatus: null,
+      configured: true, reachable: true, authenticated: true },
+    { uiState: 'unknown', canAttempt: true, errorCode: null, httpStatus: null,
+      configured: true, reachable: null, authenticated: null },
+    { uiState: 'offline', canAttempt: false, errorCode: 'PROVIDER_TRANSPORT_UNREACHABLE', httpStatus: null,
+      configured: true, reachable: false, authenticated: null },
+    { uiState: 'configuration-required', canAttempt: false, errorCode: 'PROVIDER_NOT_CONFIGURED', httpStatus: null,
+      configured: false, reachable: null, authenticated: null },
+    { uiState: 'authentication-rejected', canAttempt: false, errorCode: 'PROVIDER_UNAUTHORIZED', httpStatus: 401,
+      configured: true, reachable: true, authenticated: false },
+    { uiState: 'authorization-forbidden', canAttempt: false, errorCode: 'PROVIDER_FORBIDDEN', httpStatus: 403,
+      configured: true, reachable: true, authenticated: true },
+    { uiState: 'rate-limited', canAttempt: false, errorCode: 'PROVIDER_RATE_LIMIT', httpStatus: 429,
+      configured: true, reachable: true, authenticated: true },
+    { uiState: 'provider-error', canAttempt: false, errorCode: 'PROVIDER_HTTP_500', httpStatus: 500,
+      configured: true, reachable: true, authenticated: true }
   ];
-  for (const caso of NO_UTILIZABLES) {
+  check(OCHO_ESTADOS.length === Object.values(UI_STATE).length
+    && OCHO_ESTADOS.every(c => Object.values(UI_STATE).includes(c.uiState)),
+    `se recorren los ${Object.values(UI_STATE).length} estados del contrato, no una muestra`);
+
+  for (const caso of OCHO_ESTADOS) {
     const r = await ejecutarLoadRuntime({
-      configured: true, reachable: true, authenticated: true,
-      modelsAvailable: modelos.length, models: modelos,
-      canAttempt: false, ready: false, ...caso
+      modelsAvailable: modelos.length, models: modelos, ready: caso.uiState === 'connected', ...caso
     });
-    check(r.opciones === 1 && r.valores[0] === '',
-      `${caso.uiState}: el selector no ofrece ningún modelo (${r.opciones} opciones)`);
-    check(r.deshabilitado,
-      `${caso.uiState}: el selector queda deshabilitado`);
+
+    if (caso.canAttempt) {
+      check(r.opciones === modelos.length && !r.deshabilitado,
+        `${caso.uiState}: se puede intentar, así que se ofrecen los modelos (${r.opciones})`);
+    } else {
+      check(r.opciones === 1 && r.valores[0] === '',
+        `${caso.uiState}: no ofrece ningún modelo utilizable (${r.opciones} opciones)`);
+      check(r.deshabilitado, `${caso.uiState}: el selector queda deshabilitado`);
+      // El TEXTO MOSTRADO, no la clave ni la existencia de t(): es lo que
+      // separa «no hay modelos» de «te han limitado», y es lo único que el
+      // usuario llega a leer.
+      const esperado = r.diccionario[`provider.selectEmpty.${caso.uiState}`];
+      check(typeof esperado === 'string' && esperado.length > 0 && r.textos[0] === esperado,
+        `${caso.uiState}: la opción dice "${r.textos[0]}"`);
+      // Y dos estados distintos no pueden leerse igual: si todos compartiesen
+      // texto, el usuario no sabría cuál de los ocho le ha tocado.
+      check(r.textos[0] !== r.diccionario['provider.selectEmpty.connected'],
+        `${caso.uiState}: su texto no se confunde con el de «sin modelos»`);
+    }
+
+    // La píldora tiene que contar el mismo estado que el selector.
+    check(r.estadoPill === caso.uiState,
+      `${caso.uiState}: la píldora lleva el mismo estado (${r.estadoPill})`);
+    const textoEstado = r.diccionario[`provider.state.${caso.uiState}`];
+    check(r.textoPill === textoEstado,
+      `${caso.uiState}: la píldora muestra "${r.textoPill}"`);
+    check(!/PROVIDER_|HTTP_|\bsk-/.test(r.textoPill + r.textos.join(' ')),
+      `${caso.uiState}: nada de lo que se enseña lleva códigos internos ni credenciales`);
   }
 
-  // Y el motivo se dice, no se calla: la opción única lleva el texto del
-  // estado, que es lo que separa «no hay modelos» de «te han limitado».
-  const limitado = construirEntorno(null);
-  check(typeof limitado.globales.t === 'function', 'el texto vacío sale de t(), no de un literal');
   const codigoLoadRuntime = renderer.slice('loadRuntime')
     .split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
   check(/provider\.selectEmpty\.\$\{uiState\}/.test(codigoLoadRuntime),

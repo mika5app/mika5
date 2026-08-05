@@ -291,4 +291,8 @@ const ollamaApi = {
   }
 };
 
-module.exports = { ollamaApi, fetchWithTimeout, resolverBaseOllama, BASE };
+// `resolverBaseOllama` se exporta para poder probar la restricción a bucle
+// local, que es la parte con consecuencias de seguridad. `BASE` no: quien la
+// necesita la obtiene de `ollamaApi.status().base`, y exponer el valor ya
+// resuelto sólo añade superficie que después hay que mantener.
+module.exports = { ollamaApi, fetchWithTimeout, resolverBaseOllama };
