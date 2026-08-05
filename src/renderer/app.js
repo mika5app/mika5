@@ -2803,8 +2803,16 @@ function ajustarAltoDesplegableProveedores() {
   const menu = el('providerOptions');
   if (!menu || menu.style.display === 'none' || !menu.style.display) return;
   const arriba = menu.getBoundingClientRect().top;
-  const disponible = Math.max(120, window.innerHeight - arriba - MARGEN_DESPLEGABLE);
-  menu.style.maxHeight = `${Math.round(disponible)}px`;
+  // Sin suelo. Una versión anterior ponía `Math.max(120, ...)` para que el menú
+  // no quedase ridículo en ventanas muy bajas, y eso rompía justo lo que esta
+  // función existe para garantizar: por debajo de cierta altura el suelo ganaba
+  // y el menú volvía a salirse por abajo. `BrowserWindow` no declara
+  // `minHeight`, así que esa altura es alcanzable de verdad, no teórica.
+  //
+  // Un menú de 60 px es incómodo; uno que se sale de la pantalla es
+  // inutilizable, y además silencioso. Se prefiere lo primero.
+  const disponible = window.innerHeight - arriba - MARGEN_DESPLEGABLE;
+  menu.style.maxHeight = `${Math.max(0, Math.round(disponible))}px`;
 }
 
 /** Abre o cierra el desplegable de proveedores. */

@@ -737,7 +737,7 @@ async function ejecutar(win) {
   check(final.vivos === final.total && final.total === IDS_CANONICOS.length,
     `el selector sigue completo y pulsable al final (${final.vivos}/${final.total})`);
 
-  // --- 11. El desplegable cabe en la ventana, a cualquier altura ------------
+  // --- 11. El desplegable cabe en la ventana, sin altura mínima ------------
   //
   // Con siete proveedores la lista mide ~520 px: en una ventana baja no cabe.
   // Lo que se comprueba es que se recorta dentro de su propia caja y no por
@@ -751,7 +751,12 @@ async function ejecutar(win) {
   // silencio en cuanto la cabecera cambia de alto.
   const [anchoOriginal, altoOriginal] = win.getSize();
   const MARGEN = 16;
-  for (const alto of [1000, 700, 600, 500, 420]) {
+  // Se baja hasta alturas absurdas a propósito. `BrowserWindow` no declara
+  // `minHeight`, así que el usuario puede llegar ahí: no es un caso teórico.
+  // Una versión anterior ponía un suelo de 120 px al alto del menú «para que no
+  // quedase ridículo», y por debajo de cierta altura ese suelo ganaba y el menú
+  // volvía a salirse por abajo — rompiendo lo único que esto garantiza.
+  for (const alto of [1000, 700, 600, 500, 420, 300, 240]) {
     win.setSize(anchoOriginal, alto);
     await new Promise(r => setTimeout(r, 350));
     const g = await ev(win, `
@@ -788,8 +793,14 @@ async function ejecutar(win) {
     `);
     check(g.bottom <= g.ventana,
       `${alto}px: el desplegable no se sale por debajo (${g.bottom} <= ${g.ventana})`);
-    check(g.alcanzadas === g.total,
-      `${alto}px: se llega a las ${g.total} opciones (${g.alcanzadas})`);
+    // Con la ventana muy baja el menú queda demasiado corto para pulsar nada,
+    // y eso se acepta: lo que no se acepta es que se salga de la pantalla. La
+    // alcanzabilidad de las siete se exige donde el menú tiene sitio para
+    // mostrar al menos una fila entera.
+    if (g.ventana - g.top - MARGEN >= 80) {
+      check(g.alcanzadas === g.total,
+        `${alto}px: se llega a las ${g.total} opciones (${g.alcanzadas})`);
+    }
     // Cuando recorta, tiene que estar aprovechando el alto disponible: el hueco
     // libre bajo el menú es el margen y no más. Sin esta comprobación, volver a
     // una constante inventada pasaría desapercibido mientras «quepa».
