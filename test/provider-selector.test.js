@@ -839,8 +839,15 @@ async function ejecutar(win) {
     `Electron aplica la altura mínima declarada (pedido 100, resultante ${minima.exterior}, minHeight ${ALTO_MINIMO_VENTANA})`);
   check(minima.exterior > 100,
     `la ventana no baja de lo pedido por debajo del mínimo (pedido 100, resultante ${minima.exterior})`);
-  check(minima.interior > 0 && minima.interior < minima.exterior,
-    `la altura interior efectiva del mínimo es ${minima.interior}px (exterior ${minima.exterior}px, marco ${minima.exterior - minima.interior}px)`);
+  // El marco puede medir CERO. Bajo Xvfb no hay gestor de ventanas y no hay
+  // decoración: `getSize()` y `window.innerHeight` coinciden. Exigir que el
+  // interior fuese estrictamente menor que el exterior ataba la prueba a un
+  // escritorio con decoración. Lo que sí se sigue exigiendo es que la altura
+  // interior exista, sea coherente con la exterior, y —abajo, midiendo
+  // geometría— que dé de sí para una fila entera.
+  const marco = minima.exterior - minima.interior;
+  check(minima.interior > 0 && marco >= 0 && minima.interior <= minima.exterior,
+    `la altura interior efectiva del mínimo es ${minima.interior}px (exterior ${minima.exterior}px, marco ${marco}px)`);
   console.log(`provider-selector: mínimo declarado ${ALTO_MINIMO_VENTANA}px → ventana real `
     + `${minima.exterior}px exteriores → window.innerHeight ${minima.interior}px `
     + `(marco ${minima.exterior - minima.interior}px, devicePixelRatio ${dpr})`);
@@ -911,6 +918,11 @@ async function ejecutar(win) {
         ventana: window.innerHeight,
         top: Math.round(caja.top),
         bottom: Math.round(caja.bottom),
+        // Sin redondear: el margen se comprueba sobre el borde REAL. Redondear
+        // el borde puede sumar medio píxel y convertir un margen correcto en un
+        // fallo, o al revés.
+        topExacto: caja.top,
+        bottomExacto: caja.bottom,
         cliente, contenido, recorta, relleno, scrollMax,
         util: cliente - relleno,
         filaMax: Math.max(...alturasFila),
@@ -942,13 +954,21 @@ async function ejecutar(win) {
       + `(contenido ${g.contenido}, visible ${g.cliente}, scrollTop máximo ${g.scrollMax})`);
     if (g.recorta) {
       // El hueco bajo el menú tiene que ser EXACTAMENTE el margen declarado.
-      // Por debajo, el menú se está comiendo el margen (suelo artificial); por
-      // encima, está desperdiciando alto (constante inventada).
-      const hueco = g.ventana - g.bottom;
-      check(hueco >= MARGEN,
-        `${etiqueta}: al recortar respeta el margen inferior (deja ${hueco}px, margen ${MARGEN})`);
-      check(hueco <= MARGEN + 4,
-        `${etiqueta}: al recortar aprovecha el alto disponible (deja ${hueco}px, margen ${MARGEN})`);
+      // Por debajo, el menú se está comiendo el margen; por encima, está
+      // desperdiciando alto.
+      //
+      // Se mide sobre el borde REAL, sin redondear. El menú no empieza en una
+      // coordenada entera fuera de Windows —en Linux arranca en 49,x—, así que
+      // redondear el borde inferior desplazaba el resultado medio píxel. El
+      // margen mínimo no lleva tolerancia: `1e-9` es ruido de coma flotante al
+      // sumar `top + max-height`, no permiso para invadir el margen.
+      const huecoExacto = g.ventana - g.bottomExacto;
+      check(huecoExacto >= MARGEN - 1e-9,
+        `${etiqueta}: al recortar respeta el margen inferior `
+        + `(deja ${huecoExacto.toFixed(3)}px, margen ${MARGEN}, borde ${g.bottomExacto.toFixed(3)})`);
+      check(huecoExacto <= MARGEN + 4,
+        `${etiqueta}: al recortar aprovecha el alto disponible `
+        + `(deja ${huecoExacto.toFixed(3)}px, margen ${MARGEN})`);
     }
     console.log(`provider-selector: ${etiqueta} — menú ${g.top}..${g.bottom}, `
       + `visible ${g.cliente}px (útil ${g.util}px), contenido ${g.contenido}px, `

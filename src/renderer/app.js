@@ -2814,8 +2814,15 @@ function ajustarAltoDesplegableProveedores() {
   // eso Electron ya no deja encoger, así que el caso "menú de 20 px" no existe.
   // El único `Math.max` que queda es contra 0, porque un `max-height` negativo
   // no es CSS válido.
+  //
+  // Se trunca, no se redondea. El menú empieza en una coordenada fraccionaria en
+  // cuanto las métricas de fuente no son las de Windows —en Linux arranca en
+  // 49,x—, y redondear al alza produce un `max-height` mayor que el hueco real:
+  // el menú se come una fracción del margen inferior. Medido en CI bajo Xvfb:
+  // dejaba 15 px donde `MARGEN_DESPLEGABLE` declara 16. Truncar nunca excede el
+  // espacio disponible.
   const disponible = window.innerHeight - arriba - MARGEN_DESPLEGABLE;
-  menu.style.maxHeight = `${Math.max(0, Math.round(disponible))}px`;
+  menu.style.maxHeight = `${Math.max(0, Math.floor(disponible))}px`;
 }
 
 /** Abre o cierra el desplegable de proveedores. */
