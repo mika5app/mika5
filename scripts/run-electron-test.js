@@ -91,13 +91,34 @@ function sleepSync(ms) {
  * distinto por ejecución con `mkdtemp`, así que aparece en la línea de comandos
  * de los procesos de esta corrida y de ninguna otra. Se resuelven primero los
  * PID y se mata por PID, nunca por nombre.
+ *
+ * CONTRATO DEL VALOR DEVUELTO: el número de procesos que (a) fueron
+ * IDENTIFICADOS por esa ruta única y (b) recibieron la señal de terminación sin
+ * error. Significa lo mismo en Windows y en POSIX.
+ *
+ * No siempre fue así. POSIX lanzaba `pkill -f` y devolvía `1` fijo: no era un
+ * recuento, era «lo intenté». Con dos supervivientes informaba de uno, y con
+ * cero informaba de uno también salvo que `pkill` lanzase. Windows sí contaba.
+ * El mismo número significaba dos cosas distintas, y una prueba que fijaba el
+ * valor pasaba en una plataforma y fallaba en la otra. Ahora POSIX identifica
+ * primero con `pgrep -f` sobre la MISMA ruta —sin ampliar el alcance— y mata
+ * PID a PID, igual que Windows.
+ *
+ * `plataforma` se inyecta para poder probar las dos ramas desde cualquier
+ * sistema; no es una condición para tapar la diferencia, es que el mecanismo de
+ * enumeración de procesos no es el mismo en los dos sitios.
  */
-function killSurvivors(profileDir, { exec = child_process.execFileSync, log = console.warn } = {}) {
+function killSurvivors(profileDir, {
+  exec = child_process.execFileSync,
+  kill = (pid) => process.kill(pid, 'SIGKILL'),
+  plataforma = process.platform,
+  log = console.warn
+} = {}) {
   // Sin un directorio único no se mata nada: un patrón corto podría coincidir
   // con procesos ajenos, que es justo lo que se quiere evitar.
   if (!profileDir || !profileDir.includes(PROFILE_PREFIX)) return 0;
   try {
-    if (process.platform === 'win32') {
+    if (plataforma === 'win32') {
       // La ruta viaja por VARIABLE DE ENTORNO, no incrustada en el script.
       //
       // Incrustarla con JSON.stringify duplicaba las barras —`C:\\Users\\...`—
@@ -127,12 +148,40 @@ function killSurvivors(profileDir, { exec = child_process.execFileSync, log = co
       });
       return Number(String(salida).trim()) || 0;
     }
-    // En POSIX el patrón sigue siendo la ruta única del perfil.
-    exec('pkill', ['-f', '--', profileDir], { stdio: 'ignore' });
-    return 1;
+    // POSIX: enumerar primero, matar después. `pgrep` usa exactamente el mismo
+    // patrón que usaba `pkill` —la ruta única del perfil—, así que el alcance no
+    // crece; lo que cambia es que ahora se sabe A QUIÉN se mata, y se puede
+    // contar. Sale con 1 cuando no hay coincidencias, y eso no es un fallo.
+    let listado;
+    try {
+      listado = String(exec('pgrep', ['-f', '--', profileDir], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore']
+      }) || '');
+    } catch (_) {
+      return 0;
+    }
+
+    const pids = listado
+      .split('\n')
+      .map((linea) => Number(linea.trim()))
+      // `pgrep` no se lista a sí mismo, pero el proceso que llama aquí sí podría
+      // aparecer si su línea de comandos llevara la ruta. Excluirlo es barato y
+      // evita que la limpieza se mate antes de contar.
+      .filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== process.pid);
+
+    let terminados = 0;
+    for (const pid of pids) {
+      try {
+        kill(pid);
+        terminados += 1;
+      } catch (_) {
+        // Murió entre el `pgrep` y el `kill`. No estaba vivo, no se cuenta.
+      }
+    }
+    return terminados;
   } catch (_) {
-    // `pkill` devuelve 1 cuando no había nada que matar, y no poder limpiar no
-    // puede cambiar el resultado de la prueba.
+    // No poder limpiar no puede cambiar el resultado de la prueba.
     return 0;
   }
 }

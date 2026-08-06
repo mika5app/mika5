@@ -251,48 +251,127 @@ console.log('\n=== La limpieza sólo alcanza a los procesos de esta ejecución =
 // Electron de cualquier otra aplicación del usuario, MIKA5 abierta de verdad
 // incluida. El perfil temporal es único por ejecución: identifica exactamente
 // los procesos propios y ningún otro.
-// Aquí sólo se comprueba la FORMA de la selección. Que mate de verdad al
-// superviviente propio y respete al ajeno se comprueba con procesos reales en
-// test/kill-survivors.test.js: un doble de `exec` que siempre devuelve "2"
-// verifica el texto del comando y nada más — y con la primera versión, que
-// incrustaba la ruta con JSON.stringify y no casaba nunca, ese doble pasaba
-// mientras la limpieza no mataba nada.
+// Aquí se comprueba la FORMA de la selección y el CONTRATO del valor devuelto:
+// el número de procesos identificados por la ruta única a los que se les envió
+// la terminación sin error. Que mate de verdad al superviviente propio y respete
+// al ajeno se comprueba con procesos reales en test/kill-survivors.test.js.
+//
+// Las dos ramas se prueban desde cualquier sistema inyectando `plataforma`. No
+// es una condición para tapar la diferencia: enumerar procesos no se hace igual
+// en Windows que en POSIX, pero el número que sale tiene que significar lo mismo.
+const PERFIL_PROPIO = path.join(os.tmpdir(), 'mika5-electron-test-abc123');
+
+console.log('\n-- rama Windows --');
 {
   const llamadas = [];
   const execFalso = (comando, args, opciones) => {
     llamadas.push({ comando, args, opciones });
-    return '2';
+    return '2';   // PowerShell imprime `$p.Count`
   };
 
-  const perfilPropio = path.join(os.tmpdir(), 'mika5-electron-test-abc123');
-  const matados = launcher.killSurvivors(perfilPropio, { exec: execFalso, log: () => {} });
-  check(matados === 2, `informa de los procesos terminados (${matados})`);
+  const matados = launcher.killSurvivors(PERFIL_PROPIO,
+    { exec: execFalso, plataforma: 'win32', log: () => {} });
+  check(matados === 2, `informa de los procesos identificados y terminados (${matados})`);
 
   const orden = llamadas.flatMap(l => l.args).join(' ');
   const entorno = llamadas.map(l => (l.opciones && l.opciones.env) || {});
-  check(entorno.some(e => e.MIKA5_TEST_PROFILE_DIR === perfilPropio),
+  check(entorno.some(e => e.MIKA5_TEST_PROFILE_DIR === PERFIL_PROPIO),
     'la ruta viaja por entorno, sin escapado que pueda romperla');
-  check(!orden.includes(perfilPropio),
+  check(!orden.includes(PERFIL_PROPIO),
     'y no se incrusta en el script, donde JSON.stringify duplicaba las barras');
   check(!/Name\s*=\s*.?electron/i.test(orden),
     'no se selecciona por nombre de proceso, que alcanzaría a aplicaciones ajenas');
-  check(/Stop-Process -Id|pkill/.test(orden),
+  check(/Stop-Process -Id/.test(orden),
     'se termina por identificador de proceso resuelto, no por patrón suelto');
   check(/ProcessId -ne \$PID/.test(orden),
     'el PowerShell ejecutor queda excluido: matarse a sí mismo ocultaría el resultado');
 
+  const vacio = launcher.killSurvivors(PERFIL_PROPIO,
+    { exec: () => '0', plataforma: 'win32', log: () => {} });
+  check(vacio === 0, 'sin coincidencias informa de cero');
+}
+
+console.log('\n-- rama POSIX --');
+{
+  // `pgrep` enumera; el recuento sale de los PID que se logra señalizar, no de
+  // «lo he intentado». Antes esta rama devolvía 1 fijo y el mismo número
+  // significaba dos cosas distintas según la plataforma.
+  const llamadas = [];
+  const matados = [];
+  const r = launcher.killSurvivors(PERFIL_PROPIO, {
+    exec: (comando, args, opciones) => {
+      llamadas.push({ comando, args, opciones });
+      return '4011\n4012\n4013\n';
+    },
+    kill: (pid) => { matados.push(pid); },
+    plataforma: 'linux',
+    log: () => {}
+  });
+  check(r === 3, `informa de los procesos identificados y terminados (${r})`);
+  check(matados.join(',') === '4011,4012,4013',
+    `mata PID a PID los que enumeró (${matados.join(',')})`);
+
+  const orden = llamadas.flatMap(l => [l.comando, ...l.args]).join(' ');
+  check(llamadas.every(l => l.comando === 'pgrep'),
+    'enumera con pgrep antes de matar, en vez de disparar pkill a ciegas');
+  check(orden.includes(PERFIL_PROPIO) && orden.includes('-f'),
+    'el patrón sigue siendo la ruta única del perfil: el alcance no crece');
+  // El patrón es la ruta ENTERA y nada más. Comprobarlo por igualdad exacta, no
+  // buscando la palabra "electron": el propio prefijo del perfil la contiene.
+  check(llamadas.every(l => l.args[l.args.length - 1] === PERFIL_PROPIO),
+    'el último argumento de pgrep es exactamente la ruta, sin patrón añadido');
+  check(llamadas.every(l => l.args.includes('--')),
+    'la ruta va tras `--`, así que un nombre que empiece por guion no se lee como opción');
+
+  // Un PID que muere entre el pgrep y el kill no se cuenta: el contrato dice
+  // «terminados», no «encontrados».
+  const parcial = launcher.killSurvivors(PERFIL_PROPIO, {
+    exec: () => '5001\n5002\n',
+    kill: (pid) => { if (pid === 5002) throw new Error('ESRCH'); },
+    plataforma: 'linux',
+    log: () => {}
+  });
+  check(parcial === 1, `un PID que ya no existe no se cuenta como terminado (${parcial})`);
+
+  // pgrep sale con 1 cuando no hay coincidencias, y eso no es un fallo.
+  const ninguno = launcher.killSurvivors(PERFIL_PROPIO, {
+    exec: () => { const e = new Error('exit 1'); e.status = 1; throw e; },
+    kill: () => { throw new Error('no debería matarse nada'); },
+    plataforma: 'linux',
+    log: () => {}
+  });
+  check(ninguno === 0, 'sin coincidencias informa de cero y no mata nada');
+
+  const propioExcluido = launcher.killSurvivors(PERFIL_PROPIO, {
+    exec: () => `${process.pid}\n`,
+    kill: () => { throw new Error('no debe matarse a sí mismo'); },
+    plataforma: 'linux',
+    log: () => {}
+  });
+  check(propioExcluido === 0, 'el proceso que llama queda excluido de la selección');
+}
+
+console.log('\n-- perfil no reconocible, en las dos ramas --');
+{
   // Sin un perfil reconocible no se mata nada: un patrón corto o vacío podría
   // coincidir con cualquier cosa.
-  for (const invalido of ['', null, undefined, path.join(os.tmpdir(), 'otra-cosa'), '/']) {
-    llamadas.length = 0;
-    const r = launcher.killSurvivors(invalido, { exec: execFalso, log: () => {} });
-    check(r === 0 && llamadas.length === 0,
-      `un perfil no reconocible (${JSON.stringify(invalido)}) no dispara ninguna terminación`);
+  for (const plataforma of ['win32', 'linux']) {
+    for (const invalido of ['', null, undefined, path.join(os.tmpdir(), 'otra-cosa'), '/']) {
+      const llamadas = [];
+      const r = launcher.killSurvivors(invalido, {
+        exec: (c, a, o) => { llamadas.push({ c, a, o }); return '2'; },
+        kill: () => { llamadas.push({ c: 'kill' }); },
+        plataforma,
+        log: () => {}
+      });
+      check(r === 0 && llamadas.length === 0,
+        `${plataforma}: un perfil no reconocible (${JSON.stringify(invalido)}) no dispara nada`);
+    }
   }
-
-  check(fs.existsSync(path.join(ROOT, 'test/kill-survivors.test.js')),
-    'existe la prueba con procesos reales, que es la que demuestra que mata');
 }
+
+check(fs.existsSync(path.join(ROOT, 'test/kill-survivors.test.js')),
+  'existe la prueba con procesos reales, que es la que demuestra que mata');
 
 console.log(`\n${'='.repeat(40)}`);
 console.log(`Electron test isolation tests passed (${passed} comprobaciones)`);
