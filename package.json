@@ -54,6 +54,7 @@
     "test:website-i18n": "node test/website-i18n.test.js",
     "test:print-pdf-electron": "node scripts/run-electron-test.js test/print-pdf-electron.test.js",
     "test:provider-selector": "node scripts/run-electron-test.js test/provider-selector.test.js",
+    "test:native-binding": "node scripts/run-electron-test.js test/native-binding.test.js",
     "test:ollama-cancellation": "node test/ollama-cancellation.test.js",
     "test:xlsx-vendored": "node test/xlsx-vendored.test.js",
     "test:kill-survivors": "node test/kill-survivors.test.js"

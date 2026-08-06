@@ -183,7 +183,12 @@ const GATES_CANONICOS = [
   // Selector multiproveedor, sesión de escritorio y ausencia de aviso
   // bloqueante. Necesita Electron: mide la maquetación real de Chromium para
   // distinguir "la opción está en el DOM" de "el usuario puede pulsarla".
-  'provider-selector'
+  'provider-selector',
+  // Procedencia del binding nativo. Necesita Electron: comprueba el ABI y la
+  // versión de N-API del runtime empaquetado, y que el `.node` que se carga es
+  // el prebuild que trae el paquete y no un binario compilado a mano que sólo
+  // funcionaría en la máquina que lo compiló.
+  'native-binding'
 ];
 const bloqueNames = gateScript.slice(gateScript.indexOf('NAMES=('), gateScript.indexOf(')', gateScript.indexOf('NAMES=(')));
 for (const gate of GATES_CANONICOS) {

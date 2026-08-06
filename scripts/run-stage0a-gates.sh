@@ -14,7 +14,7 @@
 #   provider-cancellation · cloud-consent · network-security · knowledge-cli
 # Los demás necesitan Electron y corren por separado: db · knowledge-scope ·
 # electron-security · electron-renderer-integration · image-download ·
-# print-pdf · provider-selector. Ninguna suite se cuenta
+# print-pdf · provider-selector · native-binding. Ninguna suite se cuenta
 # dos veces como evidencia: knowledge-cli llega vía npm-test y no se repite
 # como gate independiente.
 #
@@ -43,6 +43,7 @@ NAMES=(
   "image-download-electron"
   "print-pdf-electron"
   "provider-selector"
+  "native-binding"
 )
 CMDS=(
   "npm test"
@@ -53,6 +54,7 @@ CMDS=(
   "node scripts/run-electron-test.js test/image-download-electron.test.js $ELECTRON_ARGS"
   "node scripts/run-electron-test.js test/print-pdf-electron.test.js $ELECTRON_ARGS"
   "node scripts/run-electron-test.js test/provider-selector.test.js $ELECTRON_ARGS"
+  "node scripts/run-electron-test.js test/native-binding.test.js $ELECTRON_ARGS"
 )
 
 FAILED=0
