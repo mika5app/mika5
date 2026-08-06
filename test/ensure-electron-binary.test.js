@@ -6,18 +6,22 @@
 // Por qué existe: `descargarConInstaladorOficial()` capturaba el fallo de
 // `execFileSync` y devolvía `false`, y el llamador no miraba ese valor. Un
 // instalador que salía con código distinto de cero se trataba igual que uno
-// correcto, y si en `dist` quedaba algo con pinta de servir —una versión
-// anterior, o una extracción a medias— la instalación se daba por buena. El
-// fallo no desaparecía: reaparecía en el primer arranque, lejos de su causa.
+// correcto, y si en `dist` quedaba algo con pinta de servir —otra versión, o
+// una extracción a medias— la instalación se daba por buena. El fallo no
+// desaparecía: reaparecía en el primer arranque, lejos de su causa.
 //
-// No usa red, no descarga nada y no toca `node_modules` ni el userData: cada
-// caso monta un paquete electron de mentira en un directorio temporal y el zip
-// es un archivo cualquiera cuyo hash se calcula al vuelo.
+// QUÉ NO PRUEBA ESTO. No comprueba el checksum del zip ni el comportamiento de
+// la caché: eso es de `@electron/get`, que valida el artefacto tanto al
+// descargarlo como al encontrarlo en caché, y simularlo aquí sólo daría una
+// falsa sensación de cobertura. Esa conducta se ejerce con el paquete real, en
+// CI, corrompiendo un zip de una caché de prueba.
+//
+// Cada caso monta un paquete electron de mentira en un directorio temporal: sin
+// red, sin tocar `node_modules` y sin usar artefactos reales de la usuaria.
 
 'use strict';
 
 const assert = require('assert');
-const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -32,84 +36,35 @@ function check(condition, message) {
 }
 
 const VERSION = '43.3.0';
-const PLATAFORMA = 'win32';
-const ARQUITECTURA = 'x64';
-const NOMBRE_ZIP = `electron-v${VERSION}-${PLATAFORMA}-${ARQUITECTURA}.zip`;
-const BINARIO = 'electron.exe';
-
 const temporales = [];
 
-/**
- * Monta un paquete electron de mentira: package.json con la versión,
- * checksums.json con el hash real del zip que se le pase, e `install.js` para
- * que el descargador lo encuentre.
- */
-function montarPaqueteFalso({ contenidoZip = null } = {}) {
+/** Paquete electron de mentira: package.json con la versión e `install.js`. */
+function montarPaquete({ conInstalador = true } = {}) {
   const raiz = fs.mkdtempSync(path.join(os.tmpdir(), 'mika5-eeb-'));
   temporales.push(raiz);
   const dirElectron = path.join(raiz, 'node_modules', 'electron');
   fs.mkdirSync(dirElectron, { recursive: true });
   fs.writeFileSync(path.join(dirElectron, 'package.json'), JSON.stringify({ version: VERSION }));
-  fs.writeFileSync(path.join(dirElectron, 'install.js'), '// descargador de mentira\n');
-
-  const cache = path.join(raiz, 'cache');
-  fs.mkdirSync(cache, { recursive: true });
-
-  let zip = null;
-  let hash = null;
-  if (contenidoZip !== null) {
-    zip = path.join(cache, NOMBRE_ZIP);
-    fs.writeFileSync(zip, contenidoZip);
-    hash = crypto.createHash('sha256').update(contenidoZip).digest('hex');
-  }
-  // El checksum declarado corresponde SIEMPRE al contenido correcto; los casos
-  // de hash inválido escriben otro contenido en el zip, no otro checksum.
-  const correcto = crypto.createHash('sha256').update('contenido correcto').digest('hex');
-  fs.writeFileSync(path.join(dirElectron, 'checksums.json'),
-    JSON.stringify({ [NOMBRE_ZIP]: correcto }));
-
-  return { raiz, dirElectron, cache, zip, hash, checksumDeclarado: correcto };
-}
-
-/** Simula que el instalador dejó el binario extraído. */
-function instalarBinario(dirElectron) {
-  const dist = path.join(dirElectron, 'dist');
-  fs.mkdirSync(dist, { recursive: true });
-  fs.writeFileSync(path.join(dist, 'version'), `v${VERSION}\n`);
-  fs.writeFileSync(path.join(dist, BINARIO), 'MZ-de-mentira');
+  if (conInstalador) fs.writeFileSync(path.join(dirElectron, 'install.js'), '// descargador de mentira\n');
+  return { raiz, dirElectron };
 }
 
 /**
- * La busqueda se acota al cache de mentira. Sin esto, 
- * seguiria bajando hasta el cache REAL de la maquina, encontraria alli el zip
- * de Electron de verdad y lo compararia contra el checksums.json de mentira:
- * la prueba dependeria de que la usuaria tenga o no ese fichero descargado.
+ * Simula lo que deja `install.js`: `dist/version`, el ejecutable, y un
+ * `path.txt` que apunta a él.
  */
-function buscarSoloEn(cache) {
-  return (nombreZip) => {
-    const directo = path.join(cache, nombreZip);
-    if (fs.existsSync(directo)) return directo;
-    for (const entrada of fs.readdirSync(cache, { withFileTypes: true })) {
-      if (!entrada.isDirectory()) continue;
-      const anidado = path.join(cache, entrada.name, nombreZip);
-      if (fs.existsSync(anidado)) return anidado;
-    }
-    return null;
-  };
+function instalar(dirElectron, { version = VERSION, binario = 'electron.exe', pathTxt = binario } = {}) {
+  const dist = path.join(dirElectron, 'dist');
+  fs.mkdirSync(path.dirname(path.join(dist, binario)), { recursive: true });
+  fs.writeFileSync(path.join(dist, 'version'), `v${version}\n`);
+  fs.writeFileSync(path.join(dist, binario), 'MZ-de-mentira');
+  if (pathTxt !== null) fs.writeFileSync(path.join(dirElectron, 'path.txt'), pathTxt);
 }
 
-function ejecutar(paquete, descargar, extra = {}) {
+function ejecutar(paquete, descargar) {
   const registros = [];
   try {
-    modulo.principal({
-      dirElectron: paquete.dirElectron,
-      descargar,
-      buscarZip: buscarSoloEn(paquete.cache),
-      registrar: (m) => registros.push(m),
-      plataforma: PLATAFORMA,
-      arquitectura: ARQUITECTURA,
-      ...extra
-    });
+    modulo.principal({ dirElectron: paquete.dirElectron, descargar, registrar: (m) => registros.push(m) });
     return { registros, error: null };
   } catch (error) {
     return { registros, error };
@@ -117,214 +72,200 @@ function ejecutar(paquete, descargar, extra = {}) {
 }
 
 // =====================================================================
-console.log('\n=== 1. Binario ya instalado: no se invoca nada ===');
+console.log('\n=== 1. Electron ausente: nada que asegurar ===');
 // =====================================================================
 {
-  const p = montarPaqueteFalso({ contenidoZip: 'contenido correcto' });
-  instalarBinario(p.dirElectron);
+  const raiz = fs.mkdtempSync(path.join(os.tmpdir(), 'mika5-eeb-sin-'));
+  temporales.push(raiz);
+  let invocaciones = 0;
+  const r = ejecutar({ dirElectron: path.join(raiz, 'node_modules', 'electron') },
+    () => { invocaciones++; });
+  check(r.error === null, '`npm ci --omit=dev` no falla por no tener electron');
+  check(invocaciones === 0, 'no se invoca al descargador');
+}
+
+// =====================================================================
+console.log('\n=== 2. install.js ausente con el paquete presente ===');
+// =====================================================================
+{
+  const p = montarPaquete({ conInstalador: false });
+  let lanzo = null;
+  try {
+    modulo.descargarConInstaladorOficial({ dirElectron: p.dirElectron, ejecutar: () => {} });
+  } catch (e) { lanzo = e; }
+  check(lanzo instanceof Error, 'lanza en vez de continuar en silencio');
+  check(/no trae install\.js/.test(lanzo.message), 'el mensaje lo dice');
+}
+
+// =====================================================================
+console.log('\n=== 3. Instalación válida ===');
+// =====================================================================
+{
+  const p = montarPaquete();
+  const r = ejecutar(p, ({ dirElectron }) => instalar(dirElectron));
+  check(r.error === null, 'no lanza');
+  check(r.registros.some(m => m.includes('listo') && m.includes('electron.exe')),
+    `declara el binario listo nombrando el ejecutable ("${r.registros[r.registros.length - 1]}")`);
+}
+{
+  // Idempotente: si ya está, no se invoca al instalador.
+  const p = montarPaquete();
+  instalar(p.dirElectron);
   let invocaciones = 0;
   const r = ejecutar(p, () => { invocaciones++; });
-  check(r.error === null, 'no lanza');
-  check(invocaciones === 0, 'el descargador NO se invoca cuando el binario ya está');
-  check(r.registros.some(m => m.includes('ya presente')), `lo dice en el log ("${r.registros[0]}")`);
+  check(r.error === null && invocaciones === 0, 'con la instalación ya válida no se descarga nada');
+  check(r.registros.some(m => m.includes('ya presente')), 'y lo dice el log');
 }
 
 // =====================================================================
-console.log('\n=== 2. Caché válida: se verifica ANTES de invocar al instalador ===');
+console.log('\n=== 4. Instalador con exit distinto de cero ===');
 // =====================================================================
 {
-  const p = montarPaqueteFalso({ contenidoZip: 'contenido correcto' });
-  const orden = [];
-  const r = ejecutar(p, ({ dirElectron }) => {
-    orden.push('descarga');
-    instalarBinario(dirElectron);
-  });
-  check(r.error === null, 'no lanza');
-  const iVerificado = r.registros.findIndex(m => m.includes('zip en caché verificado'));
-  check(iVerificado >= 0, 'el zip cacheado se verifica');
-  check(orden.length === 1 && orden[0] === 'descarga', 'el instalador se invoca una vez');
-  // El log de verificación se emite antes de llamar al descargador: lo prueba
-  // que exista ya cuando el descargador corre.
-  check(r.registros.some(m => m.includes('listo (descargador oficial)')),
-    'termina declarando el binario listo');
-}
-
-// =====================================================================
-console.log('\n=== 3. Zip cacheado con hash incorrecto: corta antes de instalar ===');
-// =====================================================================
-{
-  const p = montarPaqueteFalso({ contenidoZip: 'contenido MANIPULADO' });
-  let invocaciones = 0;
-  const r = ejecutar(p, () => { invocaciones++; instalarBinario(p.dirElectron); });
-  check(r.error instanceof Error, 'lanza');
-  check(/no coincide con el hash declarado/.test(r.error.message),
-    `el mensaje nombra el hash (${r.error.message.split('\n')[0]})`);
-  check(r.error.message.includes(p.checksumDeclarado), 'incluye el hash esperado');
-  check(invocaciones === 0,
-    'el descargador NO llega a invocarse: es él quien extraería el zip manipulado');
-}
-
-// =====================================================================
-console.log('\n=== 4. Caché fría: se descarga y se deja constancia del hash ===');
-// =====================================================================
-{
-  const p = montarPaqueteFalso();  // sin zip
-  const r = ejecutar(p, ({ dirElectron }) => {
-    // El instalador de verdad deja el zip en la caché y extrae.
-    fs.writeFileSync(path.join(p.cache, NOMBRE_ZIP), 'contenido correcto');
-    instalarBinario(dirElectron);
-  });
-  check(r.error === null, 'no lanza');
-  check(r.registros.some(m => m.includes('sin zip en caché')), 'reconoce la caché fría');
-  check(r.registros.some(m => m.includes('zip descargado y verificado')),
-    'verifica el zip recién descargado y deja el hash en el log');
-  check(r.registros.some(m => m.includes('listo (descargador oficial)')), 'declara el binario listo');
-}
-
-// =====================================================================
-console.log('\n=== 5. Instalador con exit distinto de cero: fallo real ===');
-// =====================================================================
-{
-  const p = montarPaqueteFalso();
+  const p = montarPaquete();
   const causa = new Error('Command failed: node install.js');
-  causa.status = 1;
-  const r = ejecutar(p, () => { throw causa; });
-  check(r.error instanceof Error, 'lanza');
-  check(r.error === causa || r.error.cause === causa || r.error.message.includes('install.js'),
-    'la causa original se conserva y llega al llamador');
-  check(!r.registros.some(m => m.includes('listo')),
-    'NO se declara ningún binario listo');
-}
-
-// El mismo caso, pero pasando por `descargarConInstaladorOficial()` real, con
-// `execFileSync` inyectado: es donde vivía el defecto.
-{
-  const p = montarPaqueteFalso();
-  const causa = new Error('Command failed');
   causa.status = 7;
   let lanzo = null;
   try {
-    modulo.descargarConInstaladorOficial({
-      dirElectron: p.dirElectron,
-      ejecutar: () => { throw causa; }
-    });
-  } catch (e) {
-    lanzo = e;
-  }
-  check(lanzo instanceof Error, 'descargarConInstaladorOficial() lanza en vez de devolver false');
+    modulo.descargarConInstaladorOficial({ dirElectron: p.dirElectron, ejecutar: () => { throw causa; } });
+  } catch (e) { lanzo = e; }
+  check(lanzo instanceof Error, 'lanza en vez de devolver false');
   check(/código de salida 7/.test(lanzo.message), `el mensaje lleva el código real (${lanzo.message})`);
   check(lanzo.cause === causa, 'la causa original queda en `cause`');
 }
 
+// =====================================================================
+console.log('\n=== 5. Instalador terminado por señal ===');
+// =====================================================================
 {
-  const p = montarPaqueteFalso();
+  const p = montarPaquete();
   const causa = new Error('killed');
   causa.signal = 'SIGKILL';
   let lanzo = null;
   try {
-    modulo.descargarConInstaladorOficial({
-      dirElectron: p.dirElectron,
-      ejecutar: () => { throw causa; }
-    });
+    modulo.descargarConInstaladorOficial({ dirElectron: p.dirElectron, ejecutar: () => { throw causa; } });
   } catch (e) { lanzo = e; }
-  check(/señal SIGKILL/.test(lanzo.message), `una señal también se nombra (${lanzo.message})`);
+  check(/señal SIGKILL/.test(lanzo.message), `la señal se nombra (${lanzo.message})`);
+  check(lanzo.cause === causa, 'y la causa original se conserva');
 }
 
 // =====================================================================
-console.log('\n=== 6. Instalador que falla dejando ficheros parciales ===');
+console.log('\n=== 6. Fallo que deja dist parcial ===');
 // =====================================================================
 {
-  // Éste es el caso que el defecto original daba por bueno: la descarga
-  // revienta, pero en `dist` queda un binario de antes con la versión correcta.
-  const p = montarPaqueteFalso();
-  const causa = new Error('Command failed: node install.js');
+  // El caso que el defecto original daba por bueno: la descarga revienta pero
+  // en dist queda una instalación con pinta de servir.
+  const p = montarPaquete();
+  const causa = new Error('Command failed');
   causa.status = 1;
-  const r = ejecutar(p, ({ dirElectron }) => {
-    instalarBinario(dirElectron);   // deja dist con pinta de servir
-    throw causa;
-  });
-  check(r.error instanceof Error, 'lanza pese a que `dist` quedó aparentemente utilizable');
-  check(!r.registros.some(m => m.includes('listo')),
-    'no se declara el binario listo por el estado de dist');
-  check(fs.existsSync(path.join(p.dirElectron, 'dist', BINARIO)),
-    'y el fichero parcial sigue ahí: lo que cambia es el veredicto, no el disco');
+  const r = ejecutar(p, ({ dirElectron }) => { instalar(dirElectron); throw causa; });
+  check(r.error instanceof Error, 'lanza pese a que dist quedó aparentemente utilizable');
+  check(!r.registros.some(m => m.includes('listo')), 'no se declara ningún binario listo');
+  check(fs.existsSync(path.join(p.dirElectron, 'dist', 'electron.exe')),
+    'el fichero parcial sigue en disco: lo que cambia es el veredicto, no el disco');
 }
 
-// El otro reverso: el instalador termina bien pero no deja binario.
+// =====================================================================
+console.log('\n=== 7. Exit cero sin binario válido ===');
+// =====================================================================
 {
-  const p = montarPaqueteFalso();
-  const r = ejecutar(p, () => { /* no hace nada */ });
-  check(r.error instanceof Error, 'lanza si el instalador sale bien pero no deja binario');
+  const p = montarPaquete();
+  const r = ejecutar(p, () => { /* termina bien y no instala nada */ });
+  check(r.error instanceof Error, 'lanza');
   check(/terminó sin error pero no dejó utilizable/.test(r.error.message),
-    'y el mensaje distingue ese caso del anterior');
-  check(r.error.message.includes(BINARIO), `nombra el fichero que falta (${BINARIO})`);
+    'y distingue ese caso del instalador que falla');
+  check(/no hay .*version/.test(r.error.message), 'nombra lo que falta');
 }
 
 // =====================================================================
-console.log('\n=== 7. Caché personalizada por electron_config_cache ===');
+console.log('\n=== 8. dist/version incorrecto ===');
 // =====================================================================
 {
-  // La ruta no se inventa: es la misma variable que `install.js` pasa como
-  // `cacheRoot` a `downloadArtifact`.
-  const p = montarPaqueteFalso();
-  const cachePropia = fs.mkdtempSync(path.join(os.tmpdir(), 'mika5-eeb-cache-'));
-  temporales.push(cachePropia);
-  // El zip vive SÓLO en la caché personalizada, en un subdirectorio con nombre
-  // de hash, que es como la organiza @electron/get.
-  const sub = path.join(cachePropia, 'a'.repeat(64));
-  fs.mkdirSync(sub, { recursive: true });
-  fs.writeFileSync(path.join(sub, NOMBRE_ZIP), 'contenido correcto');
-
-  const previo = process.env.electron_config_cache;
-  process.env.electron_config_cache = cachePropia;
-  try {
-    check(modulo.buscarZipEnCache(NOMBRE_ZIP) === path.join(sub, NOMBRE_ZIP),
-      'buscarZipEnCache() encuentra el zip bajo electron_config_cache');
-  } finally {
-    if (previo === undefined) delete process.env.electron_config_cache;
-    else process.env.electron_config_cache = previo;
-  }
-
-  const registros = [];
-  const previo2 = process.env.electron_config_cache;
-  process.env.electron_config_cache = cachePropia;
-  let error = null;
-  try {
-    modulo.principal({
-      dirElectron: p.dirElectron,
-      descargar: ({ dirElectron }) => instalarBinario(dirElectron),
-      registrar: (m) => registros.push(m),
-      plataforma: PLATAFORMA,
-      arquitectura: ARQUITECTURA
-    });
-  } catch (e) { error = e; } finally {
-    if (previo2 === undefined) delete process.env.electron_config_cache;
-    else process.env.electron_config_cache = previo2;
-  }
-  check(error === null, 'el flujo completo funciona con la caché redirigida');
-  check(registros.some(m => m.includes('zip en caché verificado')),
-    'y verifica el zip que vive en esa caché, no en la del sistema');
+  const p = montarPaquete();
+  const r = ejecutar(p, ({ dirElectron }) => instalar(dirElectron, { version: '31.7.7' }));
+  check(r.error instanceof Error, 'una versión distinta a la del paquete no se acepta');
+  check(/dist\/version dice 31\.7\.7/.test(r.error.message) && r.error.message.includes(VERSION),
+    'el mensaje contrasta ambas versiones');
 }
 
 // =====================================================================
-console.log('\n=== 8. Sin paquete electron: no hay nada que asegurar ===');
+console.log('\n=== 9. path.txt ausente o inválido ===');
 // =====================================================================
 {
-  const raiz = fs.mkdtempSync(path.join(os.tmpdir(), 'mika5-eeb-vacio-'));
-  temporales.push(raiz);
-  let invocaciones = 0;
-  let error = null;
-  try {
-    modulo.principal({
-      dirElectron: path.join(raiz, 'node_modules', 'electron'),
-      descargar: () => { invocaciones++; },
-      registrar: () => {},
-      plataforma: PLATAFORMA,
-      arquitectura: ARQUITECTURA
-    });
-  } catch (e) { error = e; }
-  check(error === null && invocaciones === 0,
-    'una instalación sin devDependencies no lanza ni descarga nada');
+  const p = montarPaquete();
+  const r = ejecutar(p, ({ dirElectron }) => instalar(dirElectron, { pathTxt: null }));
+  check(r.error instanceof Error && /no hay .*path\.txt/.test(r.error.message),
+    'sin path.txt no hay instalación utilizable');
+}
+{
+  const p = montarPaquete();
+  const r = ejecutar(p, ({ dirElectron }) => instalar(dirElectron, { pathTxt: '   ' }));
+  check(r.error instanceof Error && /está vacío/.test(r.error.message), 'un path.txt vacío se rechaza');
+}
+{
+  const p = montarPaquete();
+  const r = ejecutar(p, ({ dirElectron }) => instalar(dirElectron, { pathTxt: 'no-existe.exe' }));
+  check(r.error instanceof Error && /apunta a no-existe\.exe/.test(r.error.message),
+    'un path.txt que apunta a un fichero inexistente se rechaza');
+}
+{
+  const p = montarPaquete();
+  const r = ejecutar(p, ({ dirElectron }) => instalar(dirElectron, { pathTxt: '../../fuera.exe' }));
+  check(r.error instanceof Error && /no es una ruta relativa dentro de dist/.test(r.error.message),
+    'un path.txt que escapa de dist se rechaza');
+}
+{
+  const p = montarPaquete();
+  const absoluta = process.platform === 'win32' ? 'C:\\fuera.exe' : '/fuera.exe';
+  const r = ejecutar(p, ({ dirElectron }) => instalar(dirElectron, { pathTxt: absoluta }));
+  check(r.error instanceof Error && /no es una ruta relativa dentro de dist/.test(r.error.message),
+    'un path.txt absoluto se rechaza');
+}
+
+// =====================================================================
+console.log('\n=== 10. La plataforma la decide el instalador, no el wrapper ===');
+// =====================================================================
+//
+// El wrapper no reproduce la precedencia de ELECTRON_INSTALL_PLATFORM /
+// ELECTRON_INSTALL_ARCH / npm_config_* / proceso: lee `path.txt`, que es lo que
+// `install.js` escribe con el resultado de esa decisión. Se comprueba que acepta
+// la instalación resultante sea cual sea la plataforma elegida, y que no hay
+// ninguna lógica propia de plataforma que pueda discrepar.
+{
+  const casos = [
+    { clave: 'ELECTRON_INSTALL_PLATFORM', valor: 'darwin', binario: 'Electron.app/Contents/MacOS/Electron' },
+    { clave: 'ELECTRON_INSTALL_PLATFORM', valor: 'linux', binario: 'electron' },
+    { clave: 'ELECTRON_INSTALL_ARCH', valor: 'arm64', binario: 'electron.exe' }
+  ];
+  for (const caso of casos) {
+    const previo = process.env[caso.clave];
+    process.env[caso.clave] = caso.valor;
+    try {
+      const p = montarPaquete();
+      const r = ejecutar(p, ({ dirElectron }) =>
+        instalar(dirElectron, { binario: caso.binario, pathTxt: caso.binario }));
+      check(r.error === null,
+        `con ${caso.clave}=${caso.valor} acepta la instalación que dejó el instalador (${caso.binario})`);
+    } finally {
+      if (previo === undefined) delete process.env[caso.clave];
+      else process.env[caso.clave] = previo;
+    }
+  }
+}
+{
+  // Sólo el código: los comentarios SÍ nombran esas variables, precisamente
+  // para explicar que quien las resuelve es el instalador oficial.
+  const codigo = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'ensure-electron-binary.js'), 'utf8')
+    .split('\n')
+    .filter(linea => !/^\s*(\/\/|\*|\/\*)/.test(linea))
+    .join('\n');
+  check(!/process\.platform/.test(codigo)
+    && !/npm_config_platform/.test(codigo)
+    && !/npm_config_arch/.test(codigo),
+    'el wrapper no reimplementa la selección de plataforma ni arquitectura');
+  check(!/createHash|sha256|checksums\.json/.test(codigo),
+    'el wrapper no reimplementa checksums: eso es de @electron/get');
+  check(!/Expand-Archive|unzip|yauzl|extract/i.test(codigo),
+    'el wrapper no reimplementa la extracción');
 }
 
 // ---------------------------------------------------------------------------

@@ -11,32 +11,29 @@
 // en rojo con el binario ausente. Depender de una caché caliente es un
 // requisito oculto, y aguanta hasta el primer runner limpio de CI.
 //
-// Aquí no se reimplementa la descarga ni se inventa ninguna URL: se ejecuta el
-// punto de entrada oficial, que resuelve mirror, proxy, caché y checksum a
-// través de `@electron/get` y extrae con `@electron-internal/extract-zip`.
+// Qué NO hace esto, a propósito:
 //
-// El paso es idempotente: si el binario ya está en la versión correcta, no hace
-// nada.
+//   · No descarga. No extrae. No comprueba checksums. No mira dentro de la
+//     caché. Todo eso lo hace `@electron/get@5`, que valida el artefacto contra
+//     `checksums.json` TANTO al descargarlo COMO al encontrarlo en caché: si un
+//     zip cacheado no cuadra, lo descarta y vuelve a descargar
+//     (`dist/index.js`, "Artifact in cache didn't match checksums" → "falling
+//     back to re-download"). Una versión anterior de este script duplicaba esa
+//     comprobación creyendo que un acierto de caché se aceptaba sin verificar.
+//     Era falso, y el código sobraba.
 //
-// SEGURIDAD. El zip se comprueba contra el `checksums.json` que trae el propio
-// paquete electron, pero el valor de esa comprobación no es el mismo en los dos
-// casos, y conviene no confundirlos:
+//   · No decide plataforma ni arquitectura. El instalador oficial resuelve esa
+//     precedencia —`ELECTRON_INSTALL_PLATFORM`, `ELECTRON_INSTALL_ARCH`,
+//     `npm_config_platform`, `npm_config_arch`, y por último las del proceso—,
+//     y reproducirla a medias sólo crea discrepancias. Aquí se lee el resultado:
+//     `path.txt`, que `install.js` escribe apuntando al ejecutable que acaba de
+//     instalar.
 //
-//   · CACHÉ EXISTENTE — la comprobación es la que importa, y por eso ocurre
-//     ANTES de invocar al instalador. `@electron/get` verifica el hash cuando
-//     descarga; si acierta en la caché, se fía de ella y extrae. Extraer un zip
-//     sin comprobar convertiría cualquier escritura en el directorio de caché
-//     del usuario en ejecución de código: lo que sale de ahí es el ejecutable
-//     que después corre la aplicación entera.
-//
-//   · CACHÉ FRÍA — `@electron/get` ya verifica durante la descarga, contra el
-//     mismo `checksums.json`. La comprobación local posterior no añade
-//     seguridad: es evidencia, deja constancia del hash en el log de
-//     instalación.
+// Lo que sí hace: invocar al instalador oficial y comprobar, de forma
+// fail-closed, que dejó una instalación utilizable.
 
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 
 const RAIZ = path.join(__dirname, '..');
@@ -46,91 +43,63 @@ function log(mensaje) {
   console.log(`ensure-electron-binary: ${mensaje}`);
 }
 
-/** Nombre del ejecutable dentro de `dist`, por plataforma. */
-function rutaBinario(plataforma) {
-  if (plataforma === 'darwin') return 'Electron.app/Contents/MacOS/Electron';
-  if (plataforma === 'win32') return 'electron.exe';
-  return 'electron';
-}
-
-function yaInstalado(dist, version, plataforma) {
-  try {
-    const declarada = fs.readFileSync(path.join(dist, 'version'), 'utf8').replace(/^v/, '').trim();
-    if (declarada !== version) return false;
-    return fs.existsSync(path.join(dist, rutaBinario(plataforma)));
-  } catch (_) {
-    return false;
-  }
-}
-
 /**
- * Localiza el zip en la caché de `@electron/get`, que guarda cada artefacto en
- * un subdirectorio con nombre de hash. Se busca por nombre de archivo en vez de
- * recalcular ese hash: el esquema es interno de esa librería y puede cambiar.
+ * Comprueba que hay una instalación utilizable, con los mismos criterios que
+ * `isInstalled()` de `install.js`: la versión declarada en `dist/version`, un
+ * `path.txt` con contenido, y el ejecutable al que ese `path.txt` apunta.
  *
- * `electron_config_cache` va primero a propósito, y no es una ruta inventada: es
- * la misma variable que `install.js` pasa como `cacheRoot` a `downloadArtifact`.
- * Si quien instala la redirige, aquí se mira donde el instalador va a escribir.
+ * Devuelve `{ ok: false, motivo }` en vez de lanzar, para que el llamador
+ * distinga "todavía no está" de "el instalador falló".
  */
-function buscarZipEnCache(nombreZip) {
-  const raices = [
-    process.env.electron_config_cache,
-    process.env.ELECTRON_CACHE,
-    process.platform === 'win32'
-      ? path.join(process.env.LOCALAPPDATA || '', 'electron', 'Cache')
-      : path.join(process.env.HOME || '', '.cache', 'electron')
-  ].filter(Boolean);
+function inspeccionarInstalacion(dirElectron, versionEsperada) {
+  const dist = process.env.ELECTRON_OVERRIDE_DIST_PATH || path.join(dirElectron, 'dist');
 
-  for (const raiz of raices) {
-    if (!fs.existsSync(raiz)) continue;
-    const candidatos = [path.join(raiz, nombreZip)];
-    for (const entrada of fs.readdirSync(raiz, { withFileTypes: true })) {
-      if (entrada.isDirectory()) candidatos.push(path.join(raiz, entrada.name, nombreZip));
-    }
-    for (const candidato of candidatos) {
-      if (fs.existsSync(candidato)) return candidato;
-    }
+  const rutaVersion = path.join(dist, 'version');
+  let version;
+  try {
+    version = fs.readFileSync(rutaVersion, 'utf8').replace(/^v/, '').trim();
+  } catch (_) {
+    return { ok: false, motivo: `no hay ${rutaVersion}` };
   }
-  return null;
-}
+  if (version !== versionEsperada) {
+    return {
+      ok: false,
+      motivo: `dist/version dice ${version} y el paquete electron del checkout declara ${versionEsperada}`
+    };
+  }
 
-function sha256(archivo) {
-  const hash = crypto.createHash('sha256');
-  hash.update(fs.readFileSync(archivo));
-  return hash.digest('hex');
-}
+  const rutaPathTxt = path.join(dirElectron, 'path.txt');
+  let relativo;
+  try {
+    relativo = fs.readFileSync(rutaPathTxt, 'utf8').trim();
+  } catch (_) {
+    return { ok: false, motivo: `no hay ${rutaPathTxt}` };
+  }
+  if (!relativo) {
+    return { ok: false, motivo: `${rutaPathTxt} está vacío` };
+  }
+  // `path.txt` es una ruta RELATIVA dentro de `dist`. Una absoluta o con `..`
+  // apuntaría fuera del paquete, y eso no lo escribe el instalador oficial.
+  if (path.isAbsolute(relativo) || relativo.split(/[\\/]/).includes('..')) {
+    return { ok: false, motivo: `path.txt no es una ruta relativa dentro de dist: ${relativo}` };
+  }
 
-/** Comprueba un zip contra el `checksums.json` del propio paquete electron. */
-function verificarZip(zip, nombreZip, dirElectron = DIR_ELECTRON) {
-  const esperado = (() => {
-    try {
-      return JSON.parse(fs.readFileSync(path.join(dirElectron, 'checksums.json'), 'utf8'))[nombreZip];
-    } catch (_) {
-      return null;
-    }
-  })();
-  if (!esperado) {
-    throw new Error(`checksums.json no declara ${nombreZip}: no se acepta nada sin poder verificarlo`);
+  const binario = path.join(dist, relativo);
+  if (!fs.existsSync(binario)) {
+    return { ok: false, motivo: `path.txt apunta a ${relativo}, que no existe en ${dist}` };
   }
-  const obtenido = sha256(zip);
-  if (obtenido !== String(esperado).toLowerCase()) {
-    throw new Error(
-      'el zip no coincide con el hash declarado por electron.\n'
-      + `  archivo:  ${zip}\n  esperado: ${esperado}\n  obtenido: ${obtenido}\n`
-      + '  Bórralo y vuelve a instalar; no se acepta un artefacto sin verificar.'
-    );
-  }
-  return obtenido;
+
+  return { ok: true, version, relativo, binario };
 }
 
 /**
  * Ejecuta el descargador que trae el propio paquete electron.
  *
  * Un código de salida distinto de cero es un fallo real y se propaga como tal,
- * conservando la causa original en `cause`. La versión anterior lo capturaba y
+ * conservando la causa original en `cause`. Una versión anterior lo capturaba y
  * devolvía `false`, y el llamador no miraba ese valor: una descarga fallida que
- * dejara un `dist` de una versión anterior —o a medio escribir— se declaraba
- * correcta. El fallo no desaparecía, sólo se posponía hasta el primer arranque.
+ * dejara un `dist` de otra versión —o a medio escribir— se declaraba correcta.
+ * El fallo no desaparecía, sólo se posponía hasta el primer arranque.
  */
 function descargarConInstaladorOficial({ dirElectron = DIR_ELECTRON, ejecutar = execFileSync } = {}) {
   const instalador = path.join(dirElectron, 'install.js');
@@ -160,59 +129,39 @@ function descargarConInstaladorOficial({ dirElectron = DIR_ELECTRON, ejecutar = 
 function principal({
   dirElectron = DIR_ELECTRON,
   descargar = descargarConInstaladorOficial,
-  buscarZip = buscarZipEnCache,
-  registrar = log,
-  plataforma = process.env.npm_config_platform || process.platform,
-  arquitectura = process.env.npm_config_arch || process.arch
+  registrar = log
 } = {}) {
   if (!fs.existsSync(dirElectron)) {
-    // Instalación sin devDependencies: no hay nada que asegurar.
+    // `npm ci --omit=dev` no instala electron. No hay nada que asegurar y no es
+    // un error.
     return;
   }
 
   const version = JSON.parse(fs.readFileSync(path.join(dirElectron, 'package.json'), 'utf8')).version;
-  const dist = path.join(dirElectron, 'dist');
 
-  if (yaInstalado(dist, version, plataforma)) {
-    registrar(`binario ${version} ya presente`);
+  const previa = inspeccionarInstalacion(dirElectron, version);
+  if (previa.ok) {
+    registrar(`binario ${version} ya presente (${previa.relativo})`);
     return;
   }
 
-  const nombreZip = `electron-v${version}-${plataforma}-${arquitectura}.zip`;
+  registrar(`binario ${version} no utilizable (${previa.motivo}): se invoca el descargador oficial`);
 
-  // Caché existente: se verifica ANTES, porque es el instalador quien extrae.
-  // Un hash que no cuadra corta aquí, sin llegar a invocarlo.
-  const zipPrevio = buscarZip(nombreZip);
-  if (zipPrevio) {
-    registrar(`zip en caché verificado (sha256 ${verificarZip(zipPrevio, nombreZip, dirElectron).slice(0, 16)}…)`);
-  } else {
-    registrar('binario ausente y sin zip en caché: se invoca el descargador oficial de electron');
-  }
-
-  // Un fallo aquí sube tal cual. No se mira si `dist` quedó con pinta de servir:
-  // una descarga que terminó en error no autoriza a declarar la instalación
-  // correcta, por muchos ficheros que haya dejado por el camino.
+  // Un fallo aquí sube tal cual. No se mira qué quedó en `dist`: una descarga
+  // que terminó en error no autoriza a declarar la instalación correcta, deje
+  // los ficheros que deje por el camino.
   descargar({ dirElectron });
 
-  // Caché fría: `@electron/get` ya verificó al descargar contra este mismo
-  // `checksums.json`. Repetirlo no añade seguridad; deja el hash en el log.
-  if (!zipPrevio) {
-    const zipNuevo = buscarZip(nombreZip);
-    if (zipNuevo) {
-      registrar(`zip descargado y verificado (sha256 ${verificarZip(zipNuevo, nombreZip, dirElectron).slice(0, 16)}…)`);
-    }
-  }
-
-  if (!yaInstalado(dist, version, plataforma)) {
+  const resultado = inspeccionarInstalacion(dirElectron, version);
+  if (!resultado.ok) {
     throw new Error(
-      `el descargador oficial terminó sin error pero no dejó utilizable el binario de Electron ${version}.\n`
-      + `  falta: ${path.join(dist, rutaBinario(plataforma))}\n`
+      `el descargador oficial terminó sin error pero no dejó utilizable Electron ${version}: ${resultado.motivo}\n`
       + '  Comprueba red, proxy o ELECTRON_MIRROR y reintenta:\n'
       + '    node node_modules/electron/install.js'
     );
   }
 
-  registrar(`binario ${version} listo (descargador oficial)`);
+  registrar(`binario ${version} listo (${resultado.relativo}, descargador oficial)`);
 }
 
 if (require.main === module) {
@@ -226,11 +175,7 @@ if (require.main === module) {
 }
 
 module.exports = {
-  rutaBinario,
-  yaInstalado,
-  buscarZipEnCache,
-  sha256,
-  verificarZip,
+  inspeccionarInstalacion,
   descargarConInstaladorOficial,
   principal
 };
