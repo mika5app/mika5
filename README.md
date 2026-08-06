@@ -105,12 +105,12 @@ Desktop application for working with local and cloud AI models, organized by pro
 
 | Component | Technology | Version |
 |-----------|------------|---------|
-| Desktop | Electron | ^31.0.0 |
-| Database | better-sqlite3 (WAL mode) | ^12.6.2 |
+| Desktop | Electron | 43.3.0 |
+| Database | better-sqlite3 (WAL mode, N-API) | 13.0.3 |
 | Markdown | marked | ^17.0.4 |
 | Syntax highlight | highlight.js + atom-one-dark | ^11.11.1 |
 | UUIDs | uuid | ^9.0.1 |
-| Build | electron-builder (NSIS + DMG + AppImage) | ^24.13.3 |
+| Build | electron-builder (NSIS + DMG + AppImage) | 26.15.7 |
 | Frontend | Vanilla JavaScript (no frameworks) | — |
 
 ---

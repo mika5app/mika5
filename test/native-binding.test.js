@@ -2,11 +2,17 @@
 
 // Procedencia del binding nativo y comportamiento real de SQLite bajo Electron.
 //
-// Por qué existe: la migración a Electron 43 rompió la compilación de
-// `better-sqlite3@12.x` contra V8 —`External::Value()`, `External::New()`,
-// `PropertyCallbackInfo::This()` y la sobrecarga de `SetNativeDataProperty`
-// desaparecieron o cambiaron—, y la salida fue subir a la serie 13, que usa
-// N-API y trae el binario dentro del propio paquete npm.
+// Por qué existe: al migrar a Electron 43, la versión fijada entonces
+// —`better-sqlite3@12.6.2`— no compiló contra V8: `External::Value()`,
+// `External::New()`, `PropertyCallbackInfo::This()` y la sobrecarga de
+// `SetNativeDataProperty` desaparecieron o cambiaron. La 12.11.1 comparte ese
+// mismo código fuente.
+//
+// Eso NO significa que toda la serie 12 quede fuera: `better-sqlite3@12.12.0`
+// existe y contempla Electron 43. Se eligió la 13.0.3 por otra razón —usa N-API
+// en vez de la API de V8 y trae los binarios dentro del propio paquete npm para
+// win32, darwin y linux en x64 y arm64, glibc y musl—, que es la matriz que
+// necesita el empaquetado multiplataforma.
 //
 // Eso cambia de dónde sale el `.node`, y ahí caben dos fallos silenciosos:
 //
