@@ -78,6 +78,18 @@ jobs:
           test -s SECURITY.md
           echo "version $VERSION"
 
+      - name: ELECTRON_OVERRIDE_DIST_PATH must be absent
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${ELECTRON_OVERRIDE_DIST_PATH:-}" ]; then
+            echo "ELECTRON_OVERRIDE_DIST_PATH está definida: '$ELECTRON_OVERRIDE_DIST_PATH'"
+            echo "Redirige dist/ y haría que lo instalado, lo empaquetado y lo verificado"
+            echo "no fuesen necesariamente lo mismo. No se limpia en silencio: CI falla."
+            exit 1
+          fi
+          echo "ELECTRON_OVERRIDE_DIST_PATH ausente"
+
       - name: Install dependencies
         run: npm ci
 
@@ -117,6 +129,18 @@ jobs:
       - name: Install virtual display
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends xvfb
 
+      - name: ELECTRON_OVERRIDE_DIST_PATH must be absent
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${ELECTRON_OVERRIDE_DIST_PATH:-}" ]; then
+            echo "ELECTRON_OVERRIDE_DIST_PATH está definida: '$ELECTRON_OVERRIDE_DIST_PATH'"
+            echo "Redirige dist/ y haría que lo instalado, lo empaquetado y lo verificado"
+            echo "no fuesen necesariamente lo mismo. No se limpia en silencio: CI falla."
+            exit 1
+          fi
+          echo "ELECTRON_OVERRIDE_DIST_PATH ausente"
+
       - name: Install dependencies
         run: npm ci
 
@@ -125,13 +149,14 @@ jobs:
       - name: Full audit
         run: npm audit
 
-      - name: Full gate battery
-        run: xvfb-run -a npm run test:all
-
-      # El gate GUI se ejecuta aparte y con su propio script: no es un alias de
-      # test:all, sólo las suites que abren superficie gráfica.
+      # El gate GUI va PRIMERO y con su propio script: no es un alias de
+      # test:all, sólo las suites que abren superficie gráfica. Ejecutarlo antes
+      # deja evidencia independiente aunque la batería general falle después.
       - name: GUI gate
         run: xvfb-run -a npm run test:gui
+
+      - name: Full gate battery
+        run: xvfb-run -a npm run test:all
 
       - name: Whitespace check
         run: git diff --check
@@ -169,6 +194,17 @@ jobs:
       - name: Record toolchain
         shell: bash
         run: node -v && npm -v && echo "${{ runner.arch }}"
+
+      - name: ELECTRON_OVERRIDE_DIST_PATH must be absent
+        shell: pwsh
+        run: |
+          if ($env:ELECTRON_OVERRIDE_DIST_PATH) {
+            Write-Output "ELECTRON_OVERRIDE_DIST_PATH esta definida: '$env:ELECTRON_OVERRIDE_DIST_PATH'"
+            Write-Output "Redirige dist/ y haria que lo instalado, lo empaquetado y lo verificado"
+            Write-Output "no fuesen necesariamente lo mismo. No se limpia en silencio: CI falla."
+            exit 1
+          }
+          Write-Output "ELECTRON_OVERRIDE_DIST_PATH ausente"
 
       - name: Install dependencies
         run: npm ci
@@ -218,6 +254,17 @@ jobs:
           set -euo pipefail
           node -v && npm -v
           echo "arch ${{ runner.arch }}"
+
+      - name: ELECTRON_OVERRIDE_DIST_PATH must be absent
+        shell: pwsh
+        run: |
+          if ($env:ELECTRON_OVERRIDE_DIST_PATH) {
+            Write-Output "ELECTRON_OVERRIDE_DIST_PATH esta definida: '$env:ELECTRON_OVERRIDE_DIST_PATH'"
+            Write-Output "Redirige dist/ y haria que lo instalado, lo empaquetado y lo verificado"
+            Write-Output "no fuesen necesariamente lo mismo. No se limpia en silencio: CI falla."
+            exit 1
+          }
+          Write-Output "ELECTRON_OVERRIDE_DIST_PATH ausente"
 
       - name: Install dependencies
         run: npm ci
@@ -304,6 +351,18 @@ jobs:
 
       - name: Record toolchain
         run: node -v && npm -v && uname -m
+      - name: ELECTRON_OVERRIDE_DIST_PATH must be absent
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${ELECTRON_OVERRIDE_DIST_PATH:-}" ]; then
+            echo "ELECTRON_OVERRIDE_DIST_PATH está definida: '$ELECTRON_OVERRIDE_DIST_PATH'"
+            echo "Redirige dist/ y haría que lo instalado, lo empaquetado y lo verificado"
+            echo "no fuesen necesariamente lo mismo. No se limpia en silencio: CI falla."
+            exit 1
+          fi
+          echo "ELECTRON_OVERRIDE_DIST_PATH ausente"
+
       - name: Install dependencies
         run: npm ci
       - name: Production audit
@@ -361,6 +420,18 @@ jobs:
 
       - name: Record toolchain
         run: node -v && npm -v && uname -m
+      - name: ELECTRON_OVERRIDE_DIST_PATH must be absent
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${ELECTRON_OVERRIDE_DIST_PATH:-}" ]; then
+            echo "ELECTRON_OVERRIDE_DIST_PATH está definida: '$ELECTRON_OVERRIDE_DIST_PATH'"
+            echo "Redirige dist/ y haría que lo instalado, lo empaquetado y lo verificado"
+            echo "no fuesen necesariamente lo mismo. No se limpia en silencio: CI falla."
+            exit 1
+          fi
+          echo "ELECTRON_OVERRIDE_DIST_PATH ausente"
+
       - name: Install dependencies
         run: npm ci
       - name: Production audit
@@ -421,6 +492,18 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends rpm fakeroot xvfb libfuse2t64 || \
           sudo apt-get install -y --no-install-recommends rpm fakeroot xvfb libfuse2
+      - name: ELECTRON_OVERRIDE_DIST_PATH must be absent
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${ELECTRON_OVERRIDE_DIST_PATH:-}" ]; then
+            echo "ELECTRON_OVERRIDE_DIST_PATH está definida: '$ELECTRON_OVERRIDE_DIST_PATH'"
+            echo "Redirige dist/ y haría que lo instalado, lo empaquetado y lo verificado"
+            echo "no fuesen necesariamente lo mismo. No se limpia en silencio: CI falla."
+            exit 1
+          fi
+          echo "ELECTRON_OVERRIDE_DIST_PATH ausente"
+
       - name: Install dependencies
         run: npm ci
       - name: Production audit
