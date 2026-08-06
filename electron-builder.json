@@ -29,7 +29,10 @@
   ],
   "electronFuses": {
     "enableEmbeddedAsarIntegrityValidation": true,
-    "onlyLoadAppFromAsar": true
+    "onlyLoadAppFromAsar": true,
+    "runAsNode": false,
+    "enableNodeOptionsEnvironmentVariable": false,
+    "enableNodeCliInspectArguments": false
   },
   "extraMetadata": {
     "main": "src/main/main.js"
