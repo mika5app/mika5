@@ -1,0 +1,478 @@
+name: Security validation (no publishing)
+
+# Validación completa de la rama de seguridad SIN publicar nada.
+#
+# Por qué existe: `build.yml` sólo dispara en `main`, `release/**`, tags y PRs a
+# `main`, y sus jobs de plataforma están condicionados a `github.ref_type ==
+# 'tag'`. Desde una rama de trabajo no corre nada, y la matriz completa sólo se
+# alcanzaba etiquetando —es decir, empezando una release para poder probarla.
+#
+# Aquí se construyen las siete plataformas con `--publish never`, se verifican
+# los artefactos y se calculan sus checksums. No se crea ninguna GitHub Release,
+# no se usan secretos de firma y no se llama al workflow de despliegue web. Los
+# artefactos suben como artifacts de Actions, para inspección y nada más.
+
+on:
+  push:
+    branches:
+      - 'security/**'
+
+# Sólo lectura. Sin `contents: write` no se puede crear una release aunque
+# alguien añada el paso por descuido.
+permissions:
+  contents: read
+
+env:
+  # electron-builder 26 pide Node >= 20; el proyecto se desarrolla en 24. Se fija
+  # 22 como mínimo soportado y común a todos los jobs.
+  NODE_VERSION: '22'
+
+concurrency:
+  group: mika5-security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate Community source
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Record toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "node    $(node -v)"
+          echo "npm     $(npm -v)"
+          echo "runner  ${{ runner.os }} / ${{ runner.arch }}"
+
+      - name: Validate Community metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid package version: $VERSION"
+            exit 1
+          fi
+          test -s LICENSE
+          test -s BUILDING.md
+          test -s COMMUNITY.md
+          test -s TRADEMARK.md
+          test -s SECURITY.md
+          echo "version $VERSION"
+
+      # La caché de Electron vive dentro del runner y empieza vacía. Se declara
+      # explícitamente para que ningún paso herede una caché de otro sitio.
+      - name: Install dependencies
+        shell: bash
+        env:
+          electron_config_cache: ${{ runner.temp }}/electron-cache
+        run: |
+          set -euo pipefail
+          test ! -d "$electron_config_cache" || { echo "la caché no está vacía"; exit 1; }
+          npm ci
+
+      - name: Production audit
+        run: npm audit --omit=dev
+
+      - name: Full audit
+        run: npm audit
+
+  gates-linux:
+    name: Gates (Linux, xvfb)
+    runs-on: ubuntu-latest
+    needs: validate
+    timeout-minutes: 45
+    env:
+      electron_config_cache: ${{ runner.temp }}/electron-cache
+      MIKA5_ELECTRON_ARGS: --no-sandbox
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Record toolchain
+        run: node -v && npm -v && uname -m
+
+      - name: Install virtual display
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends xvfb
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Production audit
+        run: npm audit --omit=dev
+      - name: Full audit
+        run: npm audit
+
+      - name: Full gate battery
+        run: xvfb-run -a npm run test:all
+
+      # El gate GUI se ejecuta aparte y con su propio script: no es un alias de
+      # test:all, sólo las suites que abren superficie gráfica.
+      - name: GUI gate
+        run: xvfb-run -a npm run test:gui
+
+      - name: Whitespace check
+        run: git diff --check
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: gate-logs-linux
+          path: .gate-logs/
+          include-hidden-files: true
+          retention-days: 7
+
+  gates-windows:
+    name: Gates (Windows)
+    runs-on: windows-latest
+    needs: validate
+    timeout-minutes: 45
+    env:
+      electron_config_cache: ${{ runner.temp }}/electron-cache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Record toolchain
+        shell: bash
+        run: node -v && npm -v && echo "${{ runner.arch }}"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Production audit
+        run: npm audit --omit=dev
+      - name: Full audit
+        run: npm audit
+
+      - name: Full gate battery
+        shell: bash
+        run: npm run test:all
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: gate-logs-windows
+          path: .gate-logs/
+          include-hidden-files: true
+          retention-days: 7
+
+  build-windows:
+    name: Windows x64 package
+    runs-on: windows-latest
+    needs: [gates-linux, gates-windows]
+    timeout-minutes: 60
+    env:
+      electron_config_cache: ${{ runner.temp }}/electron-cache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Record toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          node -v && npm -v
+          echo "arch ${{ runner.arch }}"
+
+      - name: Electron cache starts empty
+        shell: bash
+        run: test ! -d "$electron_config_cache" || { echo "caché no vacía"; exit 1; }
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Production audit
+        run: npm audit --omit=dev
+      - name: Full audit
+        run: npm audit
+
+      # Comprueba de verdad, con el paquete publicado, que un zip corrupto en la
+      # caché lo rechaza y reemplaza el instalador oficial. No usa ningún
+      # verificador propio: el wrapper ya no lleva ninguno.
+      - name: A corrupted cached zip is rejected by the official installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP="$(find "$electron_config_cache" -name 'electron-v*.zip' | head -1)"
+          test -n "$ZIP"
+          echo "corrompiendo $ZIP"
+          printf 'esto-no-es-un-zip' > "$ZIP"
+          rm -rf node_modules/electron/dist node_modules/electron/path.txt
+          node scripts/ensure-electron-binary.js
+          node -e "
+            const fs=require('fs'), path=require('path');
+            const d='node_modules/electron';
+            const v=fs.readFileSync(path.join(d,'dist','version'),'utf8').replace(/^v/,'').trim();
+            const esperada=require('./'+d+'/package.json').version;
+            const rel=fs.readFileSync(path.join(d,'path.txt'),'utf8').trim();
+            if(v!==esperada) throw new Error('version '+v+' != '+esperada);
+            if(!fs.existsSync(path.join(d,'dist',rel))) throw new Error('falta '+rel);
+            console.log('reinstalado y utilizable:', v, rel);
+          "
+
+      - name: Clean dist
+        shell: bash
+        run: rm -rf dist
+
+      - name: Build Windows x64 (once, no retry)
+        run: npm run build:win -- --publish never
+
+      - name: Verify the packaged executable
+        shell: bash
+        run: node scripts/verify-packaged-windows.js
+
+      - name: Checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum dist/win-unpacked/MIKA5.exe | tee -a checksums-windows.txt
+          for f in dist/*.exe; do sha256sum "$f" | tee -a checksums-windows.txt; done
+          cat checksums-windows.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: |
+            dist/*.exe
+            checksums-windows.txt
+          retention-days: 7
+
+  build-macos-intel:
+    name: macOS Intel (x64)
+    runs-on: macos-15-intel
+    needs: [gates-linux, gates-windows]
+    timeout-minutes: 60
+    env:
+      electron_config_cache: ${{ runner.temp }}/electron-cache
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Record toolchain
+        run: node -v && npm -v && uname -m
+      - name: Install dependencies
+        run: npm ci
+      - name: Production audit
+        run: npm audit --omit=dev
+      - name: Full audit
+        run: npm audit
+      - name: Clean dist
+        run: rm -rf dist
+      - name: Build macOS x64 (once, no retry)
+        run: npm run build:mac -- --x64 --publish never
+      - name: Verify architecture and artifacts
+        run: |
+          set -euo pipefail
+          APP="$(find dist -maxdepth 2 -name 'MIKA5.app' -type d | head -1)"
+          test -n "$APP"
+          BIN="$APP/Contents/MacOS/MIKA5"
+          file "$BIN"
+          lipo -archs "$BIN" | tee arch-intel.txt
+          grep -q 'x86_64' arch-intel.txt
+          if grep -q 'arm64' arch-intel.txt; then echo "mezcla arm64 en el paquete Intel"; exit 1; fi
+          ls -la dist/*.dmg
+          shasum -a 256 dist/*.dmg | tee checksums-macos-intel.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-x64
+          path: |
+            dist/*.dmg
+            checksums-macos-intel.txt
+            arch-intel.txt
+          retention-days: 7
+
+  build-macos-arm:
+    name: macOS Apple Silicon (arm64)
+    runs-on: macos-15
+    needs: [gates-linux, gates-windows]
+    timeout-minutes: 60
+    env:
+      electron_config_cache: ${{ runner.temp }}/electron-cache
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Record toolchain
+        run: node -v && npm -v && uname -m
+      - name: Install dependencies
+        run: npm ci
+      - name: Production audit
+        run: npm audit --omit=dev
+      - name: Full audit
+        run: npm audit
+      - name: Clean dist
+        run: rm -rf dist
+      - name: Build macOS arm64 (once, no retry)
+        run: npm run build:mac -- --arm64 --publish never
+      - name: Verify architecture and artifacts
+        run: |
+          set -euo pipefail
+          APP="$(find dist -maxdepth 2 -name 'MIKA5.app' -type d | head -1)"
+          test -n "$APP"
+          BIN="$APP/Contents/MacOS/MIKA5"
+          file "$BIN"
+          lipo -archs "$BIN" | tee arch-arm.txt
+          grep -q 'arm64' arch-arm.txt
+          if grep -q 'x86_64' arch-arm.txt; then echo "mezcla x86_64 en el paquete arm64"; exit 1; fi
+          ls -la dist/*.dmg
+          shasum -a 256 dist/*.dmg | tee checksums-macos-arm.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64
+          path: |
+            dist/*.dmg
+            checksums-macos-arm.txt
+            arch-arm.txt
+          retention-days: 7
+
+  build-linux:
+    name: Linux x64 packages
+    runs-on: ubuntu-latest
+    needs: [gates-linux, gates-windows]
+    timeout-minutes: 60
+    env:
+      electron_config_cache: ${{ runner.temp }}/electron-cache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Record toolchain
+        run: node -v && npm -v && uname -m
+      - name: Install packaging and display tooling
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends rpm fakeroot xvfb libfuse2t64 || \
+          sudo apt-get install -y --no-install-recommends rpm fakeroot xvfb libfuse2
+      - name: Install dependencies
+        run: npm ci
+      - name: Production audit
+        run: npm audit --omit=dev
+      - name: Full audit
+        run: npm audit
+      - name: Clean dist
+        run: rm -rf dist
+      - name: Build Linux x64 (once, no retry)
+        run: npm run build:linux -- --publish never
+      - name: Verify formats and desktop entry
+        run: |
+          set -euo pipefail
+          ls -la dist/*.AppImage dist/*.deb dist/*.rpm
+          DEB="$(ls dist/*.deb | head -1)"
+          mkdir -p /tmp/deb-x && dpkg-deb -x "$DEB" /tmp/deb-x
+          DESKTOP="$(find /tmp/deb-x -name '*.desktop' | head -1)"
+          test -n "$DESKTOP"
+          echo "--- $DESKTOP ---"
+          cat "$DESKTOP"
+          grep -q '^Name=MIKA5' "$DESKTOP"
+          grep -q '^Categories=.*Office' "$DESKTOP"
+          grep -q '^StartupWMClass=mika5' "$DESKTOP"
+          grep -q '^Keywords=.*Ollama' "$DESKTOP"
+      - name: Smoke the AppImage under Xvfb
+        run: |
+          set -euo pipefail
+          APPIMG="$(ls dist/*.AppImage | head -1)"
+          chmod +x "$APPIMG"
+          PERFIL="$(mktemp -d)"
+          xvfb-run -a "$APPIMG" --appimage-extract-and-run --no-sandbox --user-data-dir="$PERFIL" &
+          PID=$!
+          for i in $(seq 1 60); do
+            if [ -f "$PERFIL/mika5.db" ]; then break; fi
+            sleep 1
+          done
+          test -f "$PERFIL/mika5.db" || { echo "la AppImage no creó su base"; kill $PID || true; exit 1; }
+          echo "AppImage arrancó y creó $PERFIL/mika5.db"
+          kill $PID || true
+      - name: Checksums
+        run: sha256sum dist/*.AppImage dist/*.deb dist/*.rpm | tee checksums-linux.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.rpm
+            checksums-linux.txt
+          retention-days: 7
+
+  verify-artifacts:
+    name: Verify artifacts (no publishing)
+    runs-on: ubuntu-latest
+    needs: [build-windows, build-macos-intel, build-macos-arm, build-linux]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artefactos
+
+      - name: Inventory, names and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "== inventario =="
+          find artefactos -type f | sort
+
+          echo
+          echo "== presencia por plataforma =="
+          test -n "$(find artefactos -name 'MIKA5-Setup-*-win-x64.exe' | head -1)"
+          test -n "$(find artefactos -name 'MIKA5-Portable-*-win-x64.exe' | head -1)"
+          test -n "$(find artefactos -name '*-mac-x64.dmg' | head -1)"
+          test -n "$(find artefactos -name '*-mac-arm64.dmg' | head -1)"
+          test -n "$(find artefactos -name '*.AppImage' | head -1)"
+          test -n "$(find artefactos -name '*.deb' | head -1)"
+          test -n "$(find artefactos -name '*.rpm' | head -1)"
+          echo "los siete formatos están"
+
+          echo
+          echo "== arquitecturas declaradas por los jobs de macOS =="
+          cat artefactos/macos-x64/arch-intel.txt
+          cat artefactos/macos-arm64/arch-arm.txt
+          grep -q 'x86_64' artefactos/macos-x64/arch-intel.txt
+          grep -q 'arm64'  artefactos/macos-arm64/arch-arm.txt
+
+          echo
+          echo "== SHA-256 de todos los artefactos =="
+          find artefactos -type f \( -name '*.exe' -o -name '*.dmg' -o -name '*.AppImage' \
+            -o -name '*.deb' -o -name '*.rpm' \) -print0 \
+            | xargs -0 sha256sum | tee SHA256SUMS-internos.txt
+
+          echo
+          echo "NOTA: esto NO es una release. No se publica ningún artefacto."
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: checksums
+          path: SHA256SUMS-internos.txt
+          retention-days: 7
