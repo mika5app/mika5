@@ -369,29 +369,92 @@ jobs:
         run: npm audit --omit=dev
       - name: Full audit
         run: npm audit
+
+      # build/icon.icns es un derivado de src/renderer/assets/icon.png y está en
+      # .gitignore a propósito: el repositorio declara que se regenera en CI, y
+      # hasta ahora nadie lo regeneraba. scripts/gen-icns.sh es el único
+      # generador; esto lo invoca por `npm run icons:mac`, no reimplementa nada
+      # y no añade el .icns al repositorio.
+      - name: Generate the macOS icon
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf build/icon.icns build/icon.iconset
+          npm run icons:mac
+      - name: The generated icon must exist and be usable
+        shell: bash
+        run: |
+          set -euo pipefail
+          ICNS="build/icon.icns"
+          # Fail-closed. Sin icono electron-builder NO falla al empaquetar el
+          # .app: cae al icono por defecto de Electron y lo dice en una línea de
+          # log que se pierde. Donde sí revienta es al construir el DMG. Que
+          # falte tiene que parar el job aquí, antes de empaquetar.
+          test -f "$ICNS" || { echo "$ICNS no se generó o no es un archivo regular"; exit 1; }
+          test -s "$ICNS" || { echo "$ICNS está vacío"; exit 1; }
+          { file "$ICNS"
+            ls -l "$ICNS"
+            shasum -a 256 "$ICNS"
+            sips -g pixelWidth -g pixelHeight -g format "$ICNS" 2>&1 \
+              || echo "(sips no pudo inspeccionar el .icns; la comprobación de existencia y tamaño ya pasó)"
+          } | tee icon-macos-intel.txt
+
       - name: Clean dist
         run: rm -rf dist
       - name: Build macOS x64 (once, no retry)
         run: npm run build:mac -- --x64 --publish never
       - name: Verify architecture and artifacts
+        shell: bash
         run: |
           set -euo pipefail
-          APP="$(find dist -maxdepth 2 -name 'MIKA5.app' -type d | head -1)"
-          test -n "$APP"
+          VERSION="$(node -p "require('./package.json').version")"
+          APP="dist/mac/MIKA5.app"
+          OPUESTA="dist/mac-arm64"
+          DMG="dist/MIKA5-$VERSION-mac-x64.dmg"
+          ZIP="dist/MIKA5-$VERSION-mac-x64.zip"
+          echo "== versión declarada por package.json: $VERSION =="
+          ls -la dist
+
+          # Ruta fija, no búsqueda. `find … | head -1` elegía en silencio cuando
+          # había dos aplicaciones en dist/, y cuál salía dependía del orden del
+          # directorio: se podía verificar arm64 creyendo comprobar Intel.
+          # electron-builder deja x64 en dist/mac y arm64 en dist/mac-arm64.
+          test -d "$APP" || { echo "no está la aplicación x64 en $APP"; exit 1; }
+          if [ -e "$OPUESTA" ]; then
+            echo "también se empaquetó arm64 en $OPUESTA; este job debe producir una sola arquitectura"
+            exit 1
+          fi
+          APPS="$(find dist -maxdepth 2 -name 'MIKA5.app' -type d | wc -l | tr -d ' ')"
+          test "$APPS" = "1" || { echo "se esperaba exactamente una aplicación empaquetada, hay $APPS"; exit 1; }
+
           BIN="$APP/Contents/MacOS/MIKA5"
+          test -f "$BIN" || { echo "falta el binario $BIN"; exit 1; }
           file "$BIN"
           lipo -archs "$BIN" | tee arch-intel.txt
-          grep -q 'x86_64' arch-intel.txt
-          if grep -q 'arm64' arch-intel.txt; then echo "mezcla arm64 en el paquete Intel"; exit 1; fi
-          ls -la dist/*.dmg
-          shasum -a 256 dist/*.dmg | tee checksums-macos-intel.txt
+          grep -qw 'x86_64' arch-intel.txt || { echo "el binario no declara x86_64"; exit 1; }
+          if grep -qw 'arm64' arch-intel.txt; then echo "mezcla arm64 en el paquete Intel"; exit 1; fi
+
+          test -f "$DMG" || { echo "falta $DMG"; exit 1; }
+          test -f "$ZIP" || { echo "falta $ZIP"; exit 1; }
+          N_DMG="$(ls -1 dist/*.dmg | wc -l | tr -d ' ')"
+          N_ZIP="$(ls -1 dist/*.zip | wc -l | tr -d ' ')"
+          test "$N_DMG" = "1" || { echo "se esperaba un solo DMG, hay $N_DMG"; ls -1 dist/*.dmg; exit 1; }
+          test "$N_ZIP" = "1" || { echo "se esperaba un solo ZIP, hay $N_ZIP"; ls -1 dist/*.zip; exit 1; }
+          if ls dist/*arm64* >/dev/null 2>&1; then
+            echo "hay paquetes arm64 en el job Intel:"; ls -1 dist/*arm64*; exit 1
+          fi
+
+          ls -la "$DMG" "$ZIP"
+          shasum -a 256 "$DMG" "$ZIP" | tee checksums-macos-intel.txt
       - uses: actions/upload-artifact@v4
         with:
           name: macos-x64
           path: |
-            dist/*.dmg
+            dist/MIKA5-*-mac-x64.dmg
+            dist/MIKA5-*-mac-x64.zip
             checksums-macos-intel.txt
             arch-intel.txt
+            icon-macos-intel.txt
           retention-days: 7
 
   build-macos-arm:
@@ -438,29 +501,91 @@ jobs:
         run: npm audit --omit=dev
       - name: Full audit
         run: npm audit
+
+      # Mismo motivo que en el job Intel: el .icns es un derivado ignorado por
+      # git que el repositorio da por regenerado en CI. scripts/gen-icns.sh es
+      # el único generador y aquí sólo se le invoca.
+      - name: Generate the macOS icon
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf build/icon.icns build/icon.iconset
+          npm run icons:mac
+      - name: The generated icon must exist and be usable
+        shell: bash
+        run: |
+          set -euo pipefail
+          ICNS="build/icon.icns"
+          # Fail-closed. Sin icono electron-builder NO falla al empaquetar el
+          # .app: cae al icono por defecto de Electron y lo dice en una línea de
+          # log que se pierde. Donde sí revienta es al construir el DMG. Que
+          # falte tiene que parar el job aquí, antes de empaquetar.
+          test -f "$ICNS" || { echo "$ICNS no se generó o no es un archivo regular"; exit 1; }
+          test -s "$ICNS" || { echo "$ICNS está vacío"; exit 1; }
+          { file "$ICNS"
+            ls -l "$ICNS"
+            shasum -a 256 "$ICNS"
+            sips -g pixelWidth -g pixelHeight -g format "$ICNS" 2>&1 \
+              || echo "(sips no pudo inspeccionar el .icns; la comprobación de existencia y tamaño ya pasó)"
+          } | tee icon-macos-arm.txt
+
       - name: Clean dist
         run: rm -rf dist
       - name: Build macOS arm64 (once, no retry)
         run: npm run build:mac -- --arm64 --publish never
       - name: Verify architecture and artifacts
+        shell: bash
         run: |
           set -euo pipefail
-          APP="$(find dist -maxdepth 2 -name 'MIKA5.app' -type d | head -1)"
-          test -n "$APP"
+          VERSION="$(node -p "require('./package.json').version")"
+          APP="dist/mac-arm64/MIKA5.app"
+          OPUESTA="dist/mac"
+          DMG="dist/MIKA5-$VERSION-mac-arm64.dmg"
+          ZIP="dist/MIKA5-$VERSION-mac-arm64.zip"
+          echo "== versión declarada por package.json: $VERSION =="
+          ls -la dist
+
+          # Ruta fija, no búsqueda. `find … | head -1` elegía en silencio cuando
+          # había dos aplicaciones en dist/, y cuál salía dependía del orden del
+          # directorio: se podía verificar x64 creyendo comprobar Apple Silicon.
+          # electron-builder deja arm64 en dist/mac-arm64 y x64 en dist/mac; el
+          # nombre lo decide la arquitectura, no el orden de construcción.
+          test -d "$APP" || { echo "no está la aplicación arm64 en $APP"; exit 1; }
+          if [ -e "$OPUESTA" ]; then
+            echo "también se empaquetó x64 en $OPUESTA; este job debe producir una sola arquitectura"
+            exit 1
+          fi
+          APPS="$(find dist -maxdepth 2 -name 'MIKA5.app' -type d | wc -l | tr -d ' ')"
+          test "$APPS" = "1" || { echo "se esperaba exactamente una aplicación empaquetada, hay $APPS"; exit 1; }
+
           BIN="$APP/Contents/MacOS/MIKA5"
+          test -f "$BIN" || { echo "falta el binario $BIN"; exit 1; }
           file "$BIN"
           lipo -archs "$BIN" | tee arch-arm.txt
-          grep -q 'arm64' arch-arm.txt
-          if grep -q 'x86_64' arch-arm.txt; then echo "mezcla x86_64 en el paquete arm64"; exit 1; fi
-          ls -la dist/*.dmg
-          shasum -a 256 dist/*.dmg | tee checksums-macos-arm.txt
+          grep -qw 'arm64' arch-arm.txt || { echo "el binario no declara arm64"; exit 1; }
+          if grep -qw 'x86_64' arch-arm.txt; then echo "mezcla x86_64 en el paquete arm64"; exit 1; fi
+
+          test -f "$DMG" || { echo "falta $DMG"; exit 1; }
+          test -f "$ZIP" || { echo "falta $ZIP"; exit 1; }
+          N_DMG="$(ls -1 dist/*.dmg | wc -l | tr -d ' ')"
+          N_ZIP="$(ls -1 dist/*.zip | wc -l | tr -d ' ')"
+          test "$N_DMG" = "1" || { echo "se esperaba un solo DMG, hay $N_DMG"; ls -1 dist/*.dmg; exit 1; }
+          test "$N_ZIP" = "1" || { echo "se esperaba un solo ZIP, hay $N_ZIP"; ls -1 dist/*.zip; exit 1; }
+          if ls dist/*-mac-x64* >/dev/null 2>&1; then
+            echo "hay paquetes x64 en el job Apple Silicon:"; ls -1 dist/*-mac-x64*; exit 1
+          fi
+
+          ls -la "$DMG" "$ZIP"
+          shasum -a 256 "$DMG" "$ZIP" | tee checksums-macos-arm.txt
       - uses: actions/upload-artifact@v4
         with:
           name: macos-arm64
           path: |
-            dist/*.dmg
+            dist/MIKA5-*-mac-arm64.dmg
+            dist/MIKA5-*-mac-arm64.zip
             checksums-macos-arm.txt
             arch-arm.txt
+            icon-macos-arm.txt
           retention-days: 7
 
   build-linux:
