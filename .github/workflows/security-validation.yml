@@ -45,6 +45,15 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - name: Isolate the Electron cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          CACHE="$RUNNER_TEMP/electron-cache"
+          test ! -d "$CACHE" || { echo "la caché de Electron no está vacía: $CACHE"; exit 1; }
+          echo "electron_config_cache=$CACHE" >> "$GITHUB_ENV"
+          echo "caché aislada y vacía: $CACHE"
+
       - name: Record toolchain
         shell: bash
         run: |
@@ -69,16 +78,8 @@ jobs:
           test -s SECURITY.md
           echo "version $VERSION"
 
-      # La caché de Electron vive dentro del runner y empieza vacía. Se declara
-      # explícitamente para que ningún paso herede una caché de otro sitio.
       - name: Install dependencies
-        shell: bash
-        env:
-          electron_config_cache: ${{ runner.temp }}/electron-cache
-        run: |
-          set -euo pipefail
-          test ! -d "$electron_config_cache" || { echo "la caché no está vacía"; exit 1; }
-          npm ci
+        run: npm ci
 
       - name: Production audit
         run: npm audit --omit=dev
@@ -92,7 +93,6 @@ jobs:
     needs: validate
     timeout-minutes: 45
     env:
-      electron_config_cache: ${{ runner.temp }}/electron-cache
       MIKA5_ELECTRON_ARGS: --no-sandbox
     steps:
       - uses: actions/checkout@v4
@@ -101,6 +101,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+
+      - name: Isolate the Electron cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          CACHE="$RUNNER_TEMP/electron-cache"
+          test ! -d "$CACHE" || { echo "la caché de Electron no está vacía: $CACHE"; exit 1; }
+          echo "electron_config_cache=$CACHE" >> "$GITHUB_ENV"
+          echo "caché aislada y vacía: $CACHE"
 
       - name: Record toolchain
         run: node -v && npm -v && uname -m
@@ -140,8 +149,6 @@ jobs:
     runs-on: windows-latest
     needs: validate
     timeout-minutes: 45
-    env:
-      electron_config_cache: ${{ runner.temp }}/electron-cache
     steps:
       - uses: actions/checkout@v4
         with:
@@ -149,6 +156,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+
+      - name: Isolate the Electron cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          CACHE="$RUNNER_TEMP/electron-cache"
+          test ! -d "$CACHE" || { echo "la caché de Electron no está vacía: $CACHE"; exit 1; }
+          echo "electron_config_cache=$CACHE" >> "$GITHUB_ENV"
+          echo "caché aislada y vacía: $CACHE"
 
       - name: Record toolchain
         shell: bash
@@ -179,8 +195,6 @@ jobs:
     runs-on: windows-latest
     needs: [gates-linux, gates-windows]
     timeout-minutes: 60
-    env:
-      electron_config_cache: ${{ runner.temp }}/electron-cache
     steps:
       - uses: actions/checkout@v4
         with:
@@ -189,16 +203,21 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - name: Isolate the Electron cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          CACHE="$RUNNER_TEMP/electron-cache"
+          test ! -d "$CACHE" || { echo "la caché de Electron no está vacía: $CACHE"; exit 1; }
+          echo "electron_config_cache=$CACHE" >> "$GITHUB_ENV"
+          echo "caché aislada y vacía: $CACHE"
+
       - name: Record toolchain
         shell: bash
         run: |
           set -euo pipefail
           node -v && npm -v
           echo "arch ${{ runner.arch }}"
-
-      - name: Electron cache starts empty
-        shell: bash
-        run: test ! -d "$electron_config_cache" || { echo "caché no vacía"; exit 1; }
 
       - name: Install dependencies
         run: npm ci
@@ -265,7 +284,6 @@ jobs:
     needs: [gates-linux, gates-windows]
     timeout-minutes: 60
     env:
-      electron_config_cache: ${{ runner.temp }}/electron-cache
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
       - uses: actions/checkout@v4
@@ -274,6 +292,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+
+      - name: Isolate the Electron cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          CACHE="$RUNNER_TEMP/electron-cache"
+          test ! -d "$CACHE" || { echo "la caché de Electron no está vacía: $CACHE"; exit 1; }
+          echo "electron_config_cache=$CACHE" >> "$GITHUB_ENV"
+          echo "caché aislada y vacía: $CACHE"
+
       - name: Record toolchain
         run: node -v && npm -v && uname -m
       - name: Install dependencies
@@ -313,7 +341,6 @@ jobs:
     needs: [gates-linux, gates-windows]
     timeout-minutes: 60
     env:
-      electron_config_cache: ${{ runner.temp }}/electron-cache
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
       - uses: actions/checkout@v4
@@ -322,6 +349,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+
+      - name: Isolate the Electron cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          CACHE="$RUNNER_TEMP/electron-cache"
+          test ! -d "$CACHE" || { echo "la caché de Electron no está vacía: $CACHE"; exit 1; }
+          echo "electron_config_cache=$CACHE" >> "$GITHUB_ENV"
+          echo "caché aislada y vacía: $CACHE"
+
       - name: Record toolchain
         run: node -v && npm -v && uname -m
       - name: Install dependencies
@@ -360,8 +397,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: [gates-linux, gates-windows]
     timeout-minutes: 60
-    env:
-      electron_config_cache: ${{ runner.temp }}/electron-cache
     steps:
       - uses: actions/checkout@v4
         with:
@@ -369,6 +404,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+
+      - name: Isolate the Electron cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          CACHE="$RUNNER_TEMP/electron-cache"
+          test ! -d "$CACHE" || { echo "la caché de Electron no está vacía: $CACHE"; exit 1; }
+          echo "electron_config_cache=$CACHE" >> "$GITHUB_ENV"
+          echo "caché aislada y vacía: $CACHE"
+
       - name: Record toolchain
         run: node -v && npm -v && uname -m
       - name: Install packaging and display tooling
