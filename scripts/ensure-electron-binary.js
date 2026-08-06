@@ -3,21 +3,33 @@
 
 // Deja utilizable el binario de Electron después de `npm ci` / `npm install`.
 //
-// Por qué existe: en esta máquina `npm ci` terminaba con código 0 y sin
-// binario. El postinstall de electron llama a `@electron/get`, que acierta en
-// la caché, y luego extrae con `extract-zip@2.0.1` -> `yauzl@2.10.0`. Con
-// Node 24 ese yauzl recorre el zip de Electron, se detiene en la entrada 73
-// (`locales/fil.pak`) y emite `end` como si el archivo hubiese terminado: sin
-// error, sin excepción y sin binario. El zip está bien —`Expand-Archive` lo
-// extrae entero—; el extractor no. Una instalación rota que sale 0 es peor que
-// una que falla, porque el fallo aparece mucho después y en otro sitio.
+// Dos motivos, y conviene no confundirlos.
 //
-// Este paso es idempotente y no descarga nada: si el binario ya está, no hace
-// nada; si falta, extrae el zip que `@electron/get` dejó en la caché.
+// 1. DESCARGA. Desde Electron 43 el paquete npm **no declara ningún script**:
+//    no hay `postinstall` que traiga el binario. El descargador oficial viaja
+//    dentro del paquete —`install.js`, expuesto también como bin
+//    `install-electron`— y hay que invocarlo. Mientras la caché de
+//    `@electron/get` tuviera ya el zip, esto pasaba desapercibido; con una
+//    caché fría, `npm ci` terminaba en rojo con el binario ausente. Depender de
+//    una caché caliente es un requisito oculto, así que aquí se invoca el
+//    mecanismo oficial cuando hace falta.
+//
+// 2. EXTRACCIÓN. Cuando el descargador oficial acierta en la caché, extrae con
+//    `extract-zip` -> `yauzl@2.10.0`. Con Node 24 ese yauzl recorre el zip de
+//    Electron, se detiene en la entrada 73 (`locales/fil.pak`) y emite `end`
+//    como si el archivo hubiese terminado: sin error, sin excepción y sin
+//    binario. El zip está bien —`Expand-Archive` lo extrae entero—; el
+//    extractor no. Una instalación rota que sale 0 es peor que una que falla,
+//    porque el fallo aparece mucho después y en otro sitio. Por eso queda el
+//    respaldo de extraer con la herramienta del sistema.
+//
+// El paso es idempotente: si el binario ya está en la versión correcta, no hace
+// nada.
 //
 // SEGURIDAD: el zip se verifica contra `checksums.json` del propio paquete
-// electron ANTES de extraerlo. `@electron/get` sólo comprueba el hash cuando
-// descarga: si acierta en la caché se fía de ella. Extraer sin comprobar
+// electron SIEMPRE que esté en la caché, venga de una descarga de ahora o de
+// una anterior, y ANTES de extraerlo. `@electron/get` sólo comprueba el hash
+// cuando descarga: si acierta en la caché se fía de ella. Extraer sin comprobar
 // convertiría cualquier escritura en el directorio de caché del usuario en
 // ejecución de código, porque lo que se extrae es el ejecutable que después
 // corre la aplicación entera.
@@ -101,6 +113,55 @@ function extraer(zip, destino) {
   }
 }
 
+/**
+ * Invoca el descargador que trae el propio paquete electron.
+ *
+ * No se reimplementa la descarga ni se inventa una URL: se ejecuta `install.js`,
+ * que es el mismo punto de entrada que el bin `install-electron` del paquete y
+ * que resuelve mirror, proxy y checksum a través de `@electron/get`.
+ *
+ * Un fallo aquí no se propaga: puede que el zip ya esté en otra raíz de caché, y
+ * quien decide si hay binario utilizable es la comprobación posterior, no ésta.
+ */
+function descargarConInstaladorOficial() {
+  const instalador = path.join(DIR_ELECTRON, 'install.js');
+  if (!fs.existsSync(instalador)) {
+    log('el paquete electron no trae install.js: no hay descargador oficial que invocar');
+    return false;
+  }
+  log('binario ausente y sin zip en caché: se invoca el descargador oficial de electron');
+  try {
+    execFileSync(process.execPath, [instalador], { stdio: 'inherit', cwd: DIR_ELECTRON });
+    return true;
+  } catch (error) {
+    log(`el descargador oficial terminó con error: ${error.message}`);
+    return false;
+  }
+}
+
+/** Comprueba el zip contra `checksums.json` del propio paquete electron. */
+function verificarZip(zip, nombreZip) {
+  const esperado = (() => {
+    try {
+      return require(path.join(DIR_ELECTRON, 'checksums.json'))[nombreZip];
+    } catch (_) {
+      return null;
+    }
+  })();
+  if (!esperado) {
+    throw new Error(`checksums.json no declara ${nombreZip}: no se acepta nada sin poder verificarlo`);
+  }
+  const obtenido = sha256(zip);
+  if (obtenido !== String(esperado).toLowerCase()) {
+    throw new Error(
+      `el zip no coincide con el hash declarado por electron.\n`
+      + `  archivo:  ${zip}\n  esperado: ${esperado}\n  obtenido: ${obtenido}\n`
+      + '  Bórralo y vuelve a instalar; no se acepta un artefacto sin verificar.'
+    );
+  }
+  return obtenido;
+}
+
 function principal() {
   if (!fs.existsSync(DIR_ELECTRON)) {
     // Instalación sin devDependencies: no hay nada que asegurar.
@@ -118,32 +179,34 @@ function principal() {
   }
 
   const nombreZip = `electron-v${version}-${plataforma}-${arquitectura}.zip`;
-  const zip = buscarZipEnCache(nombreZip);
+  let zip = buscarZipEnCache(nombreZip);
+
+  // Caché fría: el paquete electron ya no descarga solo. Se le pide que lo haga.
   if (!zip) {
-    throw new Error(
-      `falta el binario de Electron ${version} y no hay ${nombreZip} en la caché.\n`
-      + '  Ejecuta: node node_modules/electron/install.js\n'
-      + '  Si eso termina sin crear node_modules/electron/dist/'
-      + `${rutaBinario(plataforma)}, es el fallo de yauzl con Node ${process.versions.node}.`
-    );
+    descargarConInstaladorOficial();
+    zip = buscarZipEnCache(nombreZip);
   }
 
-  const esperado = (() => {
-    try {
-      return require(path.join(DIR_ELECTRON, 'checksums.json'))[nombreZip];
-    } catch (_) {
-      return null;
-    }
-  })();
-  if (!esperado) {
-    throw new Error(`checksums.json no declara ${nombreZip}: no se extrae nada sin poder verificarlo`);
+  // El hash se comprueba siempre que haya zip, tanto si lo acaba de traer el
+  // descargador oficial como si llevaba meses en la caché del usuario.
+  if (zip) {
+    const hash = verificarZip(zip, nombreZip);
+    log(`zip verificado (sha256 ${hash.slice(0, 16)}…)`);
   }
-  const obtenido = sha256(zip);
-  if (obtenido !== String(esperado).toLowerCase()) {
+
+  // El descargador oficial puede haber dejado ya el binario extraído. En ese
+  // caso no hay nada más que hacer: el zip, si estaba, ya quedó verificado.
+  if (yaInstalado(dist, version, plataforma)) {
+    log(`binario ${version} listo (descargador oficial)`);
+    return;
+  }
+
+  if (!zip) {
     throw new Error(
-      `el zip en caché no coincide con el hash declarado por electron.\n`
-      + `  archivo:  ${zip}\n  esperado: ${esperado}\n  obtenido: ${obtenido}\n`
-      + '  Bórralo y vuelve a instalar; no se extrae un artefacto sin verificar.'
+      `falta el binario de Electron ${version} y no hay ${nombreZip} en la caché`
+      + ' tras invocar el descargador oficial.\n'
+      + '  Comprueba la red, el proxy o ELECTRON_MIRROR y reintenta:\n'
+      + '    node node_modules/electron/install.js'
     );
   }
 
@@ -166,4 +229,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { rutaBinario, yaInstalado, buscarZipEnCache, sha256 };
+module.exports = { rutaBinario, yaInstalado, buscarZipEnCache, sha256, verificarZip, descargarConInstaladorOficial };
