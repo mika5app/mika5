@@ -68,7 +68,13 @@ const depsBase = () => ({
   },
   tmpdir: () => '/tmp-falso',
   rm: () => {},
-  sleep: () => {}
+  sleep: () => {},
+  // `killSurvivors()` ya no acepta `log`, pero `runElectronTest()` sí: lo
+  // desestructura con `console.warn` por defecto y lo reenvía a
+  // `removeProfileDir()`. Sin este stub, los avisos de spawn fallido y de
+  // señal se imprimen en mitad de la suite. Es el silenciador del logger
+  // inyectado, no un resto del parámetro eliminado.
+  log: () => {}
 });
 
 {
