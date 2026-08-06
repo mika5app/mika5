@@ -15,6 +15,12 @@
 //
 // Aquí se lanzan dos procesos reales y se comprueban las tres cosas.
 //
+// Distinción que sólo esta prueba puede sostener: el valor que devuelve
+// `killSurvivors()` cuenta señales enviadas sin error, no bajas confirmadas.
+// Que el proceso deje de existir se verifica aquí, reconsultando el PID después
+// de esperar. Las pruebas unitarias de test/electron-test-isolation.test.js
+// cubren la forma de la selección y el recuento, y no observan ninguna muerte.
+//
 //   node test/kill-survivors.test.js
 
 const assert = require('assert');
@@ -71,36 +77,40 @@ async function principal() {
   check(sigueVivo(propio.pid), `el proceso de esta ejecución existe (pid ${propio.pid})`);
   check(sigueVivo(ajeno.pid), `y el ajeno también (pid ${ajeno.pid})`);
 
-  console.log('\n=== 2. La limpieza encuentra y mata al propio ===');
-  const matados = killSurvivors(perfilPropio, { log: () => {} });
-  check(matados >= 1,
-    `informa de al menos un superviviente terminado (${matados})`);
+  console.log('\n=== 2. La limpieza señaliza al propio, y el propio desaparece ===');
+  // Dos afirmaciones distintas, comprobadas por separado: lo que la función
+  // informa (señales enviadas sin error) y lo que de verdad ocurre (el proceso
+  // deja de existir). La segunda exige reconsultar el PID, y eso lo hace esta
+  // prueba, no la función.
+  const senalizados = killSurvivors(perfilPropio);
+  check(senalizados >= 1,
+    `informa de al menos un superviviente señalizado (${senalizados})`);
   await esperar(1200);
   check(!sigueVivo(propio.pid),
-    `el proceso de esta ejecución está muerto (pid ${propio.pid})`);
+    `y el proceso de esta ejecución ya no existe (pid ${propio.pid})`);
 
   console.log('\n=== 3. Y no toca el ajeno ===');
   check(sigueVivo(ajeno.pid),
     `el proceso ajeno sigue vivo (pid ${ajeno.pid})`);
 
   console.log('\n=== 4. Limpiar el ajeno también funciona, por su propia ruta ===');
-  // Simétrico a propósito: si la primera limpieza hubiese matado por nombre,
-  // el ajeno ya estaría muerto y esta comprobación no distinguiría nada.
-  const matados2 = killSurvivors(perfilAjeno, { log: () => {} });
-  check(matados2 >= 1, `también se le encuentra por SU ruta (${matados2})`);
+  // Simétrico a propósito: si la primera limpieza hubiese señalizado por
+  // nombre, el ajeno ya no existiría y esta comprobación no distinguiría nada.
+  const senalizados2 = killSurvivors(perfilAjeno);
+  check(senalizados2 >= 1, `también se le encuentra por SU ruta (${senalizados2})`);
   await esperar(1200);
-  check(!sigueVivo(ajeno.pid), 'y muere cuando se le apunta a él');
+  check(!sigueVivo(ajeno.pid), 'y deja de existir cuando se le apunta a él');
 
-  console.log('\n=== 5. Una ruta sin supervivientes no mata nada ni falla ===');
+  console.log('\n=== 5. Una ruta sin supervivientes no señaliza nada ni falla ===');
   const vacio = fs.mkdtempSync(path.join(os.tmpdir(), PROFILE_PREFIX));
-  const ninguno = killSurvivors(vacio, { log: () => {} });
+  const ninguno = killSurvivors(vacio);
   check(ninguno === 0, `sin procesos que casen devuelve 0 (${ninguno})`);
   fs.rmSync(vacio, { recursive: true, force: true });
 
   console.log('\n=== 6. Una ruta no reconocible no dispara nada ===');
   for (const invalido of ['', null, undefined, path.join(os.tmpdir(), 'otra-cosa'), '/', 'C:\\']) {
-    check(killSurvivors(invalido, { log: () => {} }) === 0,
-      `${JSON.stringify(invalido)} no dispara ninguna terminación`);
+    check(killSurvivors(invalido) === 0,
+      `${JSON.stringify(invalido)} no envía ninguna señal de terminación`);
   }
 
   console.log('\n=== 7. La ruta no se incrusta en el script ===');
