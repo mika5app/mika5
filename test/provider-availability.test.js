@@ -527,7 +527,19 @@ console.log('\n=== 10 bis. loadRuntime() sólo puebla el selector con canAttempt
     // es exactamente lo que no vale como evidencia.
     const diccionario = require('./helpers/renderer-source') && (() => {
       const fuenteI18n = fs.readFileSync(path.join(__dirname, '../src/renderer/i18n.js'), 'utf8');
-      const traducciones = new Function(`${fuenteI18n}\nreturn MIKA5_TRANSLATIONS;`)();
+      // `i18n.js` llama a `detectLanguage()` al cargarse, y ahí lee
+      // `navigator.language`. En el renderer de Electron ese global existe
+      // siempre; en Node no está garantizado (20 no lo expone, 21+ sí), así que
+      // evaluar el módulo dependía de una casualidad de la versión del proceso y
+      // los gates fallaban con `ReferenceError: navigator is not defined`.
+      //
+      // Se inyecta como PARÁMETRO explícito de la evaluación, no como global del
+      // proceso: la dependencia queda declarada en el harness y no toca ni
+      // `i18n.js` ni el comportamiento productivo. El valor es fijo para que el
+      // idioma detectado no dependa de la máquina; aquí sólo se consume el
+      // diccionario `es`, que es lo que este bloque compara.
+      const NAVIGATOR_SINTETICO = Object.freeze({ language: 'es-ES', userLanguage: 'es-ES' });
+      const traducciones = new Function('navigator', `${fuenteI18n}\nreturn MIKA5_TRANSLATIONS;`)(NAVIGATOR_SINTETICO);
       return traducciones.es;
     })();
     return {
