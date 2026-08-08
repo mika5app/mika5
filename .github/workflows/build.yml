@@ -314,8 +314,12 @@ jobs:
       - name: Rebuild native modules
         run: npx electron-builder install-app-deps
 
+      # Las dos arquitecturas se piden por la CLI, no por electron-builder.json:
+      # `mac.target` ya no declara `arch`, y sin flag electron-builder construye
+      # sólo la del host — x64 en este runner — así que el paso siguiente no
+      # encontraría los artefactos arm64 que exige.
       - name: Build macOS packages
-        run: npm run build:mac -- --publish never
+        run: npm run build:mac -- --x64 --arm64 --publish never
 
       - name: Verify and upload macOS packages
         shell: bash
