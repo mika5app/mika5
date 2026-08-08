@@ -148,12 +148,31 @@ function rutasCambiadas(opciones) {
   // Dos puntos, no tres: interesa lo que cambió entre before y sha, no lo que
   // cambió desde su base común. Con tres puntos, un force-push daría un conjunto
   // distinto del que el push realmente introdujo.
-  const diff = git(['diff', '--name-only', before, sha, '--'], repoRoot);
+  //
+  // `--no-renames` y `-z` no son adorno; sin ellas la respuesta era falsa en dos
+  // situaciones distintas, ambas medidas:
+  //
+  //   1. La detección de renames viene activada por defecto, y `--name-only`
+  //      colapsa el par en una sola línea con el DESTINO. Mover
+  //      web/index.html a archive/index.html imprimía sólo `archive/index.html`,
+  //      así que el scope `web` respondía `false` a un cambio que deja la web
+  //      sin ese fichero. Con `--no-renames` el rename se reporta como borrado
+  //      más alta, y aparecen los dos lados.
+  //
+  //   2. Con `core.quotePath` —también por defecto— git envuelve en comillas y
+  //      escapa en octal cualquier byte no ASCII: `web/página.html` salía como
+  //      `"web/p\303\241gina.html"`, que no empieza por `web/`. `-z` desactiva
+  //      ese escapado y además separa por NUL, de modo que un nombre con salto
+  //      de línea o tabulador deja de partir la salida en dos.
+  //
+  // Por lo mismo no se recorta cada entrada: con `-z` el separador es
+  // inequívoco, y un `trim()` mutilaría un nombre que empiece o acabe en espacio.
+  const diff = git(['diff', '--name-only', '-z', '--no-renames', before, sha, '--'], repoRoot);
   if (!diff.ok) {
     traza(`git diff no se pudo ejecutar (${diff.motivo}): se evalúa como cambio total`);
     return null;
   }
-  return diff.salida.split('\n').map(l => l.trim()).filter(l => l !== '');
+  return diff.salida.split('\0').filter(l => l !== '');
 }
 
 /**
