@@ -14,9 +14,6 @@ on:
 permissions:
   contents: read
 
-env:
-  NODE_VERSION: '20'
-
 concurrency:
   group: mika5-community-${{ github.ref }}
   cancel-in-progress: ${{ github.ref_type != 'tag' }}
@@ -37,7 +34,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Validate release metadata
@@ -95,7 +92,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Install dependencies
@@ -247,7 +244,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Install dependencies
@@ -302,7 +299,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Generate macOS icon
@@ -363,7 +360,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Install Linux packaging dependencies
@@ -443,6 +440,11 @@ jobs:
           set -euo pipefail
 
           VERSION="${TAG#v}"
+          # La versión de Node se lee de la fuente canónica. Este job no
+          # instala Node, así que antes tomaba la variable global del
+          # workflow: al desaparecer ésta, el metadata la lee de .nvmrc, que
+          # es lo mismo que `setup-node` usa en los jobs que sí construyen.
+          NODE_VERSION="$(cat .nvmrc)"
 
           cat > release-assets/BUILD-METADATA.json <<EOF
           {

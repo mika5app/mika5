@@ -22,11 +22,6 @@ on:
 permissions:
   contents: read
 
-env:
-  # electron-builder 26 pide Node >= 20; el proyecto se desarrolla en 24. Se fija
-  # 22 como mínimo soportado y común a todos los jobs.
-  NODE_VERSION: '22'
-
 concurrency:
   group: mika5-security-${{ github.ref }}
   cancel-in-progress: true
@@ -43,7 +38,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
 
       - name: Isolate the Electron cache
         shell: bash
@@ -112,7 +107,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
 
       - name: Isolate the Electron cache
         shell: bash
@@ -180,7 +175,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
 
       - name: Isolate the Electron cache
         shell: bash
@@ -237,7 +232,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
 
       - name: Isolate the Electron cache
         shell: bash
@@ -338,7 +333,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
 
       - name: Isolate the Electron cache
         shell: bash
@@ -470,7 +465,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
 
       - name: Isolate the Electron cache
         shell: bash
@@ -599,7 +594,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
 
       - name: Isolate the Electron cache
         shell: bash
