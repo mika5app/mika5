@@ -45,7 +45,9 @@ function install(installer, directory) {
   // NSIS /D must be the last, unquoted command-line argument. The hosted
   // runner temp path has no spaces; fail instead of changing its semantics.
   assert(!/\s/.test(directory), 'Installer test path must have no whitespace');
-  execFileSync(installer, ['/S', '/currentuser', `/D=${directory}`], {
+  // Bash may supply a mixed-separator path. Pass a native Windows path to
+  // legacy NSIS too, not just to the filesystem APIs used for the hash check.
+  execFileSync(path.resolve(installer), ['/S', '/currentuser', `/D=${directory}`], {
     stdio: 'inherit', timeout: 180000, windowsHide: true
   });
 }
@@ -220,6 +222,7 @@ async function verify(baseline) {
     report.ok = true;
   } catch (error) {
     report.error = error.message;
+    report.failure = { code: error.code, status: error.status, signal: error.signal };
     throw error;
   } finally {
     const logs = path.join(ROOT, '.gate-logs');
