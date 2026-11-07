@@ -8,6 +8,7 @@ const path = require('path');
 const yaml = require('js-yaml');
 const { stageArtifacts } = require('../scripts/ci/stage-artifacts');
 const { matchingZips } = require('../scripts/ci/check-electron-cache');
+const { requireIsolatedRunner } = require('../scripts/ci/verify-windows-installation');
 const { construirManifiesto, PRODUCTORES } = require('../scripts/ci/artifact-manifest');
 const { verificarStaging } = require('../scripts/ci/verify-artifacts');
 
@@ -42,6 +43,10 @@ function canonicalProblems(wf) {
     requireRule(producer.includes(`scripts/ci/${script}`), `producer control ${script}`);
   }
   requireRule(producer.includes('scripts/verify-packaged-windows.js'), 'Windows packaged checks');
+  const install = jobs.package?.steps.find(s => s.id === 'install-test');
+  requireRule(install?.if === "runner.os == 'Windows'" && install.run.includes('scripts/ci/verify-windows-installation.js'), 'real Windows installer QA');
+  requireRule(jobs.package?.steps.indexOf(install) > jobs.package?.steps.findIndex(s => /npm run build:win/.test(s.run || ''))
+    && jobs.package?.steps.indexOf(install) < jobs.package?.steps.findIndex(s => /node scripts\/ci\/stage-artifacts.js/.test(s.run || '')), 'installer QA gates artifact staging');
   requireRule(producer.includes('dpkg-deb -x') && producer.includes('--appimage-extract-and-run'), 'Linux package checks');
   requireRule(!/\bls\b[^\n]*\||head -1|eval\s/.test(producer), 'unambiguous discovery');
   requireRule((producer.match(/--publish never/g) || []).length === 3, 'all platform builds disable publishing');
@@ -67,11 +72,19 @@ for (const mutate of [
   w => { w.jobs['quality-gates'].strategy.matrix.os.pop(); },
   w => { w.jobs.package.strategy.matrix.include.pop(); },
   w => { w.jobs['verify-artifacts'].steps = []; },
-  w => { w.jobs.package['continue-on-error'] = true; }
+  w => { w.jobs.package['continue-on-error'] = true; },
+  w => { w.jobs.package.steps = w.jobs.package.steps.filter(s => s.id !== 'install-test'); }
 ]) {
   const bad = structuredClone(canonical);
   mutate(bad);
   assert(canonicalProblems(bad).length > 0, 'Broken orchestration must be rejected');
+}
+
+const hosted = { GITHUB_ACTIONS: 'true', RUNNER_ENVIRONMENT: 'github-hosted', RUNNER_TEMP: 'D:\\runner-temp' };
+assert.doesNotThrow(() => requireIsolatedRunner(hosted, 'win32'));
+for (const [env, platform] of [[{}, 'win32'], [{ ...hosted, RUNNER_ENVIRONMENT: 'self-hosted' }, 'win32'],
+  [{ ...hosted, GITHUB_ACTIONS: undefined }, 'win32'], [{ ...hosted, RUNNER_TEMP: '' }, 'win32'], [hosted, 'linux']]) {
+  assert.throws(() => requireIsolatedRunner(env, platform), /disposable/);
 }
 
 for (const name of ['build.yml', 'security-validation.yml', 'integration.yml']) {
