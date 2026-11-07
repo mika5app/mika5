@@ -2,6 +2,9 @@
 
 const dns = require('dns').promises;
 const https = require('https');
+const http = require('http');
+const tls = require('tls');
+const { Readable } = require('stream');
 const net = require('net');
 
 function detectImageMimeFromBuffer(buffer) {
@@ -14,6 +17,7 @@ function detectImageMimeFromBuffer(buffer) {
   if (buffer.length >= 12
     && buffer.toString('ascii', 0, 4) === 'RIFF'
     && buffer.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+  if (buffer.length >= 6 && /^(GIF87a|GIF89a)$/.test(buffer.toString('ascii', 0, 6))) return 'image/gif';
   if (buffer.length >= 2 && buffer[0] === 0x42 && buffer[1] === 0x4D) return 'image/bmp';
   return null;
 }
@@ -24,7 +28,8 @@ function safeImageExtensionFromMime(mimeType) {
     'image/jpeg': 'jpg',
     'image/jpg': 'jpg',
     'image/webp': 'webp',
-    'image/bmp': 'bmp'
+    'image/bmp': 'bmp',
+    'image/gif': 'gif'
   }[String(mimeType || '').toLowerCase()] || null;
 }
 
@@ -96,7 +101,11 @@ function isBlockedIp(address) {
     const mapped = bytes.slice(0, 10).every(byte => byte === 0)
       && bytes[10] === 0xFF && bytes[11] === 0xFF;
     if (mapped) return isBlockedIp(bytes.slice(12).join('.'));
-    return allZero || loopback || uniqueLocal || linkLocal || multicast;
+    const globalUnicast = (bytes[0] & 0xE0) === 0x20;
+    const transitionOrDocumentation = (bytes[0] === 0x20 && bytes[1] === 0x02)
+      || (bytes[0] === 0x20 && bytes[1] === 0x01
+        && ((bytes[2] === 0 && bytes[3] === 0) || (bytes[2] === 0x0D && bytes[3] === 0xB8)));
+    return allZero || loopback || uniqueLocal || linkLocal || multicast || !globalUnicast || transitionOrDocumentation;
   }
   return true;
 }
@@ -171,70 +180,166 @@ function responseHeader(response, name) {
   return headers[name] ?? headers[name.toLowerCase()] ?? null;
 }
 
+// Each connection uses the validated IP; HTTP Host, SNI and certificate
+// verification retain the original hostname. A system HTTP(S) proxy receives
+// CONNECT <validated IP>, so it cannot resolve the destination a second time.
+async function fetchPinnedImage(_url, options) {
+  const proxyRules = options.resolveProxy ? await options.resolveProxy(options.destination.url.href) : 'DIRECT';
+  const rules = String(proxyRules).split(';').map(rule => rule.trim());
+  for (let i = 0; i < rules.length; i++) {
+    options.signal.throwIfAborted();
+    try {
+      return await fetchPinnedRoute(options, rules[i]);
+    } catch (error) {
+      // Only a failed connection to the proxy permits the next configured
+      // route. Never invent DIRECT or bypass authentication/TLS failures.
+      if (error.code !== 'DOWNLOAD_PROXY_CONNECTION_FAILED' || i === rules.length - 1) throw error;
+    }
+  }
+}
+
+async function fetchPinnedRoute(options, rule) {
+  const { destination, signal } = options;
+  const url = destination.url;
+  const hostname = url.hostname.replace(/^\[|\]$/g, '');
+  const address = destination.addresses[0];
+  signal.throwIfAborted();
+  const agent = new https.Agent({ keepAlive: false });
+  let tunnel;
+  const closeTunnel = () => tunnel?.destroy();
+  const systemCAs = typeof tls.getCACertificates === 'function' ? tls.getCACertificates('system') : [];
+  const ca = systemCAs.length ? [...tls.getCACertificates('default'), ...systemCAs] : undefined;
+  try {
+    if (rule !== 'DIRECT') {
+      const match = /^(PROXY|HTTPS) ([^\s/]+)$/.exec(rule);
+      if (!match) throw downloadError('DOWNLOAD_PROXY_UNSUPPORTED');
+      const proxy = new URL(`${match[1] === 'HTTPS' ? 'https' : 'http'}://${match[2]}`);
+      if (proxy.username || proxy.password) throw downloadError('DOWNLOAD_PROXY_UNSUPPORTED');
+      const authority = `${address.family === 6 ? `[${address.address}]` : address.address}:${url.port || 443}`;
+      tunnel = await new Promise((resolve, reject) => {
+        const request = (proxy.protocol === 'https:' ? https : http).request(proxy, {
+          method: 'CONNECT', path: authority, headers: { Host: authority }, signal, ca
+        });
+        request.on('error', error => {
+          const unavailable = ['ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH', 'ETIMEDOUT'];
+          reject(unavailable.includes(error.code) ? downloadError('DOWNLOAD_PROXY_CONNECTION_FAILED') : error);
+        });
+        request.on('connect', (response, tunnel, head) => {
+          if (response.statusCode !== 200 || head.length) {
+            tunnel.destroy();
+            reject(downloadError(response.statusCode === 407 ? 'DOWNLOAD_PROXY_AUTH_REQUIRED' : 'DOWNLOAD_NETWORK_FAILED'));
+          } else resolve(tunnel);
+        });
+        request.end();
+      });
+      signal.addEventListener('abort', closeTunnel, { once: true });
+      signal.throwIfAborted();
+      agent.createConnection = connectionOptions => tls.connect({ ...connectionOptions, socket: tunnel, ca });
+    }
+    return await new Promise((resolve, reject) => {
+      const request = https.request(url, {
+        method: 'GET', headers: options.headers, signal, agent, ca,
+        servername: net.isIP(hostname) ? undefined : hostname,
+        lookup: (_name, lookupOptions, callback) => {
+          if (lookupOptions?.all) callback(null, destination.addresses);
+          else callback(null, address.address, address.family);
+        }
+      }, response => resolve({
+        status: response.statusCode,
+        headers: response.headers,
+        body: Readable.toWeb(response, {
+          // Count bytes, not chunks, in the adapter's own prefetch queue.
+          strategy: { highWaterMark: 64 * 1024, size: chunk => chunk.byteLength }
+        }),
+        dispose() {
+          signal.removeEventListener('abort', closeTunnel);
+          response.destroy(); request.destroy(); agent.destroy(); closeTunnel();
+        }
+      }));
+      request.on('error', reject);
+      request.end();
+    });
+  } catch (error) {
+    signal.removeEventListener('abort', closeTunnel);
+    closeTunnel();
+    agent.destroy();
+    throw error;
+  }
+}
+
 async function fetchElectronImage(input, options = {}) {
-  const fetchImpl = options.fetchImpl;
-  if (typeof fetchImpl !== 'function') throw downloadError('DOWNLOAD_UNKNOWN');
+  const fetchImpl = options.fetchImpl || fetchPinnedImage;
   const lookup = options.lookup || dns.lookup;
   const maxBytes = options.maxBytes || DOWNLOAD_MAX_BYTES;
   const maxRedirects = Number.isInteger(options.maxRedirects) ? options.maxRedirects : 5;
-  const timeoutMs = options.timeoutMs || 30000;
-  const startedAt = Date.now();
-  let current = input;
-  let redirects = 0;
-
-  while (true) {
-    const destination = await validateElectronDownloadDestination(current, lookup);
-    const remainingMs = timeoutMs - (Date.now() - startedAt);
-    if (remainingMs <= 0) throw downloadError('DOWNLOAD_TIMEOUT');
-    const controller = new AbortController();
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
+  const controller = new AbortController();
+  let timer;
+  const timeout = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => {
       controller.abort();
-    }, remainingMs);
-    let response;
-    let buffer;
-    try {
-      response = await fetchImpl(destination.url.toString(), {
-        method: 'GET',
-        redirect: 'manual',
-        headers: {
-          Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
-          'Accept-Encoding': 'identity',
-          'User-Agent': `MIKA5/${options.appVersion || '0.0.0'}`
-        },
-        signal: controller.signal
-      });
-      const status = Number(response?.status || 0);
-      if (DOWNLOAD_REDIRECT_STATUSES.has(status)) {
-        const location = responseHeader(response, 'location');
-        if (!location) throw downloadError('DOWNLOAD_HTTP_STATUS');
-        if (redirects >= maxRedirects) throw downloadError('DOWNLOAD_TOO_MANY_REDIRECTS');
-        redirects += 1;
-        current = new URL(location, destination.url);
-        continue;
+      reject(downloadError('DOWNLOAD_TIMEOUT'));
+    }, options.timeoutMs || 30000);
+  });
+  const work = async () => {
+    let current = input;
+    for (let redirects = 0; ; redirects++) {
+      const destination = await validateElectronDownloadDestination(current, lookup);
+      controller.signal.throwIfAborted();
+      let response;
+      let reader;
+      const cancelReader = () => { reader?.cancel().catch(() => {}); };
+      try {
+        response = await fetchImpl(destination.url.toString(), {
+          method: 'GET', redirect: 'manual', destination, resolveProxy: options.resolveProxy,
+          headers: {
+            Accept: 'image/png,image/jpeg,image/webp,image/gif,image/bmp',
+            'Accept-Encoding': 'identity', 'User-Agent': `MIKA5/${options.appVersion || '0.0.0'}`
+          }, signal: controller.signal
+        });
+        const status = Number(response?.status || 0);
+        if (DOWNLOAD_REDIRECT_STATUSES.has(status)) {
+          const location = responseHeader(response, 'location');
+          if (!location) throw downloadError('DOWNLOAD_HTTP_STATUS');
+          if (redirects >= maxRedirects) throw downloadError('DOWNLOAD_TOO_MANY_REDIRECTS');
+          current = new URL(location, destination.url);
+          continue;
+        }
+        if (status < 200 || status >= 300) throw downloadError('DOWNLOAD_HTTP_STATUS');
+        const declaredLength = Number(responseHeader(response, 'content-length') || 0);
+        if (declaredLength > maxBytes) throw downloadError('DOWNLOAD_TOO_LARGE');
+        if (!response.body?.getReader) throw downloadError('DOWNLOAD_INVALID_IMAGE');
+        reader = response.body.getReader();
+        controller.signal.addEventListener('abort', cancelReader, { once: true });
+        const chunks = [];
+        let total = 0;
+        while (true) {
+          const { done, value } = await reader.read();
+          controller.signal.throwIfAborted();
+          if (done) break;
+          total += value.byteLength;
+          if (total > maxBytes) throw downloadError('DOWNLOAD_TOO_LARGE');
+          chunks.push(Buffer.from(value));
+        }
+        const buffer = Buffer.concat(chunks, total);
+        const mimeType = detectImageMimeFromBuffer(buffer);
+        if (!mimeType) throw downloadError('DOWNLOAD_INVALID_IMAGE');
+        return { buffer, mimeType, finalUrl: destination.url };
+      } finally {
+        controller.signal.removeEventListener('abort', cancelReader);
+        // Cancel unread redirect/error bodies as well as partial streams.
+        if (reader) { reader.cancel().catch(() => {}); reader.releaseLock(); }
+        else response?.body?.cancel().catch(() => {});
+        response?.dispose?.();
       }
-      if (status < 200 || status >= 300) throw downloadError('DOWNLOAD_HTTP_STATUS');
-      const declaredLength = Number(responseHeader(response, 'content-length') || 0);
-      if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
-        throw downloadError('DOWNLOAD_TOO_LARGE');
-      }
-      const arrayBuffer = await response.arrayBuffer();
-      buffer = Buffer.from(arrayBuffer);
-    } catch (error) {
-      if (error instanceof ImageDownloadError) throw error;
-      if (timedOut || error?.name === 'AbortError') throw downloadError('DOWNLOAD_TIMEOUT');
-      throw downloadError('DOWNLOAD_NETWORK_FAILED');
-    } finally {
-      clearTimeout(timer);
     }
-    if (buffer.length > maxBytes) throw downloadError('DOWNLOAD_TOO_LARGE');
-    const mimeType = detectImageMimeFromBuffer(buffer);
-    if (!mimeType || !safeImageExtensionFromMime(mimeType)) {
-      throw downloadError('DOWNLOAD_INVALID_IMAGE');
-    }
-    return { buffer, mimeType, finalUrl: destination.url };
-  }
+  };
+  try {
+    return await Promise.race([work(), timeout]);
+  } catch (error) {
+    if (controller.signal.aborted) throw downloadError('DOWNLOAD_TIMEOUT');
+    if (error instanceof ImageDownloadError) throw error;
+    throw downloadError('DOWNLOAD_NETWORK_FAILED');
+  } finally { clearTimeout(timer); controller.abort(); }
 }
 
 async function downloadAndSaveElectronImage(input, options = {}) {

@@ -36,7 +36,7 @@
     ALLOW_UNKNOWN_PROTOCOLS: false
   };
 
-  const DATA_IMAGE = /^data:image\/(?:png|jpeg|webp|gif);base64,/i;
+  const DATA_IMAGE = /^data:image\/(?:png|jpeg|webp|gif|bmp);base64,/i;
 
   DOMPurify.addHook('afterSanitizeAttributes', node => {
     if (node.tagName === 'A') {

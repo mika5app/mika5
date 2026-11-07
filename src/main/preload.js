@@ -53,9 +53,11 @@ contextBridge.exposeInMainWorld("mika5", {
     routeIntent: (params) => ipcRenderer.invoke('ai:route-intent', params),
     listModels: () => ipcRenderer.invoke('ai:list-models'),
     status: () => ipcRenderer.invoke('ai:status'),
+    getAvailability: (providerId) => ipcRenderer.invoke('ai:get-availability', providerId),
     abort: (requestId) => ipcRenderer.invoke('ai:abort', requestId),
     getCapabilities: (providerId) => ipcRenderer.invoke('ai:get-capabilities', providerId),
-    resolveVision: (params) => ipcRenderer.invoke('ai:resolve-vision', params)
+    resolveVision: (params) => ipcRenderer.invoke('ai:resolve-vision', params),
+    resolvePrivacy: (params) => ipcRenderer.invoke('ai:resolve-privacy', params)
   },
   ollama: {
     status: () => ipcRenderer.invoke("ollama:status"),
@@ -80,5 +82,9 @@ contextBridge.exposeInMainWorld("mika5", {
   setAppState: (key, value) => ipcRenderer.invoke("appState:set", key, value),
   openExternal: (url) => ipcRenderer.invoke("openExternal", url),
   saveFile: (payload) => ipcRenderer.invoke("app:saveFile", payload),
-  printToPDF: (payload) => ipcRenderer.invoke("app:printToPDF", payload)
+  printToPDF: (payload) => ipcRenderer.invoke("app:printToPDF", payload),
+  app: {
+    quit: () => ipcRenderer.invoke("app:quit"),
+    getVersion: () => ipcRenderer.invoke("app:getVersion")
+  }
 });

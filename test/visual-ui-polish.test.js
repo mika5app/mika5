@@ -285,7 +285,7 @@ function codigoTests() {
   check(!fuenteExport.includes('code-block-wrapper') && !fuenteExport.includes('collapsed'),
     'la exportación no depende del estado visual del bloque');
   const fuenteMarkdown = renderer.slice('renderExportMarkdown');
-  check(/button/.test(fuenteMarkdown) && /replace\(/.test(fuenteMarkdown),
+  check(fuenteMarkdown.includes('sanitizeHtml(marked.parse(raw))'),
     'la exportación sigue eliminando elementos interactivos');
   const fuenteBloques = renderer.slice('addCopyButtonsToCodeBlocks');
   check(!/collapsed/.test(fuenteExport) && !fuenteBloques.includes('setAppState')

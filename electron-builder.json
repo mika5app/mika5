@@ -25,10 +25,15 @@
     "!**/*.ts"
   ],
   "asarUnpack": [
-    "**/node_modules/better-sqlite3/**",
-    "**/node_modules/bindings/**",
-    "**/node_modules/file-uri-to-path/**"
+    "**/node_modules/better-sqlite3/**"
   ],
+  "electronFuses": {
+    "enableEmbeddedAsarIntegrityValidation": true,
+    "onlyLoadAppFromAsar": true,
+    "runAsNode": false,
+    "enableNodeOptionsEnvironmentVariable": false,
+    "enableNodeCliInspectArguments": false
+  },
   "extraMetadata": {
     "main": "src/main/main.js"
   },
@@ -56,8 +61,8 @@
 
   "mac": {
     "target": [
-      { "target": "dmg", "arch": ["x64", "arm64"] },
-      { "target": "zip", "arch": ["x64", "arm64"] }
+      { "target": "dmg" },
+      { "target": "zip" }
     ],
     "icon": "build/icon.icns",
     "category": "public.app-category.productivity",
@@ -90,11 +95,13 @@
     "description": "Local AI desktop with projects, chats, knowledge and RAG",
     "artifactName": "MIKA5-${version}-linux-${arch}.${ext}",
     "desktop": {
-      "Name": "MIKA5",
-      "Comment": "Local AI desktop — run models privately on your PC",
-      "Categories": "Office;Utility;Science;",
-      "StartupWMClass": "mika5",
-      "Keywords": "AI;LLM;Ollama;Chat;RAG;"
+      "entry": {
+        "Name": "MIKA5",
+        "Comment": "Local AI desktop — run models privately on your PC",
+        "Categories": "Office;Utility;Science;",
+        "StartupWMClass": "mika5",
+        "Keywords": "AI;LLM;Ollama;Chat;RAG;"
+      }
     }
   },
   "deb": {

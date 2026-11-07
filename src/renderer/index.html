@@ -617,7 +617,7 @@
 
         /* El estado del runtime deja de ocupar sitio en la barra, pero sigue
            siendo visible de un vistazo como punto en el disparador. */
-        .more-actions-trigger[data-runtime]::after {
+        .more-actions-trigger[data-provider-state]::after {
             content: "";
             position: absolute;
             top: 3px;
@@ -627,8 +627,19 @@
             border-radius: 50%;
             border: 1px solid var(--surface-header);
         }
-        .more-actions-trigger[data-runtime="ok"]::after { background: #4ade80; }
-        .more-actions-trigger[data-runtime="offline"]::after { background: #f87171; }
+        /* El punto lleva el estado completo, no un booleano. Verde sólo con
+           conexión verificada; ámbar cuando el servidor contesta pero el
+           servicio no sirve —límite alcanzado, error del proveedor— o falta
+           configurar; gris cuando nadie lo ha comprobado; rojo sólo para lo
+           que de verdad impide trabajar. */
+        .more-actions-trigger[data-provider-state="connected"]::after { background: #4ade80; }
+        .more-actions-trigger[data-provider-state="offline"]::after { background: #f87171; }
+        .more-actions-trigger[data-provider-state="authentication-rejected"]::after { background: #f87171; }
+        .more-actions-trigger[data-provider-state="authorization-forbidden"]::after { background: #f87171; }
+        .more-actions-trigger[data-provider-state="rate-limited"]::after { background: #fb923c; }
+        .more-actions-trigger[data-provider-state="provider-error"]::after { background: #fb923c; }
+        .more-actions-trigger[data-provider-state="configuration-required"]::after { background: #facc15; }
+        .more-actions-trigger[data-provider-state="unknown"]::after { background: #94a3b8; }
 
         .more-actions-menu {
             position: absolute;
@@ -864,6 +875,29 @@
             background: rgba(156, 163, 175, 0.2);
             color: #9ca3af;
             border: 1px solid rgba(156, 163, 175, 0.4);
+        }
+
+        /* Sin verificar: no es un fallo, es ausencia de prueba. En gris, para
+           no confundirlo ni con conectado ni con caído. */
+        .status-pill.status-unknown {
+            background: rgba(148, 163, 184, 0.18);
+            color: #94a3b8;
+            border: 1px solid rgba(148, 163, 184, 0.4);
+        }
+
+        /* Falta configurar: hay una acción concreta del usuario pendiente. */
+        .status-pill.status-unconfigured {
+            background: rgba(234, 179, 8, 0.18);
+            color: #facc15;
+            border: 1px solid rgba(234, 179, 8, 0.4);
+        }
+
+        /* Degradado: el servidor contesta, pero el servicio no está sirviendo.
+           Ni verde ni rojo, porque no es ninguna de las dos cosas. */
+        .status-pill.status-degraded {
+            background: rgba(251, 146, 60, 0.18);
+            color: #fb923c;
+            border: 1px solid rgba(251, 146, 60, 0.4);
         }
 
         /* --- Chat Area --- */
@@ -2185,7 +2219,7 @@
 
                     <!-- Provider selector (compact) -->
                     <div class="provider-selector">
-                        <button class="provider-trigger" id="providerTrigger" onclick="event.stopPropagation();(function(){const o=document.getElementById('providerOptions'); o.style.display = (o.style.display==='none' || !o.style.display) ? 'block' : 'none';})()">
+                        <button class="provider-trigger" id="providerTrigger" onclick="event.stopPropagation(); toggleProviderMenu();">
                             <span id="currentProviderName">Ollama Local</span>
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M6 9l6 6 6-6"/>
@@ -2335,6 +2369,28 @@
                                 <span class="more-actions-row-label">Idioma / Language</span>
                                 <button class="btn-icon" type="button" id="btnLangToggle" role="menuitem" aria-label="Language" title="Cambiar idioma / Change language" style="font-size:12px;font-weight:600;min-width:28px;">ES</button>
                             </div>
+
+                            <div class="more-actions-divider" role="none"></div>
+
+                            <!-- MIKA5 no tiene cuentas ni sesión remota: la
+                                 acción sale de la aplicación, no cierra una
+                                 sesión, y no borra nada. Fuera de macOS la barra
+                                 de menú está oculta, así que sin esto la única
+                                 salida visible era la X de la ventana. La
+                                 versión instalada se muestra aquí porque es el
+                                 único dato de versión que la aplicación conoce
+                                 de sí misma: no hay comprobación de
+                                 actualizaciones. -->
+                            <div class="more-actions-row" role="none">
+                                <span class="more-actions-row-label" id="appVersionLabel">Versión instalada</span>
+                                <span id="appVersionValue" class="more-actions-row-label">—</span>
+                            </div>
+
+                            <button class="btn-icon more-actions-item" type="button" id="btnQuitApp" role="menuitem"
+                                    aria-label="Salir de MIKA5">
+                                <span aria-hidden="true">🚪</span>
+                                <span class="more-actions-item-label" id="btnQuitAppLabel">Salir de MIKA5</span>
+                            </button>
                         </div>
                     </div>
                 </div>

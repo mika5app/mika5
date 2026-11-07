@@ -1,6 +1,6 @@
 {
   "name": "mika5-desktop",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "MIKA5 — local AI desktop with projects, chats, knowledge and RAG",
   "author": {
     "name": "MIKA5",
@@ -9,6 +9,13 @@
   "license": "AGPL-3.0",
   "main": "src/main/main.js",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mika5app/mika5.git"
+  },
+  "engines": {
+    "node": ">=22.12.0 <23"
+  },
   "scripts": {
     "dev": "electron .",
     "build": "electron-builder --config electron-builder.json",
@@ -16,15 +23,19 @@
     "build:mac": "electron-builder --mac   --config electron-builder.json",
     "build:linux": "electron-builder --linux --config electron-builder.json",
     "build:all": "electron-builder --win --mac --linux --config electron-builder.json",
-    "postinstall": "electron-builder install-app-deps",
+    "postinstall": "electron-builder install-app-deps && node scripts/ensure-electron-binary.js",
     "icons:mac": "bash scripts/gen-icns.sh",
     "icons:win": "node scripts/gen-ico.js",
-    "test": "node test/rag.test.js && node test/vision.test.js && npm run test:alibaba && npm run test:provider-capabilities && npm run test:request-context && npm run test:provider-cancellation && npm run test:cloud-consent && npm run test:network-security && npm run test:knowledge-cli && npm run test:ci-gates && npm run test:palette && npm run test:visual-ui-shell && npm run test:visual-ui-conversation && npm run test:electron-test-isolation && npm run test:visual-ui-polish && npm run test:ipc-contracts",
+    "test": "node test/rag.test.js && node test/vision.test.js && npm run test:alibaba && npm run test:provider-capabilities && npm run test:provider-availability && npm run test:provider-credentials && npm run test:provider-registry && npm run test:request-context && npm run test:provider-cancellation && npm run test:ollama-cancellation && npm run test:xlsx-vendored && npm run test:cloud-consent && npm run test:network-security && npm run test:knowledge-cli && npm run test:ensure-electron-binary && npm run test:ci-gates && npm run test:palette && npm run test:visual-ui-shell && npm run test:visual-ui-conversation && npm run test:electron-test-isolation && npm run test:kill-survivors && npm run test:visual-ui-polish && npm run test:ipc-contracts && npm run test:website-i18n && node test/security-regressions.test.js",
     "test:all": "bash scripts/run-stage0a-gates.sh",
+    "test:gui": "bash scripts/run-gui-gates.sh",
     "test:db": "node scripts/run-electron-test.js test/db.test.js",
     "test:rag": "node test/rag.test.js",
     "test:vision": "node test/vision.test.js",
     "test:provider-capabilities": "node test/provider-capabilities.test.js",
+    "test:provider-availability": "node test/provider-availability.test.js",
+    "test:provider-credentials": "node test/provider-credentials.test.js",
+    "test:provider-registry": "node test/provider-registry.test.js",
     "test:alibaba": "node test/alibaba-provider.test.js",
     "test:request-context": "node test/request-context.test.js",
     "test:provider-cancellation": "node test/provider-cancellation.test.js",
@@ -44,22 +55,32 @@
     "test:electron-test-isolation": "node test/electron-test-isolation.test.js",
     "test:visual-ui-polish": "node test/visual-ui-polish.test.js",
     "test:ipc-contracts": "node test/ipc-contracts.test.js",
-    "test:print-pdf-electron": "node scripts/run-electron-test.js test/print-pdf-electron.test.js"
+    "test:website-i18n": "node test/website-i18n.test.js",
+    "test:print-pdf-electron": "node scripts/run-electron-test.js test/print-pdf-electron.test.js",
+    "test:provider-selector": "node scripts/run-electron-test.js test/provider-selector.test.js",
+    "test:native-binding": "node scripts/run-electron-test.js test/native-binding.test.js",
+    "test:ollama-cancellation": "node test/ollama-cancellation.test.js",
+    "test:xlsx-vendored": "node test/xlsx-vendored.test.js",
+    "test:kill-survivors": "node test/kill-survivors.test.js",
+    "test:ensure-electron-binary": "node test/ensure-electron-binary.test.js"
   },
   "dependencies": {
-    "better-sqlite3": "^12.6.2",
+    "better-sqlite3": "13.0.3",
     "highlight.js": "^11.11.1",
     "mammoth": "^1.12.0",
     "marked": "^17.0.4",
     "pdf-parse": "^2.4.5",
     "pdfjs-dist": "^5.4.296",
-    "uuid": "^9.0.1",
-    "xlsx": "^0.18.5",
-    "xlsx-parse-json": "^3.1.1"
+    "uuid": "11.1.1",
+    "xlsx": "file:vendor/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
-    "electron": "^31.0.0",
-    "electron-builder": "^24.13.3",
-    "js-yaml": "4.1.1"
+    "@electron/fuses": "2.1.3",
+    "electron": "43.8.7",
+    "electron-builder": "26.18.0",
+    "js-yaml": "4.3.2"
+  },
+  "overrides": {
+    "minimatch@>=7 <11.0.1": "11.0.1"
   }
 }

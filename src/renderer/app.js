@@ -546,6 +546,15 @@ function openImageViewer(src, name) {
   downloadButton.textContent = 'Descargar';
   downloadButton.addEventListener('click', () => downloadImageFromSrc(src, name, downloadButton));
   modalActions.appendChild(downloadButton);
+  const externalHref = safeExternalHref(src);
+  if (externalHref?.startsWith('https:')) {
+    const browserButton = document.createElement('button');
+    browserButton.type = 'button';
+    browserButton.className = 'image-action-btn';
+    browserButton.textContent = 'Abrir en navegador';
+    browserButton.addEventListener('click', () => window.mika5.openExternal(externalHref));
+    modalActions.appendChild(browserButton);
+  }
 
   panel.append(closeButton, img, modalActions);
   modal.appendChild(panel);
@@ -944,6 +953,10 @@ function syncModelDropdown() {
   if (!select || !optionsContainer || !currentSpan) return;
   const selectedVal = select.value;
   const options = Array.from(select.options);
+  if (currentProvider === 'local') {
+    providerPrivacy = options.find(option => option.value === selectedVal)?.dataset.source === 'cloud' ? 'cloud' : 'private';
+    updatePrivacyUI();
+  }
   optionsContainer.innerHTML = "";
   options.forEach(opt => {
     const div = document.createElement("div");
@@ -1192,8 +1205,8 @@ async function extractTextFromDocument(file) {
         const base64 = btoa(binary);
         const result = await window.mika5.extractPDF(base64);
         console.log('[PDF] extractPDF result:', result?.ok, result?.error, 'chars:', result?.text?.length);
-        if (result?.ok && result.text && result.text.length > 30) return result.text;
-        // PDF sin texto o con texto mínimo (escaneado) — intentar OCR
+        if (result?.ok && result.text?.trim()) return result.text;
+        // PDF sin texto extraíble (posiblemente escaneado) — intentar OCR
         try {
           return await tryOCR();
         } catch (ocrErr) {
@@ -1213,7 +1226,7 @@ async function extractTextFromDocument(file) {
     }
     const manualText = await extractTextFromPDF(buffer);
     console.log('[PDF] manual parser chars:', manualText?.length);
-    if (!manualText || manualText.length <= 30) {
+    if (!manualText?.trim()) {
       try { return await tryOCR(); } catch (ocrErr) {
         if (ocrErr.message === 'PDF_SCANNED_NO_VISION' || ocrErr.message === 'PDF_LIB_UNAVAILABLE') throw ocrErr;
         throw new Error('PDF_NO_TEXT');
@@ -1703,57 +1716,69 @@ async function extractTextFromScannedPDF(arrayBuffer, model, maxPages = 20) {
     throw new Error('PDF_SCANNED_NO_VISION');
   }
 
+  const providerId = currentProvider;
+  const projectId = activeProjectId || QUICK_CHAT_ID;
+  const chatId = activeChatId || 'pdf-ocr';
   await waitForPdfjsLib();
   if (!window.pdfjsLib) throw new Error('PDF_LIB_UNAVAILABLE');
 
   const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  const totalPages = pdf.numPages;
-  const pageCount = Math.min(totalPages, maxPages);
+  try {
+    const totalPages = pdf.numPages;
+    const pageCount = Math.min(totalPages, maxPages);
 
-  if (pageCount === 0) { pdf.destroy(); throw new Error('PDF_NO_PAGES'); }
+    if (pageCount === 0) throw new Error('PDF_NO_PAGES');
+    const batchContext = createRequestContext({ chatId, projectId, providerId, selectedModel: model });
+    const batchScope = buildCloudDataScope({ message: true, imageAttachments: true,
+      imageNames: [`PDF escaneado (${pageCount} páginas)`] });
+    if (!await ensureCloudConsent(batchContext, batchScope)) throw new Error('OCR cancelado por el usuario');
+    const authorization = requestAuthorizations.get(batchContext.requestId);
+    requestAuthorizations.delete(batchContext.requestId);
 
-  showToast(`OCR: procesando ${pageCount} página${pageCount > 1 ? 's' : ''}…`, "info");
+    showToast(`OCR: procesando ${pageCount} página${pageCount > 1 ? 's' : ''}…`, "info");
 
-  const extractedTexts = [];
-  for (let i = 1; i <= pageCount; i++) {
-    const page = await pdf.getPage(i);
-    const viewport = page.getViewport({ scale: 1.5 });
-    const canvas = document.createElement('canvas');
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    const ctx = canvas.getContext('2d');
-    await page.render({ canvasContext: ctx, viewport }).promise;
-    const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
-    // Liberar pixel buffer inmediatamente
-    canvas.width = 0;
-    canvas.height = 0;
-    page.cleanup();
+    const extractedTexts = [];
+    for (let i = 1; i <= pageCount; i++) {
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale: 1.5 });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext('2d');
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+      // Liberar pixel buffer inmediatamente
+      canvas.width = 0;
+      canvas.height = 0;
+      page.cleanup();
 
-    try {
-      const result = await window.mika5.ai.chat({
-        model,
-        messages: [{
-          role: 'user',
-          content: `Extrae TODO el texto visible de esta imagen de documento escaneado. Devuelve SOLO el texto extraído, sin comentarios ni explicaciones. Si hay tablas, represéntalas en formato texto alineado. Página ${i} de ${totalPages}.`
-        }],
-        // El canvas produce JPEG: se declara el tipo para que cualquier adapter
-        // (Ollama, OpenAI, Anthropic) pueda construir su bloque de imagen.
-        images: [{ mediaType: 'image/jpeg', base64 }]
-      });
-      if (result?.message?.content) {
-        extractedTexts.push(result.message.content.trim());
+      try {
+        const context = createRequestContext({ ...batchContext, requestId: `${batchContext.requestId}:${i}` });
+        requestAuthorizations.set(context.requestId, { ...authorization, requestContext: context });
+        const result = await sendAIChat({
+          requestId: context.requestId, providerId, model,
+          messages: [{
+            role: 'user',
+            content: `Extrae TODO el texto visible de esta imagen de documento escaneado. Devuelve SOLO el texto extraído, sin comentarios ni explicaciones. Si hay tablas, represéntalas en formato texto alineado. Página ${i} de ${totalPages}.`
+          }],
+          // El canvas produce JPEG: se declara el tipo para que cualquier adapter
+          // (Ollama, OpenAI, Anthropic) pueda construir su bloque de imagen.
+          images: [{ mediaType: 'image/jpeg', base64 }]
+        });
+        if (result?.message?.content) {
+          extractedTexts.push(result.message.content.trim());
+        }
+      } catch (pageErr) {
+        console.warn(`OCR error en página ${i}:`, pageErr);
       }
-    } catch (pageErr) {
-      console.warn(`OCR error en página ${i}:`, pageErr);
     }
-  }
 
-  pdf.destroy();
 
-  if (extractedTexts.length === 0) throw new Error('PDF_OCR_FAILED');
+    if (extractedTexts.length === 0) throw new Error('PDF_OCR_FAILED');
 
-  showToast(`OCR completado: ${extractedTexts.length} de ${pageCount} páginas extraídas`, "success");
-  return extractedTexts.join('\n\n--- Página ---\n\n');
+    showToast(`OCR completado: ${extractedTexts.length} de ${pageCount} páginas extraídas`, "success");
+    return extractedTexts.join('\n\n--- Página ---\n\n');
+  } finally { await pdf.destroy(); }
 }
 
 /**
@@ -1893,6 +1918,17 @@ const MARKDOWN_ALLOWED_ATTR = [
   'loading', 'data-zoomable', 'colspan', 'rowspan'
 ];
 let markdownSanitizerConfigured = false;
+const approvedRemoteImages = new Set();
+
+function rememberApprovedImages(urls) {
+  for (const value of urls) {
+    try {
+      const url = new URL(value);
+      if (url.protocol === 'https:' && !url.username && !url.password) approvedRemoteImages.add(value);
+    } catch (_) {}
+  }
+  while (approvedRemoteImages.size > 1000) approvedRemoteImages.delete(approvedRemoteImages.values().next().value);
+}
 
 function configureMarkdownSanitizer() {
   if (markdownSanitizerConfigured || typeof DOMPurify === 'undefined') return;
@@ -1910,12 +1946,23 @@ function configureMarkdownSanitizer() {
     }
     if (node.tagName === 'IMG') {
       const rawSrc = node.getAttribute('src') || '';
-      const allowedData = /^data:image\/(?:png|jpeg|webp|gif);base64,/i.test(rawSrc);
+      const allowedData = /^data:image\/(?:png|jpeg|webp|gif|bmp);base64,/i.test(rawSrc);
       let allowedHttps = false;
       try {
-        allowedHttps = new URL(rawSrc, document.baseURI).protocol === 'https:';
+        const url = new URL(rawSrc);
+        allowedHttps = url.protocol === 'https:' && !url.username && !url.password;
       } catch (_) {}
-      if (!allowedData && !allowedHttps) node.removeAttribute('src');
+      if (allowedHttps && !approvedRemoteImages.has(rawSrc)) {
+        // A model's Markdown must not silently contact a tracking endpoint.
+        // Keep the image accessible through an explicit external-link click.
+        const link = document.createElement('a');
+        link.href = rawSrc;
+        link.textContent = `Ver imagen externa: ${node.getAttribute('alt') || new URL(rawSrc).hostname}`;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        node.removeAttribute('src');
+        node.replaceWith(link);
+      } else if (!allowedData && !allowedHttps) node.removeAttribute('src');
     }
   });
   markdownSanitizerConfigured = true;
@@ -1956,7 +2003,7 @@ function safeExternalHref(value) {
 }
 
 document.addEventListener('click', event => {
-  const link = event.target.closest?.('.message-content a[href]');
+  const link = event.target.closest?.('.msg-content a[href], .message-content a[href]');
   if (!link) return;
   event.preventDefault();
   const href = safeExternalHref(link.getAttribute('href'));
@@ -2273,36 +2320,88 @@ async function saveCurrentConversation(messages = conversationHistory) {
   }
 }
 
+// Texto localizado del estado de un proveedor, construido SÓLO a partir del
+// código estable y de los metadatos permitidos. El mensaje técnico del
+// proveedor no cruza el puente: se queda en el log del proceso principal.
+function describirEstadoProveedor(disp) {
+  if (!disp || !disp.errorCode) return '';
+  const clave = `provider.error.${disp.errorCode}`;
+  const traducido = t(clave);
+  if (traducido !== clave) return traducido;
+  // Código sin texto propio: se cae al del estado, que siempre existe. Nunca
+  // se enseña el código crudo ni el mensaje del proveedor.
+  const porEstado = t(`provider.state.${disp.uiState || 'unknown'}`);
+  return Number.isInteger(disp.httpStatus)
+    ? `${porEstado} (HTTP ${disp.httpStatus})`
+    : porEstado;
+}
+
 async function loadRuntime() {
-  // Intentar obtener estado y modelos desde el proveedor AI actual
-  let st;
+  // Disponibilidad del proveedor activo, con los estados separados. Antes esto
+  // era `status()`, que para todo proveedor cloud devolvía `ok: !!apiKey`: la
+  // píldora podía anunciar «Conectado» mientras el selector quedaba vacío y
+  // deshabilitado, y un runtime sin credencial no podía estar disponible nunca.
+  let disp;
   try {
-    st = await window.mika5.ai.status();
+    disp = await window.mika5.ai.getAvailability();
   } catch (e) {
-    st = { ok: false, message: e?.message || String(e) };
+    // Si el propio canal falla no se sabe nada del proveedor. Se dice eso, no
+    // que esté caído: el error es de la aplicación, no del servidor remoto.
+    disp = {
+      configured: false, reachable: null, authenticated: null,
+      modelsAvailable: 0, models: [], canAttempt: false, ready: false,
+      uiState: 'configuration-required', errorCode: 'PROVIDER_UNAVAILABLE', httpStatus: null
+    };
   }
 
   const statusEl = el("rtStatus");
-  const runtimeOk = st.ok || currentProvider === 'alibaba';
-  if (runtimeOk) {
-    statusEl.textContent = t('status.connected');
-    statusEl.className = "status-pill status-ok";
-  } else {
-    statusEl.textContent = t('status.disconnected');
-    statusEl.className = "status-pill status-offline";
-  }
-  // El detalle vive dentro del menú; el punto del disparador conserva la señal.
+  // Ocho estados. «Conectado» exige evidencia de que el servidor contestó Y de
+  // que el servicio respondió bien: un 404, un 429 o un 500 prueban que hay
+  // alguien al otro lado y no que se pueda trabajar, así que tienen estado
+  // propio y no se pintan en verde.
+  const uiState = disp.uiState || 'unknown';
+  const CLASE_POR_ESTADO = {
+    'connected': 'status-ok',
+    'offline': 'status-offline',
+    'unknown': 'status-unknown',
+    'configuration-required': 'status-unconfigured',
+    'authentication-rejected': 'status-offline',
+    'authorization-forbidden': 'status-offline',
+    'rate-limited': 'status-degraded',
+    'provider-error': 'status-degraded'
+  };
+  statusEl.textContent = t(`provider.state.${uiState}`);
+  statusEl.className = `status-pill ${CLASE_POR_ESTADO[uiState] || 'status-unknown'}`;
+  statusEl.dataset.providerState = uiState;
+  // El tooltip se compone de textos localizados a partir del código, nunca del
+  // mensaje del proveedor: un error técnico puede arrastrar rutas, endpoints o
+  // fragmentos de credencial, y el título de un elemento es visible y copiable.
+  const rotuloError = describirEstadoProveedor(disp);
+  if (rotuloError) statusEl.title = rotuloError;
+  else statusEl.removeAttribute('title');
+
+  // El punto del disparador lleva el estado completo, no un booleano: marcar
+  // «offline» un proveedor que está sin verificar era decir que está caído.
   const moreActionsTrigger = el("btnMoreActions");
-  if (moreActionsTrigger) moreActionsTrigger.dataset.runtime = runtimeOk ? 'ok' : 'offline';
+  if (moreActionsTrigger) moreActionsTrigger.dataset.providerState = uiState;
 
   el("modelSelect").innerHTML = "";
-  if (st.ok) {
-    let modelsRes = null;
-    try {
-      modelsRes = await window.mika5.ai.listModels();
-    } catch (e) {
-      modelsRes = null;
-    }
+  // Se puebla con `canAttempt`, no con `ready`: un catálogo declarado por el
+  // adaptador basta para ofrecer los modelos, aunque nadie haya verificado que
+  // el proveedor responda. Lo que no se hace es llamar «listo» a eso.
+  //
+  // Y `canAttempt` es la ÚNICA condición. Antes había además un
+  // `configured && reachable !== false && authenticated !== false`, que se
+  // saltaba la comprobación de errores que impiden usar el proveedor: con un
+  // 429, un 403 o un 500 la credencial es válida y el servidor responde, así
+  // que esa segunda mitad daba verde y llenaba el selector de modelos que
+  // ninguna petición iba a poder usar. La píldora decía «límite alcanzado» y
+  // el desplegable ofrecía trece modelos: dos respuestas distintas a la misma
+  // pregunta. No se reconstruye `canAttempt` a partir de sus ingredientes.
+  if (disp.canAttempt) {
+    // El catálogo ya viene con la disponibilidad: pedirlo otra vez repetiría la
+    // misma consulta al proveedor.
+    const modelsRes = { models: disp.models || [] };
 
     // Normalizar la respuesta a un array de objetos { name, size, sizeFormatted, capabilities, speed }
     let models = [];
@@ -2317,6 +2416,7 @@ async function loadRuntime() {
       const description = raw.description || raw.info || '';
       return {
         name,
+        privacy: raw.privacy,
         size,
         sizeFormatted,
         capabilities,
@@ -2344,7 +2444,7 @@ async function loadRuntime() {
     if (models.length === 0) {
       const opt = document.createElement("option");
       opt.value = "";
-      opt.textContent = "Sin modelos (descarga uno o configura Cloud)";
+      opt.textContent = t(`provider.selectEmpty.${uiState}`);
       el("modelSelect").appendChild(opt);
     } else {
       if (currentProvider === 'alibaba') {
@@ -2361,7 +2461,7 @@ async function loadRuntime() {
         const opt = document.createElement("option");
         opt.value = m.name;
         opt.textContent = m.name;
-        opt.dataset.source = (currentProvider === 'local' ? 'local' : 'cloud');
+        opt.dataset.source = (currentProvider === 'llamacpp' || (currentProvider === 'local' && m.privacy !== 'cloud') ? 'local' : 'cloud');
         if (m.size) opt.dataset.size = String(m.size);
         if (m.sizeFormatted) opt.dataset.sizeFormatted = m.sizeFormatted;
         if (m.capabilities && Array.isArray(m.capabilities)) opt.dataset.caps = m.capabilities.join(' • ');
@@ -2377,9 +2477,11 @@ async function loadRuntime() {
       }
     }
   } else {
+    // Con los estados separados el motivo deja de ser un misterio: antes las
+    // tres situaciones se leían igual, «Proveedor no disponible».
     const opt = document.createElement("option");
     opt.value = "";
-    opt.textContent = "Proveedor no disponible";
+    opt.textContent = t(`provider.selectEmpty.${uiState}`);
     el("modelSelect").appendChild(opt);
     el("modelSelect").disabled = true;
     const pullLocal = el("btnPullLocal");
@@ -2418,6 +2520,7 @@ async function loadProvider() {
     const provider = await window.mika5.ai.getCurrentProvider();
     if (provider && provider.id) {
       currentProvider = provider.id;
+      if (provider.credentialSessionOnly) showToast('Las claves de proveedores funcionan sólo durante esta sesión: el almacén seguro del sistema no está disponible.', 'warning');
       providerPrivacy = provider.privacy || (provider.privacy === 'private' ? 'private' : 'cloud');
       // El contrato viaja con el proveedor: sin ida y vuelta extra por IPC.
       providerCapabilities = provider.capabilities || await refreshProviderCapabilities();
@@ -2494,35 +2597,71 @@ function requestCloudConsentChoice(providerLabel, scope, storedConsent) {
   });
 }
 
+// Authorization is attached to the immutable request identity, never to the
+// provider currently selected after an await. No credential or prompt is kept.
+const requestAuthorizations = new Map();
+
 async function ensureCloudConsent(requestContext, scope) {
-  if (requestContext.providerId === 'local' || requestContext.providerId === 'llamacpp') return true;
-  const consentProjectId = cloudConsentProjectId(requestContext.projectId);
-  const key = buildCloudConsentKey(requestContext.providerId, consentProjectId);
-  const stored = normalizeStoredConsent(await window.mika5.getAppState(key));
-  const effectiveScope = {
-    ...scope,
-    providerId: requestContext.providerId,
-    projectScope: cloudProjectScope(consentProjectId)
-  };
-  if (consentCoversScope(stored, effectiveScope)) return true;
-  const providerLabel = providerDisplayName(requestContext.providerId);
-  const choice = await requestCloudConsentChoice(providerLabel, effectiveScope, stored);
-  if (choice === 'cancel') return false;
-  if (choice === 'persist') {
-    const persisted = mergeConsentScope(stored, effectiveScope, {
-      providerId: requestContext.providerId,
-      projectScope: cloudProjectScope(consentProjectId)
-    });
-    await window.mika5.setAppState(key, JSON.stringify(persisted));
+  const resolved = await window.mika5.ai.resolvePrivacy({
+    providerId: requestContext.providerId, model: requestContext.selectedModel
+  });
+  if (currentProvider === requestContext.providerId && el('modelSelect')?.value === requestContext.selectedModel) {
+    providerPrivacy = resolved.privacy;
     updatePrivacyUI();
   }
+  const consentProjectId = cloudConsentProjectId(requestContext.projectId);
+  const effectiveScope = { ...scope, providerId: requestContext.providerId,
+    projectScope: cloudProjectScope(consentProjectId) };
+  let consent = null;
+  if (resolved.privacy === 'cloud') {
+    const key = buildCloudConsentKey(requestContext.providerId, consentProjectId);
+    const stored = normalizeStoredConsent(await window.mika5.getAppState(key));
+    if (!consentCoversScope(stored, effectiveScope)) {
+      const label = requestContext.providerId === 'local' ? 'Ollama Cloud' : providerDisplayName(requestContext.providerId);
+      const choice = await requestCloudConsentChoice(label, effectiveScope, stored);
+      if (choice === 'cancel') return false;
+      consent = mergeConsentScope(stored, effectiveScope, effectiveScope);
+      if (choice === 'persist') {
+        const saved = await window.mika5.setAppState(key, JSON.stringify(consent));
+        if (!saved?.ok) showToast('El permiso se aplicará sólo a esta solicitud; no se pudo guardar.', 'warning');
+      }
+    } else consent = stored;
+  }
+  requestAuthorizations.set(requestContext.requestId, { requestContext, scope: effectiveScope, consent });
+  // Abandoned requests must not retain unbounded authorization records.
+  while (requestAuthorizations.size > 100) requestAuthorizations.delete(requestAuthorizations.keys().next().value);
   return true;
 }
 
-function buildEffectiveCloudScope(requestContext, payload, metadata = {}) {
-  if (requestContext.providerId === 'local' || requestContext.providerId === 'llamacpp') {
-    return buildCloudDataScope({ message: true });
+async function sendAuthorizedAI(method, payload) {
+  let authorization = requestAuthorizations.get(payload.requestId);
+  if (!authorization) {
+    const context = createRequestContext({ requestId: payload.requestId,
+      chatId: activeChatId || 'provider-test', projectId: activeProjectId || QUICK_CHAT_ID,
+      providerId: payload.providerId || currentProvider, selectedModel: payload.model });
+    const scope = buildEffectiveCloudScope(context, payload, {
+      historyMessageCount: Math.max(0, (payload.messages?.length || 1) - 1)
+    });
+    if (!await ensureCloudConsent(context, scope)) throw new Error('Solicitud cancelada por el usuario');
+    authorization = requestAuthorizations.get(context.requestId);
   }
+  const { requestContext, scope, consent } = authorization;
+  requestAuthorizations.delete(requestContext.requestId);
+  if (payload.model !== requestContext.selectedModel) throw new Error('El modelo cambió después del consentimiento. Reintenta la solicitud.');
+  const result = await window.mika5.ai[method]({ ...payload,
+    requestId: requestContext.requestId, providerId: requestContext.providerId,
+    projectScope: scope.projectScope, dataScope: scope,
+    cloudConsent: consent ? { ...consent, model: payload.model, requestId: requestContext.requestId } : null
+  });
+  if (method === 'generateImage' || result?.terminalType === 'image') {
+    rememberApprovedImages(result?.images || []);
+  }
+  return result;
+}
+const sendAIChat = payload => sendAuthorizedAI('chat', payload);
+const sendAIImage = payload => sendAuthorizedAI('generateImage', payload);
+
+function buildEffectiveCloudScope(requestContext, payload, metadata = {}) {
   const messages = Array.isArray(payload?.messages) ? payload.messages : [];
   const imageNames = Array.isArray(metadata.imageNames)
     ? metadata.imageNames.filter(Boolean)
@@ -2614,7 +2753,7 @@ async function dismissCloudInputBanner() {
   const providerAtDismiss = currentProvider;
   const projectAtDismiss = activeProjectId;
   const consent = await readCloudConsent(providerAtDismiss, projectAtDismiss).catch(() => null);
-  await window.mika5.setAppState(
+  const saved = await window.mika5.setAppState(
     cloudBannerStateKey(providerAtDismiss, projectAtDismiss),
     JSON.stringify({
       schemaVersion: CLOUD_BANNER_SCHEMA_VERSION,
@@ -2622,6 +2761,7 @@ async function dismissCloudInputBanner() {
       dismissedAt: new Date().toISOString()
     })
   );
+  if (!saved?.ok) { showToast('No se pudo guardar el cierre del aviso.', 'warning'); return; }
   const banner = el('cloudInputBanner');
   if (banner && currentProvider === providerAtDismiss && activeProjectId === projectAtDismiss) {
     banner.classList.remove('visible');
@@ -2679,7 +2819,8 @@ function updatePrivacyUI() {
   const footerEl = el('footerStatus');
   const revokeButton = el('revokeCloudConsent');
 
-  const providerLabel = providerDisplayName(currentProvider);
+  const providerLabel = currentProvider === 'local' && providerPrivacy === 'cloud'
+    ? 'Ollama Cloud' : providerDisplayName(currentProvider);
 
   if (providerPrivacy === 'private') {
     if (indicator) {
@@ -2698,7 +2839,7 @@ function updatePrivacyUI() {
       indicator.setAttribute('data-tooltip', t('privacy.tooltipCloud'));
     }
     renderPrivacyBadge(badge, 'cloud', t('privacy.cloud'));
-    if (apiKeyBtn) apiKeyBtn.style.display = '';
+    if (apiKeyBtn) apiKeyBtn.style.display = currentProvider === 'local' ? 'none' : '';
     if (providerName) providerName.textContent = providerLabel;
     // El pie deja de repetir el aviso: sólo identifica el modo activo.
     if (footerEl) footerEl.textContent = t('footer.cloudCompact', { provider: providerLabel });
@@ -2728,7 +2869,76 @@ function updatePrivacyUI() {
   }
 }
 
+// Margen que se deja libre bajo el desplegable para que no muera pegado al
+// borde inferior de la ventana.
+const MARGEN_DESPLEGABLE = 16;
+
+/**
+ * Ajusta cuánto puede crecer el desplegable de proveedores antes de desplazarse
+ * por dentro.
+ *
+ * El alto se MIDE, no se adivina. Antes era `max-height: calc(100vh - 96px)`
+ * en CSS: una constante que codificaba una suposición sobre dónde empieza el
+ * menú. El menú empieza en y=50, así que ese 96 reservaba 46 px de más y los
+ * dejaba vacíos en cualquier ventana lo bastante baja como para recortar —
+ * media fila de proveedor perdida sin motivo. Y si la cabecera cambia de alto,
+ * la constante deja de valer sin que nada avise.
+ *
+ * Se llama al abrir y al redimensionar con el menú abierto.
+ */
+function ajustarAltoDesplegableProveedores() {
+  const menu = el('providerOptions');
+  if (!menu || menu.style.display === 'none' || !menu.style.display) return;
+  const arriba = menu.getBoundingClientRect().top;
+  // Sin suelo. Una versión anterior ponía `Math.max(120, ...)` para que el menú
+  // no quedase ridículo en ventanas muy bajas, y eso rompía justo lo que esta
+  // función existe para garantizar: por debajo de cierta altura el suelo ganaba,
+  // el menú se comía el margen inferior y acababa saliéndose por abajo.
+  //
+  // Que el resultado sea utilizable no lo arregla un suelo aquí, sino el límite
+  // de la ventana: `ALTO_MINIMO_VENTANA` en main.js está calculado para que a la
+  // altura mínima soportada quepa una fila entera de proveedor. Por debajo de
+  // eso Electron ya no deja encoger, así que el caso "menú de 20 px" no existe.
+  // El único `Math.max` que queda es contra 0, porque un `max-height` negativo
+  // no es CSS válido.
+  //
+  // Se trunca, no se redondea. El menú empieza en una coordenada fraccionaria en
+  // cuanto las métricas de fuente no son las de Windows —en Linux arranca en
+  // 49,x—, y redondear al alza produce un `max-height` mayor que el hueco real:
+  // el menú se come una fracción del margen inferior. Medido en CI bajo Xvfb:
+  // dejaba 15 px donde `MARGEN_DESPLEGABLE` declara 16. Truncar nunca excede el
+  // espacio disponible.
+  const disponible = window.innerHeight - arriba - MARGEN_DESPLEGABLE;
+  menu.style.maxHeight = `${Math.max(0, Math.floor(disponible))}px`;
+}
+
+/** Abre o cierra el desplegable de proveedores. */
+function toggleProviderMenu() {
+  const menu = el('providerOptions');
+  if (!menu) return;
+  const cerrado = menu.style.display === 'none' || !menu.style.display;
+  menu.style.display = cerrado ? 'block' : 'none';
+  if (cerrado) {
+    // El alto se calcula con el menú ya visible: en `display: none` no hay
+    // caja que medir y `getBoundingClientRect()` devolvería ceros.
+    ajustarAltoDesplegableProveedores();
+    menu.scrollTop = 0;
+  }
+}
+
+window.addEventListener('resize', ajustarAltoDesplegableProveedores);
+
 async function switchProvider(providerId) {
+  // El desplegable se cierra AQUÍ, antes de cualquier espera.
+  //
+  // Estaba al final, después de `await loadRuntime()`. Con un proveedor cloud
+  // lento eso son segundos, y en ese hueco el cierre quedaba pendiente: si el
+  // usuario volvía a abrir el menú mientras tanto, se le cerraba solo en cuanto
+  // llegaba la respuesta. Además el menú se quedaba abierto durante toda la
+  // carga, cuando la elección ya estaba hecha.
+  const opts = el('providerOptions');
+  if (opts) opts.style.display = 'none';
+
   try {
     const result = await window.mika5.ai.setProvider(providerId);
     currentProvider = providerId;
@@ -2737,14 +2947,10 @@ async function switchProvider(providerId) {
     // El plan visual pendiente pertenece al proveedor anterior: no se arrastra.
     pendingVisualAction = null;
     providerPrivacy = result.privacy;
-    
+
     updatePrivacyUI();
     await loadRuntime();
-    
-    // Close the provider dropdown
-    const opts = el('providerOptions');
-    if (opts) opts.style.display = 'none';
-    
+
     if (result.privacy === 'cloud') {
       showToast(t('toast.cloudMode'), 'warning');
     } else {
@@ -3834,6 +4040,10 @@ function applyTranslations() {
     moreActionsBtn.setAttribute('aria-label', t('header.moreActions'));
     moreActionsBtn.title = t('header.moreActions');
   }
+  // Rótulos que se escriben desde JS: su texto se congela al pintarse, así que
+  // cambiar de idioma tiene que repintarlos o se quedan en el idioma anterior.
+  renderSessionLabels();
+  renderInstalledVersion().catch(e => console.warn('renderInstalledVersion:', e));
 }
 
 function toggleContextPanel() {
@@ -4201,6 +4411,23 @@ function appendMsg(msg, target) {
 
   // Insert model-change indicator if model switched
   const container = target || el("chat");
+
+  // El estado vacío lo pinta `renderMessages()` cuando el chat no tiene
+  // mensajes, y sólo esa función lo retiraba, al repintar de cero. Aquí se
+  // añade un turno con `appendChild()` sobre el mismo contenedor, así que sin
+  // esta línea «Empieza la conversación» y sus sugerencias se quedaban por
+  // encima de la conversación recién iniciada hasta que el usuario cambiaba de
+  // chat y volvía. Se retira en el primer mensaje que llega, venga del envío,
+  // de una respuesta o de una restauración.
+  //
+  // No aplica cuando `target` es un DocumentFragment —el camino de
+  // `renderMessages()`—: allí no hay estado vacío que quitar y la consulta no
+  // encuentra nada.
+  if (container && typeof container.querySelector === 'function') {
+    const vacio = container.querySelector('.empty-state');
+    if (vacio) vacio.remove();
+  }
+
   if (msgModel && _lastRenderedModel && msgModel !== _lastRenderedModel && container) {
     const indicator = document.createElement("div");
     indicator.className = "model-change-indicator";
@@ -4227,6 +4454,9 @@ function appendMsg(msg, target) {
 
   const contentEl = document.createElement("div");
   contentEl.className = "msg-content";
+  // Persisted attachments came from an explicit upload/generation action;
+  // arbitrary URLs in model-authored Markdown receive no such authorization.
+  rememberApprovedImages(parseStoredAttachments(msg.attachments ?? msg.images).map(item => item?.url));
 
   try {
     contentEl.innerHTML = renderMarkdown(content);
@@ -4812,12 +5042,13 @@ async function handlePendingVisualActionReply(text) {
     chatId: activeChatId,
     projectId: activeProjectId,
     providerId: currentProvider,
-    selectedModel: pending.model || pending.visionModel || AUTOMATIC_MODEL_ID
+    selectedModel: (generate ? pending.model || pending.visualExecution?.model : pending.visionModel) || AUTOMATIC_MODEL_ID
   });
   const pendingImages = pending.sourceImage ? [pending.sourceImage] : [];
   const pendingPayload = {
     requestId: requestContext.requestId,
-    model: pending.model || pending.visionModel,
+    providerId: requestContext.providerId,
+    model: requestContext.selectedModel,
     messages: [{ role: 'user', content: text }],
     sourceImages: pendingImages
   };
@@ -4848,7 +5079,7 @@ async function handlePendingVisualActionReply(text) {
   isGenerating = true;
   appendGeneratingPlaceholder();
   try {
-    if (pending.provider && pending.provider !== currentProvider) {
+    if (pending.provider && pending.provider !== requestContext.providerId) {
       throw new Error('La acción visual pertenece a otro proveedor. Vuelve a seleccionar el proveedor original.');
     }
     if (generate) {
@@ -4866,8 +5097,9 @@ async function handlePendingVisualActionReply(text) {
         pending.plan?.sourceImage
         || pending.visualContext?.imageRef
         || null;
-      const generated = await window.mika5.ai.generateImage({
+      const generated = await sendAIImage({
         requestId: requestContext.requestId,
+        providerId: requestContext.providerId,
         model: generationModel,
         prompt,
         sourceImages: sourceImage ? [sourceImage] : []
@@ -4904,8 +5136,9 @@ async function handlePendingVisualActionReply(text) {
       if (!imageRef) throw new Error('No hay una imagen de referencia disponible para analizar');
       const visionModel = pending.visionModel || null;
       if (!visionModel) throw new Error('El proveedor actual no tiene un modelo de visión configurado');
-      const out = await window.mika5.ai.chat({
+      const out = await sendAIChat({
         requestId: requestContext.requestId,
+        providerId: requestContext.providerId,
         model: visionModel,
         messages: [{
           role: 'user',
@@ -5029,6 +5262,7 @@ async function send() {
     try {
       const route = await window.mika5.ai.routeIntent({
         text: routingInstruction,
+        providerId: originProviderId,
         chatId: originChatId,
         attachments: imageAttachments.map(attachment => ({
           type: 'image',
@@ -5097,6 +5331,7 @@ async function send() {
           || null;
         const generationPayload = {
           requestId: requestContext.requestId,
+          providerId: requestContext.providerId,
           model: route.model,
           prompt: visualExecution?.generationPrompt || route.modelPrompt || userPrompt,
           sourceImages: sourceImage ? [sourceImage] : []
@@ -5136,7 +5371,7 @@ async function send() {
             && visualExecution?.validation?.valid !== true) {
             throw new Error('No existe un plan visual seguro para generar la nueva imagen');
           }
-          const generated = await window.mika5.ai.generateImage(generationPayload);
+          const generated = await sendAIImage(generationPayload);
           const answer = terminalImageAnswer(generated.images);
           const sourceVisualEntryId = route.visualContext?.imageRef?.visualEntryId || null;
           const generatedRef = registerVisualImage({
@@ -5412,7 +5647,7 @@ async function send() {
     const finalMessages = [...systemMessages, ...trimmedMessages];
 
     // Add images to the last user message if present (Ollama vision format)
-    const payload = { requestId: requestContext.requestId, model, messages: finalMessages };
+    const payload = { requestId: requestContext.requestId, providerId: requestContext.providerId, model, messages: finalMessages };
     if (activeVisualRoute?.visualExecution) {
       payload.visualExecution = activeVisualRoute.visualExecution;
     }
@@ -5496,7 +5731,7 @@ async function send() {
 
     try {
       if (wasCanceled) throw new Error('Canceled');
-      const out = await window.mika5.ai.chat(payload);
+      const out = await sendAIChat(payload);
       if (wasCanceled) throw new Error('Canceled');
       if (!out || !out.message) throw new Error('Respuesta vacía');
       let answer = safeAssistantContent(out.message.content);
@@ -5775,19 +6010,13 @@ function closeExportModal() {
 }
 
 // --- Export system: standalone HTML builder ---
-// NEVER uses renderMarkdown from the app — builds safe standalone docs
+// Use the same DOM-based allowlist as chat, with a separate inert document CSP.
 function renderExportMarkdown(text) {
   const raw = (text || '').toString().trim();
   if (!raw) return '';
   if (typeof marked === 'undefined') return escapeHtml(raw).replace(/\n/g, '<br>');
   try {
-    let html = marked.parse(raw);
-    // Strip dangerous elements — export must be inert
-    html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-    html = html.replace(/<\/?(?:iframe|object|embed|form|input|textarea|select|button|link|meta|base)\b[^>]*>/gi, '');
-    html = html.replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
-    html = html.replace(/(href|src)\s*=\s*(['"])\s*javascript:/gi, '$1=$2#blocked:');
-    return html;
+    return sanitizeHtml(marked.parse(raw));
   } catch (e) {
     return escapeHtml(raw).replace(/\n/g, '<br>');
   }
@@ -5837,7 +6066,7 @@ const EXPORT_CSS = `
 
 function buildExportHTML(msgs, projectName, options = {}) {
   const theme = options.theme || 'light'; // 'light' for HTML/PDF
-  const lang = options.lang || 'es';
+  const lang = options.lang === 'en' ? 'en' : 'es';
   const labels = lang === 'en'
     ? { user: 'User', assistant: 'Assistant', system: 'System', project: 'Project', date: 'Date', messages: 'messages' }
     : { user: 'Usuario', assistant: 'Asistente', system: 'Sistema', project: 'Proyecto', date: 'Fecha', messages: 'mensajes' };
@@ -5846,6 +6075,7 @@ function buildExportHTML(msgs, projectName, options = {}) {
 <html lang="${lang}">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; img-src data: https:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
 <title>${escapeHtml(projectName)}</title>
 <style>${EXPORT_CSS}</style>
 </head>
@@ -5860,9 +6090,10 @@ function buildExportHTML(msgs, projectName, options = {}) {
 `;
 
   for (const m of msgs) {
-    const role = m.role || 'system';
+    const role = ['user', 'assistant', 'system'].includes(m.role) ? m.role : 'system';
     const roleLabel = labels[role] || role;
     const cls = 'msg-' + role;
+    rememberApprovedImages(parseStoredAttachments(m.attachments).map(item => item?.url));
     const safeContent = renderExportMarkdown(m.content);
     html += `<div class="msg ${cls}"><div class="role">${escapeHtml(roleLabel)}</div><div>${safeContent}</div></div>\n`;
   }
@@ -6258,12 +6489,76 @@ function wireMoreActionsMenu() {
   });
 }
 
+// --- Salir de la aplicación y versión instalada ---
+//
+// La acción se llama «Salir de MIKA5» y no «Cerrar sesión» porque no hay sesión
+// que cerrar: MIKA5 no tiene cuentas, ni login, ni credencial de usuario en
+// ninguna parte del código. Llamarlo «cerrar sesión» prometería una
+// invalidación que no ocurre y sugeriría que algo se borra. No se borra nada:
+// proyectos, chats, documentos, contexto y credenciales de proveedor siguen en
+// SQLite y reaparecen al volver a abrir. Para retirar permisos están «Revocar
+// permiso cloud» y la configuración de cada proveedor.
+async function quitApp() {
+  const confirmado = await mikaConfirm(
+    t('app.quitTitle'),
+    t('app.quitMessage'),
+    t('app.quitConfirm')
+  );
+  if (!confirmado) return;
+  try {
+    await window.mika5.app.quit();
+  } catch (e) {
+    showToast(t('app.quitFailed') + ': ' + (e?.message || e), 'error');
+  }
+}
+
+async function renderInstalledVersion() {
+  const valor = el('appVersionValue');
+  if (!valor) return;
+  try {
+    const info = await window.mika5.app.getVersion();
+    // En worktree y en `npm run dev` la aplicación no está empaquetada. Decirlo
+    // evita confundir una compilación de desarrollo con una release instalada.
+    valor.textContent = info.packaged
+      ? `v${info.installed}`
+      : `v${info.installed} · ${t('app.versionDev')}`;
+  } catch (_) {
+    valor.textContent = '—';
+  }
+}
+
+// El rotulado va aparte del cableado: los oyentes se registran una sola vez,
+// pero los textos se repintan en cada cambio de idioma desde applyTranslations.
+function renderSessionLabels() {
+  const salir = el('btnQuitApp');
+  if (salir) {
+    const etiqueta = el('btnQuitAppLabel');
+    if (etiqueta) etiqueta.textContent = t('app.quitApp');
+    salir.setAttribute('aria-label', t('app.quitApp'));
+    salir.title = t('app.quitApp');
+  }
+  const versionLabel = el('appVersionLabel');
+  if (versionLabel) versionLabel.textContent = t('app.versionLabel');
+}
+
+function wireSessionActions() {
+  const salir = el('btnQuitApp');
+  if (salir) {
+    salir.addEventListener('click', () => {
+      quitApp().catch(e => console.warn('quitApp:', e));
+    });
+  }
+  renderSessionLabels();
+  renderInstalledVersion().catch(e => console.warn('renderInstalledVersion:', e));
+}
+
 function wire() {
   el("btnCreateProject").onclick = createProject;
   const projInput = el("projectName");
   if (projInput) projInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); createProject(); } });
 
   wireMoreActionsMenu();
+  wireSessionActions();
 
   const cloudBannerDismiss = el("cloudBannerDismiss");
   if (cloudBannerDismiss) {
@@ -6878,7 +7173,8 @@ async function testAlibabaConnection() {
   if (!saved) return;
   const model = el('alibabaModelSelect').value || 'qwen3.7-max';
   try {
-    const result = await window.mika5.ai.chat({
+    const result = await sendAIChat({
+      providerId: 'alibaba',
       model,
       messages: [{ role: 'user', content: 'Responde únicamente: OK' }]
     });
@@ -6957,6 +7253,7 @@ async function generateAlibabaImage() {
   });
   const generationPayload = {
     requestId: requestContext.requestId,
+    providerId: requestContext.providerId,
     model,
     prompt,
     sourceImages: []
@@ -6969,7 +7266,7 @@ async function generateAlibabaImage() {
   if (button) button.disabled = true;
   if (results) results.textContent = 'Generando imagen…';
   try {
-    const response = await window.mika5.ai.generateImage(generationPayload);
+    const response = await sendAIImage(generationPayload);
     if (results) {
       results.innerHTML = '';
       for (const url of response.images || []) {
@@ -7010,7 +7307,7 @@ async function saveApiKey(provider) {
   try {
     const result = await window.mika5.ai.setApiKey(provider, key);
     if (result) {
-      showToast('API Key guardada para ' + provider, 'success');
+      showToast(result.warning || ('API Key guardada para ' + provider), result.warning ? 'warning' : 'success');
       input.value = '';
       closeApiKeyModal();
       if (currentProvider === provider) await loadRuntime();

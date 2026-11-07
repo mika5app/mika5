@@ -79,6 +79,146 @@ function sleepSync(ms) {
 }
 
 /**
+ * Solicita la terminación de los procesos que hayan sobrevivido A ESTA
+ * ejecución, y sólo ésos.
+ *
+ * Por qué así: una prueba que agota su plazo o un runner al que matan desde
+ * fuera dejan Electron vivos, y esos huérfanos se acumulan y ralentizan las
+ * siguientes corridas hasta hacerlas fallar. La tentación es barrer por nombre
+ * —«termina todo lo que se llame electron.exe»— y eso alcanza también el
+ * Electron de cualquier otra aplicación del usuario, incluida MIKA5 abierta de
+ * verdad.
+ *
+ * El identificador exacto es el `--user-data-dir`: `createProfileDir()` crea uno
+ * distinto por ejecución con `mkdtemp`, así que aparece en la línea de comandos
+ * de los procesos de esta corrida y de ninguna otra. Se resuelven primero los
+ * PID y se señaliza por PID, nunca por nombre.
+ *
+ * CONTRATO DEL VALOR DEVUELTO: cantidad de procesos identificados mediante la
+ * ruta única del perfil a los que se pudo enviar una solicitud o señal de
+ * terminación sin error síncrono. Significa lo mismo en Windows y en POSIX.
+ *
+ * NO significa, y no puede leerse como:
+ *   - procesos confirmados como muertos;
+ *   - procesos cuya salida se haya esperado;
+ *   - procesos reconsultados después de la señal.
+ *
+ * Ni `Stop-Process` ni `process.kill()` aguardan a que el proceso desaparezca:
+ * retornan cuando el sistema acepta la petición. Aquí no hay `Wait-Process`, ni
+ * `waitpid`, ni sondeo, ni segunda enumeración; el valor cuenta peticiones
+ * aceptadas, no bajas confirmadas. Que el superviviente propio efectivamente
+ * desaparezca y el ajeno siga vivo es una propiedad conductual, y se demuestra
+ * aparte con procesos reales en test/kill-survivors.test.js.
+ *
+ * El nombre conserva `kill` porque la señal enviada es de terminación
+ * —`SIGKILL` en POSIX, `Stop-Process -Force` en Windows—: nombra lo que se
+ * pide, no lo que se verifica.
+ *
+ * No siempre fue consistente. POSIX lanzaba `pkill -f` y devolvía `1` fijo: no
+ * era un recuento, era «lo intenté». Con dos supervivientes informaba de uno, y
+ * con cero informaba de uno también salvo que `pkill` lanzase. Windows sí
+ * contaba. El mismo número significaba dos cosas distintas, y una prueba que
+ * fijaba el valor pasaba en una plataforma y fallaba en la otra. Ahora POSIX
+ * identifica primero con `pgrep -f` sobre la MISMA ruta —sin ampliar el
+ * alcance— y señaliza PID a PID, igual que Windows.
+ *
+ * `plataforma` se inyecta para poder probar las dos ramas desde cualquier
+ * sistema; no es una condición para tapar la diferencia, es que el mecanismo de
+ * enumeración de procesos no es el mismo en los dos sitios.
+ *
+ * No recibe `log`: esta función no registra nada, informa con su valor de
+ * retorno. Quien llama decide si eso merece una línea.
+ */
+function killSurvivors(profileDir, {
+  exec = child_process.execFileSync,
+  kill = (pid) => process.kill(pid, 'SIGKILL'),
+  plataforma = process.platform
+} = {}) {
+  // Sin un directorio único no se señaliza nada: un patrón corto podría
+  // coincidir con procesos ajenos, que es justo lo que se quiere evitar.
+  if (!profileDir || !profileDir.includes(PROFILE_PREFIX)) return 0;
+  try {
+    if (plataforma === 'win32') {
+      // La ruta viaja por VARIABLE DE ENTORNO, no incrustada en el script.
+      //
+      // Incrustarla con JSON.stringify duplicaba las barras —`C:\\Users\\...`—
+      // y PowerShell no interpreta `\` como escape: la cadena buscada llevaba
+      // barras dobles y no casaba con ninguna línea de comandos real. La
+      // limpieza no señalizaba nada y lo hacía en silencio, que es peor que no
+      // intentarlo.
+      //
+      // Por entorno tampoco aparece la ruta en la línea de comandos del propio
+      // PowerShell, así que no puede seleccionarse a sí mismo. Aun así se
+      // excluye `$PID` de forma explícita: señalizarse a sí mismo antes de
+      // imprimir el resultado haría fallar a `execFileSync` y el `catch`
+      // devolvería cero como si no hubiera habido supervivientes.
+      const script = [
+        '$objetivo = $env:MIKA5_TEST_PROFILE_DIR;',
+        'if (-not $objetivo) { 0; exit }',
+        '$p = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |',
+        '  Where-Object { $_.ProcessId -ne $PID -and $_.ParentProcessId -ne $PID -and',
+        '                 $_.CommandLine -and $_.CommandLine.Contains($objetivo) });',
+        // Se cuentan las solicitudes ACEPTADAS, no los procesos encontrados:
+        // con `SilentlyContinue` un Stop-Process fallido no se distinguía de
+        // uno aceptado y `$p.Count` informaba de identificados, que es justo la
+        // ambigüedad que la rama POSIX acaba de dejar de tener.
+        //
+        // Aceptada no es lo mismo que cumplida: `Stop-Process` retorna cuando
+        // el sistema admite la petición, así que `$senalizados` no dice que el
+        // proceso haya dejado de existir. Comprobarlo exigiría reconsultar, y
+        // eso no se hace aquí.
+        '$senalizados = 0;',
+        'foreach ($proc in $p) {',
+        '  try { Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop; $senalizados++ } catch { }',
+        '}',
+        '$senalizados'
+      ].join(' ');
+      const salida = exec('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        env: { ...process.env, MIKA5_TEST_PROFILE_DIR: profileDir }
+      });
+      return Number(String(salida).trim()) || 0;
+    }
+    // POSIX: enumerar primero, señalizar después. `pgrep` usa exactamente el
+    // mismo patrón que usaba `pkill` —la ruta única del perfil—, así que el
+    // alcance no crece; lo que cambia es que ahora se sabe A QUIÉN se señaliza,
+    // y se puede contar. Sale con 1 cuando no hay coincidencias, y eso no es un
+    // fallo.
+    const listado = String(exec('pgrep', ['-f', '--', profileDir], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore']
+    }) || '');
+
+    const pids = listado
+      .split('\n')
+      .map((linea) => Number(linea.trim()))
+      // `pgrep` no se lista a sí mismo, pero el proceso que llama aquí sí podría
+      // aparecer si su línea de comandos llevara la ruta. Excluirlo es barato y
+      // evita que la limpieza se señalice a sí misma antes de contar.
+      .filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== process.pid);
+
+    // `process.kill()` entrega la señal y vuelve; no espera al `waitpid` ni
+    // comprueba que el PID haya desaparecido. Que no lance significa que la
+    // señal se envió, nada más.
+    let senalizados = 0;
+    for (const pid of pids) {
+      try {
+        kill(pid);
+        senalizados += 1;
+      } catch (_) {
+        // El PID ya no existía entre el `pgrep` y el `kill`: la señal no llegó
+        // a enviarse, así que no se cuenta.
+      }
+    }
+    return senalizados;
+  } catch (_) {
+    // No poder limpiar no puede cambiar el resultado de la prueba.
+    return 0;
+  }
+}
+
+/**
  * En Windows el proceso puede soltar los ficheros del perfil un instante
  * después de salir: un único intento de borrado falla con EBUSY/EPERM. Se
  * reintenta un número acotado de veces y, si aun así no se puede, se avisa sin
@@ -134,6 +274,14 @@ function runElectronTest(testFile, extraArgs = [], deps = {}) {
     }
     return typeof resultado?.status === 'number' ? resultado.status : 1;
   } finally {
+    // Antes de borrar: los supervivientes de esta corrida mantienen abiertos
+    // los ficheros del perfil, así que señalizarlos primero también evita los
+    // reintentos por EBUSY de aquí abajo.
+    //
+    // El mensaje dice lo que consta: se detectaron supervivientes y se pidió
+    // que terminasen. No se comprueba que lo hayan hecho, así que no se afirma.
+    const senalizados = killSurvivors(profileDir);
+    if (senalizados > 0) log(`run-electron-test: ${senalizados} superviviente(s) de esta ejecución detectado(s); solicitud de terminación enviada`);
     removeProfileDir(profileDir, { rm, sleep, log });
   }
 }
@@ -159,6 +307,7 @@ module.exports = {
   createProfileDir,
   resolveElectronBinary,
   removeProfileDir,
+  killSurvivors,
   runElectronTest,
   main
 };

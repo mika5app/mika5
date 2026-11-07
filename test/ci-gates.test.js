@@ -127,11 +127,15 @@ const EN_NPM_TEST = [
   'test/vision.test.js',
   'test:alibaba',
   'test:provider-capabilities',
+  'test:provider-availability',
+  'test:provider-credentials',
+  'test:provider-registry',
   'test:request-context',
   'test:provider-cancellation',
   'test:cloud-consent',
   'test:network-security',
   'test:knowledge-cli',
+  'test:ensure-electron-binary',
   'test:ci-gates',
   'test:palette',
   'test:visual-ui-shell',
@@ -147,12 +151,13 @@ for (const suite of EN_NPM_TEST) {
 
 // Scripts que deben existir, se invoquen desde el gate canónico o a mano.
 const SCRIPTS_REQUERIDOS = [
-  'test', 'test:all', 'test:db', 'test:rag', 'test:vision', 'test:alibaba',
-  'test:provider-capabilities', 'test:request-context', 'test:provider-cancellation',
+  'test', 'test:all', 'test:gui', 'test:db', 'test:rag', 'test:vision', 'test:alibaba',
+  'test:provider-capabilities', 'test:provider-availability', 'test:provider-credentials', 'test:provider-registry', 'test:request-context', 'test:provider-cancellation',
   'test:cloud-consent', 'test:network-security', 'test:knowledge-scope',
-  'test:knowledge-cli', 'test:ci-gates', 'test:palette', 'test:visual-ui-shell', 'test:visual-ui-conversation', 'test:electron-test-isolation', 'test:visual-ui-polish', 'test:ipc-contracts',
+  'test:knowledge-cli', 'test:ensure-electron-binary', 'test:ci-gates', 'test:palette', 'test:visual-ui-shell', 'test:visual-ui-conversation', 'test:electron-test-isolation', 'test:visual-ui-polish', 'test:ipc-contracts',
   'test:print-pdf-electron', 'test:electron-renderer',
   'test:electron-security', 'test:image-download-electron',
+  'test:provider-selector',
   'knowledge:preflight', 'knowledge:repair'
 ];
 for (const nombre of SCRIPTS_REQUERIDOS) {
@@ -175,7 +180,16 @@ const gateScript = normalizeEol(
 const GATES_CANONICOS = [
   'npm-test', 'db', 'knowledge-scope',
   'electron-security', 'electron-renderer-integration', 'image-download-electron',
-  'print-pdf-electron'
+  'print-pdf-electron',
+  // Selector multiproveedor, sesión de escritorio y ausencia de aviso
+  // bloqueante. Necesita Electron: mide la maquetación real de Chromium para
+  // distinguir "la opción está en el DOM" de "el usuario puede pulsarla".
+  'provider-selector',
+  // Procedencia del binding nativo. Necesita Electron: comprueba el ABI y la
+  // versión de N-API del runtime empaquetado, y que el `.node` que se carga es
+  // el prebuild que trae el paquete y no un binario compilado a mano que sólo
+  // funcionaría en la máquina que lo compiló.
+  'native-binding'
 ];
 const bloqueNames = gateScript.slice(gateScript.indexOf('NAMES=('), gateScript.indexOf(')', gateScript.indexOf('NAMES=(')));
 for (const gate of GATES_CANONICOS) {
@@ -210,7 +224,11 @@ console.log('\n=== js-yaml es dependencia directa, no un regalo transitivo ===')
 // desaparece sin aviso. Lo que se comprueba aquí es la DECLARACIÓN.
 
 const lock = JSON.parse(fs.readFileSync(path.join(ROOT, 'package-lock.json'), 'utf8'));
-const VERSION_YAML = '4.1.1';
+// 4.3.2 incluye la corrección de seguridad adicional; no volver a 4.3.1.
+// Frente a 4.1.1: la serie 4.0.0–4.2.0 arrastra dos avisos de DoS por
+// complejidad cuadrática en el manejo de claves de fusión (GHSA-h67p-54hq-rp68 y
+// GHSA-52cp-r559-cp3m). Subirla era condición para dejar `npm audit` en cero.
+const VERSION_YAML = '4.3.2';
 
 const declarada = (pkg.devDependencies || {})['js-yaml'];
 check(typeof declarada === 'string',
@@ -268,24 +286,27 @@ check(Boolean(workflow.on && workflow.on.pull_request),
 check(workflow.permissions && workflow.permissions.contents === 'read',
   'permisos mínimos: contents: read');
 
-const qg = workflow.jobs['quality-gates'];
+const canonicalWorkflow = yaml.load(fs.readFileSync(path.join(ROOT, '.github/workflows/_canonical.yml'), 'utf8'));
+check(workflow.jobs.canonical.uses === './.github/workflows/_canonical.yml',
+  'build.yml llama al workflow canónico del mismo commit');
+const qg = canonicalWorkflow.jobs['quality-gates'];
 check(Boolean(qg), 'existe el job quality-gates');
 const os = qg && qg.strategy && qg.strategy.matrix && qg.strategy.matrix.os;
 check(Array.isArray(os) && os.includes('ubuntu-latest') && os.includes('windows-latest'),
   'quality-gates cubre ubuntu-latest y windows-latest');
 
 const dependeDeGates = nombre => {
-  const necesita = workflow.jobs[nombre] && workflow.jobs[nombre].needs;
+  const necesita = canonicalWorkflow.jobs[nombre] && canonicalWorkflow.jobs[nombre].needs;
   const lista = Array.isArray(necesita) ? necesita : (necesita ? [necesita] : []);
   if (lista.includes('quality-gates')) return true;
   return lista.some(dependeDeGates);
 };
-for (const trabajo of ['build-windows', 'build-macos', 'build-linux']) {
+for (const trabajo of ['package', 'verify-artifacts']) {
   check(dependeDeGates(trabajo),
     `${trabajo} depende de quality-gates (directa o transitivamente)`);
 }
 
-const texto = JSON.stringify(workflow);
+const texto = JSON.stringify([workflow, canonicalWorkflow]);
 check(!texto.includes('continue-on-error'),
   'ningún job usa continue-on-error');
 
@@ -294,6 +315,256 @@ const pasosGates = JSON.stringify(qg || {});
 check(!pasosGates.includes('secrets.'),
   'quality-gates no lee ningún secreto');
 
+// =====================================================================
+console.log('\n=== Política canónica de Node ===');
+// =====================================================================
+
+// Node se declaraba dos veces y con valores distintos: `NODE_VERSION: '20'` en
+// build.yml y `'22'` en security-validation.yml. Nada obligaba a que
+// coincidieran, y no coincidían: el workflow que publica la release corría por
+// debajo del mínimo que electron@43.3.0 declara en su `engines.node`, con la
+// instalación avisando por EBADENGINE en cada job y nadie mirando.
+//
+// La versión vive ahora en un solo sitio, `.nvmrc`, y los workflows la leen con
+// `node-version-file`. Este bloque protege esa relación SIN volver a escribir el
+// número: lee `.nvmrc` y comprueba correspondencias. Actualizar Node consiste en
+// editar `.nvmrc` —y `engines.node` si cambia el rango soportado—, nunca este
+// archivo. Un test que repitiera la versión sería la tercera fuente de verdad
+// que este trabajo existe para eliminar.
+
+// --- A. La fuente canónica ---
+
+const RUTA_NVMRC = path.join(ROOT, '.nvmrc');
+check(fs.existsSync(RUTA_NVMRC),
+  '.nvmrc existe: es la única fuente de la versión de Node');
+
+const lineasNvmrc = normalizeEol(fs.readFileSync(RUTA_NVMRC, 'utf8'))
+  .split('\n').filter(linea => linea.trim() !== '');
+check(lineasNvmrc.length === 1,
+  `.nvmrc declara una versión y nada más (${lineasNvmrc.length} líneas con contenido)`);
+
+const NODE_CANONICO = (lineasNvmrc[0] || '').trim();
+// Sin `v`, sin rango, sin alias tipo `lts/*`: `setup-node` acepta varias de esas
+// formas, pero sólo una versión exacta hace reproducible lo que se construye.
+check(/^\d+\.\d+\.\d+$/.test(NODE_CANONICO),
+  `.nvmrc fija una versión exacta X.Y.Z, sin prefijo ni rango (${NODE_CANONICO})`);
+
+const RANGO_ENGINES = (pkg.engines || {}).node;
+check(typeof RANGO_ENGINES === 'string' && RANGO_ENGINES.trim() !== '',
+  `package.json declara engines.node (${RANGO_ENGINES})`);
+
+// --- B. El pin cae dentro del rango permitido ---
+
+// Comprobador deliberadamente estrecho: entiende sólo el formato que el proyecto
+// usa, `>=A.B.C <D`, y nada más. `semver` está en node_modules, pero como regalo
+// transitivo de electron-builder y de electron — exactamente la situación que el
+// bloque de js-yaml de más arriba declara insuficiente—, así que no se apoya en
+// él ni se añade una dependencia para tres comparaciones de enteros. Si el rango
+// deja de encajar en el formato, esto FALLA en lugar de dar por buena una
+// comparación que no sabe hacer.
+const FORMATO_RANGO = /^>=(\d+)\.(\d+)\.(\d+) <(\d+)$/;
+
+function evaluarRango(version, rango) {
+  const m = FORMATO_RANGO.exec(String(rango || '').trim());
+  if (!m) return { soportado: false, ok: false };
+  const partes = String(version).split('.').map(Number);
+  if (partes.length !== 3 || partes.some(n => !Number.isInteger(n))) {
+    return { soportado: true, ok: false };
+  }
+  const minimo = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const mayorExcluido = Number(m[4]);
+  const comparar = (a, b) => (a[0] - b[0]) || (a[1] - b[1]) || (a[2] - b[2]);
+  return { soportado: true, ok: comparar(partes, minimo) >= 0 && partes[0] < mayorExcluido };
+}
+
+const veredicto = evaluarRango(NODE_CANONICO, RANGO_ENGINES);
+check(veredicto.soportado,
+  `el comprobador entiende el formato de engines.node ("${RANGO_ENGINES}"); si cambia, hay que ampliarlo aquí antes de seguir`);
+check(veredicto.ok,
+  `la versión de .nvmrc (${NODE_CANONICO}) satisface engines.node (${RANGO_ENGINES})`);
+
+// --- C, D y E. Los workflows apuntan a la fuente y no declaran otra ---
+
+// Las reglas son funciones puras sobre un workflow ya parseado: se aplican a los
+// ficheros reales y, más abajo, a casos construidos en memoria que demuestran
+// que el guardián detecta lo que dice detectar.
+
+function pasosSetupNode(wf) {
+  const encontrados = [];
+  for (const [nombreJob, job] of Object.entries((wf && wf.jobs) || {})) {
+    const pasos = (job && job.steps) || [];
+    pasos.forEach((paso, indice) => {
+      if (/^actions\/setup-node(@|$)/.test(String((paso && paso.uses) || ''))) {
+        encontrados.push({ job: nombreJob, indice, paso });
+      }
+    });
+  }
+  return encontrados;
+}
+
+function violacionesSetupNode(wf) {
+  const problemas = [];
+  for (const { job, indice, paso } of pasosSetupNode(wf)) {
+    const con = (paso && paso.with) || {};
+    const donde = `${job}[${indice}]`;
+    // `node-version` gana sobre `node-version-file` cuando ambos están, así que
+    // dejar los dos reabre la divergencia sin que nada se ponga en rojo.
+    if ('node-version' in con) problemas.push(`${donde}: declara node-version`);
+    if (!('node-version-file' in con)) problemas.push(`${donde}: no declara node-version-file`);
+    else if (con['node-version-file'] !== '.nvmrc') {
+      problemas.push(`${donde}: node-version-file apunta a ${con['node-version-file']}`);
+    }
+  }
+  return problemas;
+}
+
+// Sólo `env:` de YAML, del workflow o de un job: eso sí sería una política Node
+// paralela. Una variable de shell dentro de un `run:` —como la que build.yml
+// deriva de .nvmrc para el metadata— no se mira aquí, y no debe confundirse.
+function violacionesEnvNode(wf) {
+  const problemas = [];
+  if (wf && wf.env && 'NODE_VERSION' in wf.env) {
+    problemas.push('el workflow declara NODE_VERSION en su env global');
+  }
+  for (const [nombre, job] of Object.entries((wf && wf.jobs) || {})) {
+    if (job && job.env && 'NODE_VERSION' in job.env) {
+      problemas.push(`el job ${nombre} declara NODE_VERSION en su env`);
+    }
+  }
+  return problemas;
+}
+
+const WORKFLOWS_CON_NODE = ['build.yml', 'security-validation.yml', 'integration.yml', '_canonical.yml'];
+let setupNodeTotal = 0;
+
+for (const nombre of WORKFLOWS_CON_NODE) {
+  const ruta = path.join(ROOT, '.github/workflows', nombre);
+  check(fs.existsSync(ruta), `${nombre} existe`);
+
+  const crudo = normalizeEol(fs.readFileSync(ruta, 'utf8'));
+  const wf = yaml.load(crudo);
+
+  const pasos = pasosSetupNode(wf);
+  setupNodeTotal += pasos.length;
+  // Sin contar cuántos son: la regla vale para los de hoy y para los que se
+  // añadan mañana. Lo único que se exige es que haya alguno.
+  check(pasos.length > 0 || wf.jobs?.canonical?.uses === './.github/workflows/_canonical.yml',
+    `${nombre} configura Node o delega en el workflow canónico (${pasos.length} pasos setup-node)`);
+
+  const malSetup = violacionesSetupNode(wf);
+  check(malSetup.length === 0,
+    `${nombre}: todo setup-node toma la versión de .nvmrc${malSetup.length ? ` — ${malSetup.join('; ')}` : ''}`);
+
+  // Regla textual, además de la estructural: caza un `node-version` en un paso
+  // que el análisis por `uses` no reconociera.
+  const literales = crudo.split('\n').filter(linea => /^\s*node-version:/.test(linea));
+  check(literales.length === 0,
+    `${nombre}: ningún node-version literal${literales.length ? ` — ${literales.map(l => l.trim()).join('; ')}` : ''}`);
+
+  const malEnv = violacionesEnvNode(wf);
+  check(malEnv.length === 0,
+    `${nombre}: ningún env de YAML reintroduce NODE_VERSION${malEnv.length ? ` — ${malEnv.join('; ')}` : ''}`);
+}
+
+check(setupNodeTotal > 0,
+  `los workflows suman ${setupNodeTotal} pasos setup-node y todos leen .nvmrc`);
+
+// --- F. El metadata de release también sale de la fuente canónica ---
+
+// `finalize-release` no instala Node, así que tomaba la versión de la variable
+// global del workflow. Al desaparecer ésta, la lee de .nvmrc. El campo que se
+// publica en BUILD-METADATA.json describe con qué Node se construyó: si volviera
+// a ser un literal, mentiría en cuanto .nvmrc cambiase.
+const buildWorkflow = yaml.load(
+  normalizeEol(fs.readFileSync(path.join(ROOT, '.github/workflows/build.yml'), 'utf8')));
+
+// El fichero se nombra en tres pasos —el que lo escribe, el que lo sube y el
+// que lo verifica—, así que el filtro busca la redirección que lo crea.
+const pasosMetadata = Object.values(buildWorkflow.jobs || {})
+  .flatMap(job => (job && job.steps) || [])
+  .filter(paso => /cat\s*>\s*\S*BUILD-METADATA\.json/.test(String((paso && paso.run) || '')));
+check(pasosMetadata.length === 1,
+  `un solo paso genera BUILD-METADATA.json (${pasosMetadata.length})`);
+
+const guionMetadata = String((pasosMetadata[0] || {}).run || '');
+check(/NODE_VERSION="\$\(cat\s+\.nvmrc\)"/.test(guionMetadata),
+  'el metadata deriva NODE_VERSION de .nvmrc');
+check(/"node_version":\s*"\$\{NODE_VERSION\}"/.test(guionMetadata),
+  'y el campo node_version usa esa variable, no un valor escrito a mano');
+check(!/"node_version":\s*"\d/.test(guionMetadata),
+  'node_version nunca se escribe como literal en el YAML');
+
+// --- Validación negativa: el guardián detecta lo que dice detectar ---
+
+// Casos construidos en memoria. Sin ficheros nuevos y sin tocar el repositorio:
+// una regla que sólo se ha visto pasar no demuestra que sepa fallar.
+const CASO_BASE = (paso) => yaml.load([
+  'jobs:',
+  '  demo:',
+  '    steps:',
+  '      - uses: actions/setup-node@v4',
+  ...paso.map(linea => `        ${linea}`)
+].join('\n'));
+
+const negativos = [
+  ['un node-version literal',
+    violacionesSetupNode(CASO_BASE(['with:', "  node-version: '20'"]))],
+  ['un node-version-file que apunta a otra ruta',
+    violacionesSetupNode(CASO_BASE(['with:', '  node-version-file: .node-version']))],
+  ['node-version y node-version-file a la vez',
+    violacionesSetupNode(CASO_BASE(['with:', "  node-version: '22'", '  node-version-file: .nvmrc']))],
+  ['un setup-node sin ninguna de las dos claves',
+    violacionesSetupNode(CASO_BASE([]))]
+];
+for (const [descripcion, problemas] of negativos) {
+  check(problemas.length > 0, `el guardián rechaza ${descripcion} (${problemas.join('; ')})`);
+}
+
+const casoEnvGlobal = yaml.load([
+  'env:',
+  "  NODE_VERSION: '22'",
+  'jobs:',
+  '  demo:',
+  '    steps:',
+  '      - uses: actions/setup-node@v4',
+  '        with:',
+  '          node-version-file: .nvmrc'
+].join('\n'));
+check(violacionesSetupNode(casoEnvGlobal).length === 0
+   && violacionesEnvNode(casoEnvGlobal).length > 0,
+  'el guardián rechaza un env global NODE_VERSION aunque los setup-node estén bien');
+
+const casoEnvJob = yaml.load([
+  'jobs:',
+  '  demo:',
+  '    env:',
+  "      NODE_VERSION: '20'",
+  '    steps: []'
+].join('\n'));
+check(violacionesEnvNode(casoEnvJob).length > 0,
+  'y también cuando la variable se esconde en el env de un job');
+
+// Una variable de shell derivada de .nvmrc no es una política paralela: si esto
+// se marcara como violación, el metadata de release no tendría forma de existir.
+const casoShellLocal = yaml.load([
+  'jobs:',
+  '  demo:',
+  '    steps:',
+  '      - run: |',
+  '          NODE_VERSION="$(cat .nvmrc)"',
+  '          echo "$NODE_VERSION"'
+].join('\n'));
+check(violacionesEnvNode(casoShellLocal).length === 0,
+  'una variable de shell derivada de .nvmrc no se confunde con una política paralela');
+
+check(evaluarRango('20.20.2', RANGO_ENGINES).ok === false,
+  'el comprobador de rango rechaza una versión por debajo del mínimo (20.20.2)');
+check(evaluarRango('23.0.0', RANGO_ENGINES).ok === false,
+  'y también una por encima del máximo excluido (23.0.0)');
+check(evaluarRango(NODE_CANONICO, '^1.2.3').soportado === false,
+  'y declara no soportado un formato de rango que no sabe evaluar, en vez de aprobarlo');
+
 console.log(`\n${'='.repeat(40)}`);
+require('./canonical-workflow.test');
 console.log(`CI gates tests passed (${passed} comprobaciones)`);
 console.log(`${'='.repeat(40)}`);

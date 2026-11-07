@@ -4,6 +4,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { MAIN_WEB_PREFERENCES } = require('../src/main/window-security');
 const { app, BrowserWindow, session } = require('electron');
 
 async function run() {
@@ -23,10 +24,8 @@ async function run() {
   const win = new BrowserWindow({
     show: false,
     webPreferences: {
-      offscreen: true,
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true
+      ...MAIN_WEB_PREFERENCES,
+      offscreen: true
     }
   });
 
@@ -47,6 +46,7 @@ async function run() {
     'utf8'
   );
 
+  assert.strictEqual(win.webContents.getLastWebPreferences().sandbox, true);
   const mainLikeWindow = win;
   mainLikeWindow.webContents.removeAllListeners('will-navigate');
   await mainLikeWindow.loadFile(cspFixture);
@@ -88,6 +88,7 @@ async function run() {
     await new Promise(resolve => setTimeout(resolve, 50));
     return result;
   })()`, true);
+  assert.strictEqual(await win.webContents.executeJavaScript('typeof window.mika5.ai.chat'), 'function', 'actual sandboxed preload must expose the bridge');
   assert.strictEqual(cspResult.fetchBlocked, true);
   assert.strictEqual(cspResult.webSocketBlocked, true);
   assert.strictEqual(cspResult.iframeBlocked, true);
@@ -97,6 +98,7 @@ async function run() {
   );
   assert(navigations.some(url => url === 'https://example.com/csp-navigation'));
   assert(mainLikeWindow.webContents.getURL().startsWith('file:'));
+  await require('./security-renderer-regressions')(BrowserWindow, requests);
   mainLikeWindow.destroy();
   fs.unlinkSync(cspFixture);
   console.log('Electron security tests passed');

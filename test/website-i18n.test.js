@@ -1,0 +1,890 @@
+// test/website-i18n.test.js — El sitio publico debe estar completo en espanol e
+// ingles, y el conmutador debe cambiarlo todo.
+//
+// Run: node test/website-i18n.test.js
+//
+// Por que existe: el diccionario puede tener paridad perfecta y aun asi dejar
+// medio sitio en un solo idioma, porque el texto vive en el HTML sin clave. Eso
+// paso: 136 claves con paridad y 737 nodos hardcodeados. Esta suite mide la
+// cobertura real, no el tamano del diccionario.
+//
+// Esta fase cubre landing.html y models.html. whitepaper.html sigue pendiente y
+// esta declarado como tal: la suite falla si alguien lo da por hecho sin
+// traducirlo.
+
+'use strict';
+
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+
+const ROOT = path.join(__dirname, '..');
+const WEB = path.join(ROOT, 'web');
+let passed = 0;
+
+function check(condition, message) {
+  assert(condition, message);
+  passed++;
+  console.log(`  ✓ ${message}`);
+}
+
+const leer = rel => fs.readFileSync(path.join(WEB, rel), 'utf8').replace(/\r\n?/g, '\n');
+
+// =====================================================================
+// Allowlist explicita: texto identico en ambos idiomas por ser tecnico.
+// Sin comodines: cada entrada se justifica sola.
+// =====================================================================
+const ALLOWLIST_TEXTO = [
+  // marcas y nombres propios
+  'MIKA5', 'Ollama', 'llama.cpp', 'OpenAI', 'Anthropic', 'Groq', 'Moonshot',
+  'Alibaba Cloud Model Studio', 'GitHub', 'Electron', 'SQLite', 'Windows',
+  'macOS', 'Linux', 'AppImage', 'DMG', 'NSIS', '.deb', '.rpm',
+  // identificadores de modelo sin digito ni etiqueta (no los cubre el patron)
+  'nomic-embed-text', 'mxbai-embed-large',
+  // comentarios de comando identicos en ambos idiomas
+  '# Windows', '# macOS', '# Linux',
+  // control de idioma
+  'EN', 'ES', '×', '&times;'
+];
+
+// Patrones de texto que no son user-facing: comandos, rutas, URLs, hashes.
+const PATRONES_TECNICOS = [
+  /^\$?\s*(ollama|curl|chmod|dpkg|rpm|sudo|sha256sum|shasum|Get-FileHash|PS&gt;|\.\/)/i,
+  /^#?\s*MIKA5-[\w.-]+\.(exe|dmg|zip|AppImage|deb|rpm|tar\.gz)$/,
+  /^(https?:\/\/|github\.com|ollama\.com|127\.0\.0\.1)/,
+  /^[a-f0-9]{32,}$/i,
+  /^[\d.]+\s*(GB|MB|KB)$/i,
+  /^v?\d+\.\d+\.\d+$/,
+  // Etiqueta de modelo de Ollama: minusculas, con digito o dos puntos.
+  // Exige digito o ':' para que una palabra suelta en prosa no pase por aqui.
+  /^[a-z][a-z0-9.-]*(:[a-z0-9.-]+)?$/,
+  // Nombre de cuantizacion GGUF tal y como lo publica el registro.
+  /^(Q\d(_\d|_[KM](_[SML])?)?|F16|F32|BF16)$/,
+  // Nombre de archivo publicado en la release: un solo token con extension
+  // conocida. La prosa no puede coincidir porque exige token unico.
+  /^[A-Za-z][\w.-]*\.(md|json|txt|exe|dmg|zip|AppImage|deb|rpm|gz|tar\.gz)$/,
+  // Familia de modelo con varias etiquetas: "qwen2.5-coder:7b / 14b / 32b"
+  /^[a-z][a-z0-9.:-]*(\s*\/\s*[a-z0-9.]+)+$/
+];
+
+function esTecnico(texto) {
+  if (ALLOWLIST_TEXTO.includes(texto)) return true;
+  if (/^[a-z][a-z0-9.-]*(:[a-z0-9.-]+)?$/.test(texto) && !/[0-9:]/.test(texto)) return false;
+  return PATRONES_TECNICOS.some(p => p.test(texto));
+}
+
+/**
+ * Vacia el contenido de cada elemento con data-i18n-html contando la
+ * profundidad de su propia etiqueta, para que un bloque con elementos
+ * anidados del mismo tipo (un <div> de diagrama con <div> dentro) se cierre
+ * donde corresponde y no en el primer cierre que aparezca.
+ */
+function vaciarI18nHtml(html) {
+  const apertura = /<(\w+)([^>]*\sdata-i18n-html="[^"]*"[^>]*)>/;
+  let salida = html;
+  for (let vuelta = 0; vuelta < 500; vuelta++) {
+    const m = apertura.exec(salida);
+    if (!m) break;
+    const tag = m[1];
+    const token = new RegExp(`<(/?)${tag}\\b[^>]*>`, 'g');
+    token.lastIndex = m.index + m[0].length;
+    let profundidad = 1;
+    let cierre = -1;
+    let t;
+    while ((t = token.exec(salida)) !== null) {
+      profundidad += t[1] ? -1 : 1;
+      if (profundidad === 0) { cierre = t.index; break; }
+    }
+    if (cierre === -1) break;
+    // Se conserva la etiqueta, sin el atributo, para no volver a encontrarla.
+    salida = `${salida.slice(0, m.index)}<${tag} data-i18n-html-vaciado>${salida.slice(cierre)}`;
+  }
+  return salida;
+}
+
+/** Nodos de texto visibles que no pasan por el sistema i18n. */
+function nodosHardcodeados(html) {
+  const limpio = html
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '');
+
+  // El <title> lo traduce aplicarMetadata, no una clave del markup.
+  let sinTitle = limpio.replace(/<title>[\s\S]*?<\/title>/gi, '');
+
+  // El contenido de un elemento data-i18n-html lo define el diccionario: el
+  // markup solo lleva el idioma por defecto. Se valida la clave (paridad,
+  // traduccion distinta), no el HTML de respaldo, asi que se vacia aqui.
+  // No es una via de escape: la clave sigue pasando por todas las demas
+  // comprobaciones de esta suite.
+  sinTitle = vaciarI18nHtml(sinTitle);
+
+  const fuera = [];
+  for (const m of sinTitle.matchAll(/>([^<>]+)</g)) {
+    const texto = m[1].replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!texto || texto.length < 2) continue;
+    if (!/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]{2}/.test(texto)) continue;
+    // La etiqueta de apertura puede ocupar varias lineas: se busca en todo el
+    // documento, no solo en la linea del texto.
+    const antes = sinTitle.slice(0, m.index);
+    const apertura = antes.slice(antes.lastIndexOf('<'));
+    if (/data-i18n(?:-html)?=/.test(apertura)) continue;
+    if (esTecnico(texto)) continue;
+    fuera.push(texto);
+  }
+  return fuera;
+}
+
+function diccionarios(html) {
+  const en = html.slice(html.indexOf('  en: {'), html.indexOf('  es: {'));
+  const es = html.slice(html.indexOf('  es: {'));
+  const parse = bloque => {
+    const mapa = new Map();
+    for (const m of bloque.matchAll(/'([a-zA-Z0-9._-]+)':\s*'((?:\\'|[^'])*)'/g)) {
+      mapa.set(m[1], m[2]);
+    }
+    return mapa;
+  };
+  return { en: parse(en), es: parse(es) };
+}
+
+// Claves cuyo texto coincide en ES y EN de forma deliberada. Cada una lleva su
+// motivo: son nombres de plataforma, formatos de paquete, marcas o cadenas de
+// version. Traducirlas empeoraria el texto.
+const ALLOWLIST_CLAVES_IDENTICAS = {
+  'landing.html': {
+    'landing.verify.win': 'nombre de plataforma dentro de un comentario de comando',
+    'landing.verify.mac': 'nombre de plataforma dentro de un comentario de comando',
+    'landing.verify.linux': 'nombre de plataforma dentro de un comentario de comando',
+    'nav.whitepaper': 'nombre propio del documento, se usa igual en espanol',
+    'footer.whitepaper': 'nombre propio del documento, se usa igual en espanol',
+    'nav.github': 'marca',
+    'hero.badge': 'version y nombres de sistema operativo',
+    'footer.copyright': 'version, marca y licencia',
+    'dl.win.name': 'nombre de plataforma',
+    'dl.win.desc': 'version de sistema y arquitectura',
+    'dl.mac.name': 'nombre de plataforma',
+    'dl.mac.desc': 'nombres de arquitectura de Apple',
+    'dl.mac.arm': 'arquitectura y extension de archivo',
+    'dl.mac.intel': 'arquitectura y extension de archivo',
+    'dl.linux.name': 'nombre de plataforma',
+    'dl.linux.desc': 'arquitectura y formatos de paquete',
+    'dl.linux.appimage': 'formato de paquete',
+    'qs.tab.win': 'nombre de plataforma',
+    'qs.tab.mac': 'nombre de plataforma',
+    'qs.tab.linux': 'nombre de plataforma',
+    'footer.legal': 'palabra identica en ambos idiomas',
+    'new.more.link': 'nombre propio del documento, se usa igual en espanol'
+  },
+  'models.html': {
+    'models.toc.workstation': 'nombre de gama de hardware, se usa igual en espanol',
+    'models.hardware.wsBadge': 'nombre de gama de hardware, se usa igual en espanol',
+    'models.tag.local': 'palabra identica en ambos idiomas',
+    'models.tag.cloud': 'termino fijado en el glosario: cloud se conserva en espanol',
+    'models.table.runsLocal': 'palabra identica en ambos idiomas',
+    'models.table.colHardware': 'palabra identica en ambos idiomas',
+    'models.role.chat': 'termino fijado en el glosario: chat se conserva en espanol',
+    'models.size.nomicembedtext': 'cifra en megabytes, sin decimales que separar',
+    'models.size.mxbaiembedlarge': 'cifra en megabytes, sin decimales que separar',
+    'models.footer.whitepaper': 'nombre propio del documento, se usa igual en espanol',
+    'models.footer.github': 'marca'
+  },
+  'whitepaper.html': {
+    'whitepaper.nav.title': 'nombre propio del documento, se usa igual en espanol',
+    'whitepaper.meta.crumbGuide': 'nombre propio del documento en la miga de pan',
+    'whitepaper.toc.s9': 'nombre del proyecto llama.cpp',
+    'whitepaper.editions.communityName': 'nombre de edicion: invariable segun el glosario',
+    'whitepaper.editions.proName': 'nombre de edicion: invariable segun el glosario',
+    'whitepaper.editions.cloudName': 'nombre de edicion: invariable segun el glosario',
+    'whitepaper.footer.github': 'marca',
+    'whitepaper.footer.tagline': 'version, ano y licencia'
+  }
+};
+
+/**
+ * Comprobaciones comunes a toda pagina bilingue. Cada pagina pasa por las
+ * mismas reglas: si una pagina necesitase una excepcion, tendria que
+ * declararla aqui y quedaria a la vista.
+ */
+function auditarPagina(archivo, prefijo) {
+  console.log(`\n=== ${archivo}: cobertura real ===`);
+  const html = leer(archivo);
+  const allowClaves = ALLOWLIST_CLAVES_IDENTICAS[archivo] || {};
+
+  const sueltos = nodosHardcodeados(html);
+  check(sueltos.length === 0,
+    `${archivo}: sin texto user-facing fuera del sistema i18n (${sueltos.length}${sueltos.length ? ': ' + sueltos.slice(0, 4).join(' | ') : ''})`);
+
+  const { en, es } = diccionarios(html);
+  check(en.size > 0 && es.size > 0, `${archivo}: los dos diccionarios existen (EN ${en.size}, ES ${es.size})`);
+
+  const soloEn = [...en.keys()].filter(k => !es.has(k));
+  const soloEs = [...es.keys()].filter(k => !en.has(k));
+  check(soloEn.length === 0, `${archivo}: ninguna clave sin traduccion espanola (${soloEn.join(', ') || 'ninguna'})`);
+  check(soloEs.length === 0, `${archivo}: ninguna clave sin traduccion inglesa (${soloEs.join(', ') || 'ninguna'})`);
+
+  const vacias = [...en.entries()].filter(([, v]) => !v.trim())
+    .concat([...es.entries()].filter(([, v]) => !v.trim()));
+  check(vacias.length === 0, `${archivo}: ninguna traduccion vacia (${vacias.length})`);
+
+  // Toda clave usada en el markup debe existir en ambos diccionarios.
+  const usadas = new Set([...html.matchAll(/data-i18n(?:-html)?="([^"]+)"/g)].map(m => m[1]));
+  const huerfanas = [...usadas].filter(k => !en.has(k) || !es.has(k));
+  check(huerfanas.length === 0, `${archivo}: toda clave del markup existe en EN y ES (${huerfanas.join(', ') || 'ninguna'})`);
+
+  const identicas = [...en.entries()]
+    .filter(([k, v]) => es.get(k) === v)
+    .filter(([k]) => !allowClaves[k])
+    .filter(([, v]) => !esTecnico(v.trim()))
+    .filter(([, v]) => /[A-Za-z]{4}/.test(v));
+  check(identicas.length === 0,
+    `${archivo}: ningun texto no tecnico identico en ES y EN (${identicas.length ? identicas.slice(0, 3).map(([k]) => k).join(', ') : 'ninguno'})`);
+
+  // La allowlist no puede crecer con claves que en realidad si estan traducidas:
+  // eso indicaria que sobra una excusa.
+  const allowlistInnecesaria = Object.keys(allowClaves)
+    .filter(k => en.has(k) && es.has(k) && en.get(k) !== es.get(k));
+  check(allowlistInnecesaria.length === 0,
+    `${archivo}: la allowlist de claves no contiene excepciones sobrantes (${allowlistInnecesaria.join(', ') || 'ninguna'})`);
+
+  // Metadata bilingue completa.
+  for (const sufijo of ['title', 'description', 'ogTitle', 'ogDescription', 'twitterTitle', 'twitterDescription']) {
+    const clave = `${prefijo}.meta.${sufijo}`;
+    check(en.has(clave) && es.has(clave), `${archivo}: ${clave} definida en ambos idiomas`);
+    check(en.get(clave) !== es.get(clave), `${archivo}: ${clave} realmente traducida`);
+  }
+
+  check(/document\.title\s*=/.test(html), `${archivo}: el conmutador actualiza el title del documento`);
+  check(/meta\[property="og:title"\]/.test(html), `${archivo}: el conmutador actualiza Open Graph`);
+  check(/meta\[name="twitter:title"\]/.test(html), `${archivo}: el conmutador actualiza Twitter cards`);
+  check(/application\/ld\+json/.test(html) && /JSON\.stringify\(datos/.test(html),
+    `${archivo}: el conmutador reescribe el JSON-LD`);
+  check(/document\.documentElement\.lang\s*=\s*lang/.test(html),
+    `${archivo}: el conmutador actualiza <html lang>`);
+
+  check(/I18N_ATTR_ALLOWLIST/.test(html), `${archivo}: los atributos traducibles usan allowlist cerrada`);
+  const attrPermitidos = (html.match(/I18N_ATTR_ALLOWLIST\s*=\s*\[([^\]]+)\]/) || [])[1] || '';
+  for (const attr of ['alt', 'aria-label', 'placeholder', 'title']) {
+    check(attrPermitidos.includes(`'${attr}'`), `${archivo}: la allowlist de atributos incluye ${attr}`);
+  }
+
+  const markup = html.replace(/<script[\s\S]*?<\/script>/gi, '');
+  const ariaTraducidos = [...markup.matchAll(/data-i18n-attr="[^"]*aria-label:([a-zA-Z0-9._-]+)/g)].map(m => m[1]);
+  check(ariaTraducidos.length >= 1, `${archivo}: los aria-label pasan por i18n (${ariaTraducidos.length})`);
+  for (const clave of ariaTraducidos) {
+    check(en.has(clave) && es.has(clave) && en.get(clave) !== es.get(clave),
+      `${archivo}: ${clave} traducido en ambos idiomas`);
+  }
+
+  const altTraducidos = [...markup.matchAll(/data-i18n-attr="[^"]*alt:([a-zA-Z0-9._-]+)/g)].map(m => m[1]);
+  for (const clave of new Set(altTraducidos)) {
+    check(en.has(clave) && es.has(clave) && en.get(clave) !== es.get(clave),
+      `${archivo}: ${clave} traducido en ambos idiomas`);
+  }
+
+  // Todo alt de imagen o pasa por i18n o su texto es una marca / cadena
+  // tecnica identica en ambos idiomas. Un alt en prosa sin clave falla.
+  const altsSueltos = [...markup.matchAll(/<img\b[^>]*>/g)]
+    .filter(m => !/data-i18n-attr="[^"]*alt:/.test(m[0]))
+    .map(m => (m[0].match(/\balt="([^"]*)"/) || [])[1])
+    .filter(alt => alt !== undefined && alt.trim() && !esTecnico(alt.trim()));
+  check(altsSueltos.length === 0,
+    `${archivo}: ningun alt en prosa fuera del sistema i18n (${altsSueltos.join(' | ') || 'ninguno'})`);
+
+  return { en, es, usadas };
+}
+
+// =====================================================================
+const { en, es } = auditarPagina('landing.html', 'landing');
+// =====================================================================
+
+console.log('\n=== El mockup del hero cambia de idioma ===');
+
+const landing = leer('landing.html');
+const usadasLanding = new Set([...landing.matchAll(/data-i18n(?:-html)?="([^"]+)"/g)].map(m => m[1]));
+const clavesMockup = [...usadasLanding].filter(k => k.startsWith('landing.mockup.'));
+check(clavesMockup.length >= 10, `el mockup esta conectado al i18n (${clavesMockup.length} claves)`);
+for (const clave of ['landing.mockup.projects', 'landing.mockup.projQuick', 'landing.mockup.inputPlaceholder']) {
+  check(en.has(clave) && es.has(clave) && en.get(clave) !== es.get(clave),
+    `${clave} cambia entre idiomas`);
+}
+const landingMarkup = landing.replace(/<script[\s\S]*?<\/script>/gi, '');
+const mockupSinClave = [...landingMarkup.matchAll(/>(Chats Rápidos|Proyectos|Sin proyecto|Escribe tu mensaje\.\.\.)</g)]
+  .filter(m => {
+    const antes = landingMarkup.slice(0, m.index);
+    return !/data-i18n(?:-html)?=/.test(antes.slice(antes.lastIndexOf('<')));
+  });
+check(mockupSinClave.length === 0,
+  `todo texto del mockup pasa por i18n (${mockupSinClave.length} sin clave)`);
+
+// =====================================================================
+const modelos = auditarPagina('models.html', 'models');
+// =====================================================================
+
+console.log('\n=== models.html: integridad del catalogo ===');
+
+const models = leer('models.html');
+
+// Identificadores retirados por no existir o no ser verificables. No pueden
+// volver: cada uno se elimino con su ficha completa (docs/content-audit A.1).
+const PROHIBIDOS = [
+  'glm-5', 'kimi-k2', 'nemotron', 'glm-ocr', 'qwen3.5', 'qwen3:',
+  ':cloud', 'qwen2.5-vl:', 'gemma3:9b', 'phi4:3b'
+];
+for (const id of PROHIBIDOS) {
+  check(!models.includes(id), `no reaparece el identificador retirado ${id}`);
+}
+
+// Comparaciones y cifras sin fuente primaria. La guia declara explicitamente
+// que no publica benchmarks: el texto tiene que sostenerlo.
+const PROHIBIDOS_TEXTO = [
+  'GPT-4', 'outperform', 'MMLU', 'HumanEval', 'MT-Bench', 'GSM8K', 'TextVQA',
+  'MMBench', 'o1-level', 'near o1', 'state of the art', 'see model card',
+  'tok/s'
+];
+for (const frase of PROHIBIDOS_TEXTO) {
+  check(!new RegExp(frase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(models),
+    `no reaparece la afirmacion sin fuente «${frase}»`);
+}
+
+// La unica mencion admisible a los benchmarks es la que dice que no se
+// publican, y tiene que estar en los dos idiomas.
+check(/publishes no benchmark scores/.test(models) && /no publica puntuaciones de benchmark/.test(models),
+  'el descargo de «sin benchmarks» esta en ingles y en espanol');
+check(!/\b\d+(\.\d+)?\s*(%|puntos|points)\b.{0,40}(benchmark|eval)/i.test(models),
+  'ninguna puntuacion numerica asociada a un benchmark');
+
+// Cada tag que aparece en un comando debe tener ficha o fila en la tabla.
+const tagsEnComandos = new Set([...models.matchAll(/ollama pull ([a-z0-9.:-]+)/g)].map(m => m[1]));
+check(tagsEnComandos.size >= 15, `la guia documenta comandos para ${tagsEnComandos.size} modelos`);
+
+// Los estados del catalogo existen y estan traducidos.
+for (const clave of ['models.status.validated', 'models.status.ollama', 'models.status.adapter', 'models.status.future']) {
+  check(modelos.en.has(clave) && modelos.es.has(clave) && modelos.en.get(clave) !== modelos.es.get(clave),
+    `${clave} declarado y traducido`);
+}
+
+// Separacion local / cloud: la seccion cloud no puede fijar identificadores.
+const seccionCloud = (models.match(/id="cloud"[\s\S]*?<\/section>/) || [''])[0];
+check(!/ollama pull/.test(seccionCloud), 'la seccion cloud no mezcla comandos de modelos locales');
+check(/models\.cloud\.alibaba/.test(models), 'Alibaba figura como proveedor implementado');
+
+// El JSON-LD tiene que llevar sus textos al diccionario, no quedarse en ingles.
+for (const clave of ['models.meta.faq1Q', 'models.meta.faq1A', 'models.meta.faq2Q', 'models.meta.faq2A',
+  'models.meta.faq3Q', 'models.meta.faq3A', 'models.meta.crumbHome', 'models.meta.crumbGuide']) {
+  check(modelos.en.has(clave) && modelos.es.has(clave) && modelos.en.get(clave) !== modelos.es.get(clave),
+    `${clave} traducido para el JSON-LD`);
+}
+check(/@graph/.test(models) && /BreadcrumbList/.test(models) && /FAQPage/.test(models),
+  'el JSON-LD conserva Article, BreadcrumbList y FAQPage');
+
+// =====================================================================
+const wp = auditarPagina('whitepaper.html', 'whitepaper');
+// =====================================================================
+
+const paper = leer('whitepaper.html');
+
+console.log('\n=== whitepaper.html: afirmaciones de seguridad ===');
+
+// Afirmaciones falsas o absolutas que el documento arrastraba. Ninguna puede
+// volver, ni en ingles ni en espanol.
+const CLAIMS_PROHIBIDOS = [
+  /PII sanit/i,
+  /sanitizaci[oó]n de PII/i,
+  /\[EMAIL\]|\[PHONE\]/,
+  /cero (peticiones|llamadas) de red/i,
+  /Renderer — sandboxed/,
+  /never leaves your machine/i,
+  /nunca salen de tu equipo/i,
+  /anonymis(es|ation) (is )?automatic/i,
+  /redacci[oó]n autom[aá]tica (est[aá] )?activ/i
+];
+for (const patron of CLAIMS_PROHIBIDOS) {
+  check(!patron.test(paper), `no reaparece la afirmacion prohibida ${patron}`);
+}
+
+// «zero outbound / zero network» sólo es admisible dentro de un desmentido.
+// Se comprueba el contexto de cada aparición, no la mera presencia: prohibirla
+// del todo impediría escribir la frase que corrige el error original.
+const absolutosRed = [...paper.matchAll(/zero (outbound|network)[^.<]*/gi)]
+  .filter(m => !/not true|no es cierto/i.test(paper.slice(Math.max(0, m.index - 90), m.index)));
+check(absolutosRed.length === 0,
+  `«zero outbound/network» solo aparece dentro de un desmentido (${absolutosRed.length} afirmaciones sueltas)`);
+
+// The documented settings must follow the production window policy.
+const DESMENTIDO = /not true|no es cierto|earlier versions|versiones anteriores|afirmaban|claimed|<em>not<\/em>|<em>no<\/em>/i;
+const preferences = require('../src/main/window-security').MAIN_WEB_PREFERENCES;
+check(preferences.sandbox === true && !/sandbox: false/.test(paper),
+  'documenta el sandbox habilitado en la ventana principal');
+check(/sandbox: true/.test(paper), 'declara sandbox: true');
+check(/contextIsolation: true/.test(paper) && /nodeIntegration: false/.test(paper),
+  'declara contextIsolation y nodeIntegration reales');
+check(/connect-src/.test(paper), 'documenta la CSP del renderer');
+
+// Correcciones obligatorias, presentes en los dos idiomas.
+check(/It is not true that data never leaves the machine/.test(paper)
+  && /No es cierto que los datos nunca salgan del equipo/.test(paper),
+  'corrige el absoluto de red en ingles y en espanol');
+check(/no automatic redaction/i.test(paper) && /no aplica ninguna redacci[oó]n autom[aá]tica/i.test(paper),
+  'declara que no hay redaccion automatica, en ambos idiomas');
+check(/sandboxing on/.test(paper) && /sandbox activado/.test(paper),
+  'describe la configuración actual de sandbox en ambos idiomas');
+
+console.log('\n=== whitepaper.html: funciones futuras ===');
+
+// Todo lo que no existe tiene que ir etiquetado en las dos lenguas.
+for (const clave of ['whitepaper.roadmap.sync', 'whitepaper.roadmap.mobile',
+  'whitepaper.roadmap.agents', 'whitepaper.roadmap.teams', 'whitepaper.roadmap.vllm']) {
+  check(/Not included in Community/.test(wp.en.get(clave) || ''),
+    `${clave} etiquetado como no incluido (EN)`);
+  check(/No incluido en Community/.test(wp.es.get(clave) || ''),
+    `${clave} etiquetado como no incluido (ES)`);
+}
+for (const clave of ['whitepaper.roadmap.streaming', 'whitepaper.roadmap.dragdrop',
+  'whitepaper.roadmap.tools', 'whitepaper.roadmap.modelui', 'whitepaper.roadmap.exportkb',
+  'whitepaper.roadmap.plugins']) {
+  check(/>Planned</.test(wp.en.get(clave) || '') && />Planificado</.test(wp.es.get(clave) || ''),
+    `${clave} etiquetado como planificado en ambos idiomas`);
+}
+for (const clave of ['whitepaper.roadmap.bm25', 'whitepaper.roadmap.routing']) {
+  check(/>Experimental</.test(wp.en.get(clave) || '') && />Experimental</.test(wp.es.get(clave) || ''),
+    `${clave} etiquetado como experimental en ambos idiomas`);
+}
+
+// vLLM nunca como parte de Community.
+check(/vLLM is not part of Community/.test(paper) && /vLLM no forma parte de Community/.test(paper),
+  'vLLM declarado fuera de Community en ambos idiomas');
+
+// Pro y Cloud descritos como inexistentes hoy.
+check(/does not exist in v0\.3\.0/.test(wp.en.get('whitepaper.editions.proBody') || '')
+  && /No existe en v0\.3\.0/.test(wp.es.get('whitepaper.editions.proBody') || ''),
+  'Pro declarado inexistente en v0.3.0');
+check(/None of them exists in Community v0\.3\.0/.test(wp.en.get('whitepaper.editions.cloudBody') || '')
+  && /Ninguno existe en Community v0\.3\.0/.test(wp.es.get('whitepaper.editions.cloudBody') || ''),
+  'Cloud declarado inexistente en v0.3.0');
+check(/whitepaper\.editions\.statusPlanned/.test(paper),
+  'Pro y Cloud llevan estado planificado');
+
+console.log('\n=== whitepaper.html: versiones, enlaces y datos de release ===');
+
+// Versiones anteriores solo valdrian dentro de una seccion historica
+// etiquetada; no existe tal seccion, asi que no pueden aparecer.
+for (const version of ['0.1.0', '0.2.0']) {
+  check(!paper.includes(version), `no queda ninguna referencia a v${version}`);
+}
+check((paper.match(/0\.3\.0/g) || []).length > 5, 'la version vigente aparece de forma consistente');
+
+// Enlaces internos y archivos citados del repositorio. El inicio se enlaza por
+// la raiz canonica; el resto por su archivo, que debe existir en web/.
+check(/href="\/"/.test(paper) && fs.existsSync(path.join(WEB, 'landing.html')),
+  'el enlace de inicio usa la raiz y la landing existe para servirla');
+for (const destino of ['models.html']) {
+  check(paper.includes(`href="${destino}"`) && fs.existsSync(path.join(WEB, destino)),
+    `el enlace interno a ${destino} existe`);
+}
+for (const archivo of ['LICENSE', 'BUILDING.md', 'COMMUNITY.md', 'SECURITY.md', 'TRADEMARK.md']) {
+  check(paper.includes(archivo), `cita ${archivo}`);
+  check(fs.existsSync(path.join(ROOT, archivo)), `${archivo} existe en el repositorio`);
+}
+
+// Reconciliacion de la release: 15 assets, 14 entradas de checksum.
+check(/fifteen assets/.test(paper) && /quince assets/.test(paper),
+  'declara los 15 assets en ambos idiomas');
+check(/fourteen entries/.test(paper) && /catorce entradas/.test(paper),
+  'declara las 14 entradas de SHA256SUMS en ambos idiomas');
+check(/cannot contain its own hash/.test(paper) && /no puede contener su propio hash/.test(paper),
+  'explica por que el archivo de checksums no se incluye a si mismo');
+
+// Sin benchmarks ni comparaciones, igual que en el Model Guide.
+for (const frase of ['GPT-4', 'outperform', 'MMLU', 'HumanEval', 'MT-Bench', 'GSM8K', 'TextVQA']) {
+  check(!new RegExp(frase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(paper),
+    `el White Paper no reintroduce «${frase}»`);
+}
+check(/publishes no benchmark scores/.test(paper) && /no publica puntuaciones de benchmark/.test(paper),
+  'el descargo de «sin benchmarks» esta en ambos idiomas');
+
+// Proveedores: los siete adaptadores, sin fijar modelos cloud.
+check(/seven adapters/.test(paper) && /siete adaptadores/.test(paper),
+  'declara los siete adaptadores en ambos idiomas');
+check(/Alibaba Cloud Model Studio/.test(paper), 'incluye Alibaba Cloud Model Studio');
+// La deteccion de vision por nombre solo puede mencionarse para negarla:
+// provider-capabilities.js existe justamente para impedirla.
+const porNombre = [...paper.matchAll(/(name-based fallback|deteccci[oó]n por nombre|visi[oó]n por nombre)/gi)]
+  .filter(m => !DESMENTIDO.test(paper.slice(Math.max(0, m.index - 160), m.index + m[0].length + 160)));
+check(porNombre.length === 0,
+  `nunca se describe la vision resuelta por nombre de modelo (${porNombre.length} afirmaciones sueltas)`);
+check(/never infers a capability from a model name/.test(paper)
+  && /nunca deduce una capacidad del nombre/.test(paper),
+  'declara que las capacidades no se deducen del nombre, en ambos idiomas');
+
+// =====================================================================
+console.log('\n=== Fase V: paginas publicas, novedades y release ===');
+// =====================================================================
+
+// Inventario: todo HTML de web/ debe estar auditado por esta suite.
+const PAGINAS_AUDITADAS = ['landing.html', 'models.html', 'whitepaper.html'];
+const htmlEnWeb = fs.readdirSync(WEB).filter(f => f.endsWith('.html')).sort();
+check(htmlEnWeb.join(',') === PAGINAS_AUDITADAS.slice().sort().join(','),
+  `toda pagina HTML de web/ esta auditada (${htmlEnWeb.join(', ')})`);
+
+// El sitemap no puede anunciar una URL que no sirva ninguna de esas paginas.
+// `/` es la landing: el despliegue copia landing.html a index.html.
+const sitemap = fs.readFileSync(path.join(WEB, 'sitemap.xml'), 'utf8');
+const urls = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1]);
+check(urls.length > 0, `el sitemap declara ${urls.length} URLs`);
+const sinRespaldo = urls.filter(u => {
+  const archivo = u.replace(/^https?:\/\/[^/]+\//, '');
+  if (archivo === '') return false; // raiz = landing.html copiada a index.html
+  return !fs.existsSync(path.join(WEB, archivo));
+});
+check(sinRespaldo.length === 0,
+  `toda URL del sitemap tiene documento que la sirva (${sinRespaldo.join(', ') || 'ninguna huerfana'})`);
+
+// La raiz es la URL canonica de la landing. El sitemap no puede anunciar
+// ademas /landing.html: seria el mismo documento indexado dos veces.
+check(urls.includes('https://mika5.xyz/'), 'el sitemap declara la raiz como URL de la landing');
+check(!urls.some(u => /\/landing\.html$/.test(u)),
+  'el sitemap ya no duplica la landing bajo /landing.html');
+check(new Set(urls).size === urls.length, 'el sitemap no repite ninguna URL');
+check(urls.length === 3, `el sitemap declara 3 URLs, una por documento (${urls.length})`);
+
+// Canonical exacto por pagina. Cada documento tiene la suya: comparar contra
+// la raiz habria dado por buenas models.html y whitepaper.html sin mirarlas.
+const CANONICAL_BY_FILE = {
+  'landing.html': 'https://mika5.xyz/',
+  'models.html': 'https://mika5.xyz/models.html',
+  'whitepaper.html': 'https://mika5.xyz/whitepaper.html'
+};
+const ORIGEN = 'https://mika5.xyz';
+
+// Igualdad de origen sin startsWith(): 'https://mika5.xyz.ejemplo.com' empieza
+// por la cadena esperada y no es el mismo sitio.
+function mismoOrigen(valor) {
+  try {
+    return new URL(valor).origin === ORIGEN;
+  } catch (e) {
+    return false;
+  }
+}
+check(!mismoOrigen('https://mika5.xyz.ejemplo.com/'),
+  'la comprobacion de origen rechaza un dominio que solo comparte prefijo');
+check(mismoOrigen(CANONICAL_BY_FILE['landing.html']),
+  'la comprobacion de origen acepta el dominio real');
+
+const PAGINAS = [['landing.html', landing], ['models.html', models], ['whitepaper.html', paper]];
+for (const [archivo, html] of PAGINAS) {
+  const esperado = CANONICAL_BY_FILE[archivo];
+  const canonical = (html.match(/<link rel="canonical" href="([^"]*)"/) || [])[1];
+  check(canonical === esperado, `${archivo}: canonical exacto (${canonical})`);
+  const ogUrl = (html.match(/<meta property="og:url" content="([^"]*)"/) || [])[1];
+  check(ogUrl === esperado, `${archivo}: og:url exacto (${ogUrl})`);
+}
+
+// JSON-LD: se analiza de verdad, no por expresion regular. Una regex sobre
+// `"url": "..."` no ve @id, mainEntityOfPage, el JSON minificado ni las
+// estructuras anidadas, y no detecta un bloque sintacticamente invalido.
+const RAIZ = CANONICAL_BY_FILE['landing.html'];
+
+function bloquesLd(html) {
+  return [...html.matchAll(/<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi)]
+    .map(m => m[1]);
+}
+function nodosLd(html, archivo) {
+  const nodos = [];
+  const bloques = bloquesLd(html);
+  check(bloques.length > 0, `${archivo}: declara al menos un bloque JSON-LD`);
+  bloques.forEach((crudo, i) => {
+    let datos;
+    try {
+      datos = JSON.parse(crudo);
+    } catch (e) {
+      check(false, `${archivo}: el bloque JSON-LD ${i + 1} es JSON valido (${e.message})`);
+      return;
+    }
+    check(true, `${archivo}: el bloque JSON-LD ${i + 1} es JSON valido`);
+    const grafo = datos['@graph'] || [datos];
+    grafo.forEach(n => nodos.push(n));
+  });
+  return nodos;
+}
+
+const nodosLanding = nodosLd(landing, 'landing.html');
+// Solo estos tres representan el sitio y deben apuntar a la raiz canonica.
+// Logos, descargas y paginas secundarias tienen URLs propias y no se tocan.
+const TIPOS_RAIZ = ['Organization', 'WebSite', 'SoftwareApplication'];
+for (const tipo of TIPOS_RAIZ) {
+  const nodo = nodosLanding.find(n => n['@type'] === tipo);
+  check(!!nodo, `landing.html: el JSON-LD declara un nodo ${tipo}`);
+  if (nodo) {
+    check(nodo.url === RAIZ, `landing.html: ${tipo}.url es la raiz canonica (${nodo.url})`);
+    // El @id es un identificador con fragmento, no la URL canonica: se valida
+    // que sea del mismo origen y que el fragmento sea el unico anadido.
+    if (nodo['@id']) {
+      let id = null;
+      try { id = new URL(nodo['@id']); } catch (e) { /* invalida */ }
+      check(!!id && id.origin === ORIGEN && id.pathname === '/' && /^#[\w-]+$/.test(id.hash),
+        `landing.html: ${tipo}.@id es del origen canonico con fragmento valido (${nodo['@id']})`);
+    }
+  }
+}
+// Ninguna pagina puede anunciar la URL duplicada dentro de sus datos
+// estructurados, ni en url, ni en @id, ni en mainEntityOfPage, ni en un item.
+for (const [archivo, html] of PAGINAS) {
+  const nodos = nodosLd(html, archivo);
+  const duplicadas = [];
+  const visitar = valor => {
+    if (typeof valor === 'string' && /\/landing\.html/.test(valor)) duplicadas.push(valor);
+    else if (Array.isArray(valor)) valor.forEach(visitar);
+    else if (valor && typeof valor === 'object') Object.values(valor).forEach(visitar);
+  };
+  nodos.forEach(visitar);
+  check(duplicadas.length === 0,
+    `${archivo}: el JSON-LD no referencia /landing.html (${duplicadas.join(', ') || 'ninguna'})`);
+  // mainEntityOfPage, donde exista, tiene que ser exactamente la URL canonica
+  // de esa pagina. No basta con que comparta dominio.
+  for (const nodo of nodos) {
+    if (!nodo.mainEntityOfPage) continue;
+    const valor = typeof nodo.mainEntityOfPage === 'string'
+      ? nodo.mainEntityOfPage : nodo.mainEntityOfPage['@id'];
+    check(valor === CANONICAL_BY_FILE[archivo],
+      `${archivo}: mainEntityOfPage es la canonica exacta de la pagina (${valor})`);
+  }
+  // Toda URL absoluta del propio dominio dentro del JSON-LD tiene que serlo de
+  // verdad, no de un dominio que solo comparta prefijo.
+  const propias = [];
+  const recorrer = valor => {
+    if (typeof valor === 'string' && /^https?:\/\/[^/]*mika5\.xyz/i.test(valor)) propias.push(valor);
+    else if (Array.isArray(valor)) valor.forEach(recorrer);
+    else if (valor && typeof valor === 'object') Object.values(valor).forEach(recorrer);
+  };
+  nodos.forEach(recorrer);
+  const impostoras = propias.filter(u => !mismoOrigen(u));
+  check(impostoras.length === 0,
+    `${archivo}: ninguna URL simula el dominio canonico (${impostoras.join(', ') || 'ninguna'})`);
+}
+// Los enlaces internos de inicio usan la raiz, no la URL duplicada.
+for (const [archivo, html] of [['models.html', models], ['whitepaper.html', paper]]) {
+  check(/href="\/"/.test(html), `${archivo}: el enlace de inicio usa la raiz canonica`);
+  check(!/href="landing\.html"/.test(html), `${archivo}: ningun enlace interno a /landing.html`);
+}
+check(!/hreflang/.test(landing) && !/hreflang/.test(models) && !/hreflang/.test(paper),
+  'no se declara hreflang, que requeriria URLs por idioma');
+
+// Ningun modelo puede promocionarse en la landing sin ficha en el Model Guide.
+//
+// La comparacion es estructural, no textual: cada modelo promocionado lleva
+// data-model-id en la landing, y su fila canonica del Model Guide lleva el
+// mismo atributo. Buscar el identificador como subcadena no servia: aparecer
+// en una nota, en una advertencia o dentro de otra cadena mas larga habria
+// contado como ficha.
+// Se extraen como Array, no como Set: un Set esconderia un duplicado, que es
+// justo uno de los fallos que hay que detectar.
+function idsDeModelo(html) {
+  return [...html.matchAll(/\bdata-model-id="([^"]+)"/g)].map(m => m[1]);
+}
+function duplicados(lista) {
+  const vistos = new Set(), repetidos = new Set();
+  for (const id of lista) (vistos.has(id) ? repetidos : vistos).add(id);
+  return [...repetidos];
+}
+
+// Conteos del catalogo editorial de v0.3.0. Cambiarlos exige actualizarlos
+// aqui a proposito: una version futura con otro catalogo hara fallar la suite
+// hasta que alguien confirme la cifra nueva.
+const MODELOS_LANDING_V030 = 15;
+const FICHAS_GUIA_V030 = 26;
+
+const idsLanding = idsDeModelo(landing);
+const idsGuia = idsDeModelo(models);
+check(idsLanding.length === MODELOS_LANDING_V030,
+  `la landing declara ${MODELOS_LANDING_V030} ocurrencias de modelo (${idsLanding.length})`);
+check(new Set(idsLanding).size === MODELOS_LANDING_V030,
+  `la landing declara ${MODELOS_LANDING_V030} identificadores unicos (${new Set(idsLanding).size})`);
+check(idsGuia.length === FICHAS_GUIA_V030,
+  `el Model Guide declara ${FICHAS_GUIA_V030} filas canonicas (${idsGuia.length})`);
+check(new Set(idsGuia).size === FICHAS_GUIA_V030,
+  `el Model Guide declara ${FICHAS_GUIA_V030} identificadores unicos (${new Set(idsGuia).size})`);
+check(duplicados(idsLanding).length === 0,
+  `la landing no repite ningun identificador (${duplicados(idsLanding).join(', ') || 'ninguno'})`);
+check(duplicados(idsGuia).length === 0,
+  `el Model Guide no repite ninguna ficha (${duplicados(idsGuia).join(', ') || 'ninguno'})`);
+
+// Un mismo elemento no puede llevar dos data-model-id: el navegador se queda
+// con uno y la extraccion con otro.
+const dobleAtributo = [['landing.html', landing], ['models.html', models]]
+  .flatMap(([archivo, html]) => [...html.matchAll(/<[a-z]+\b[^>]*>/gi)]
+    .filter(m => (m[0].match(/\bdata-model-id=/g) || []).length > 1)
+    .map(m => `${archivo}: ${m[0].slice(0, 60)}`));
+check(dobleAtributo.length === 0,
+  `ningun elemento lleva data-model-id duplicado (${dobleAtributo.join(' | ') || 'ninguno'})`);
+
+const conjuntoGuia = new Set(idsGuia);
+const sinFicha = idsLanding.filter(id => !conjuntoGuia.has(id));
+check(sinFicha.length === 0,
+  `todo modelo de la landing tiene ficha exacta (${sinFicha.join(', ') || 'ninguno ausente'})`);
+
+// El identificador declarado tiene que coincidir con el texto que ve el
+// usuario. En la landing es el contenido de la propia pildora; en el Model
+// Guide, el texto de la primera celda de la fila.
+const desajustesLanding = [...landing.matchAll(/data-model-id="([^"]+)"[^>]*>([^<]*)</g)]
+  .filter(m => m[1] !== m[2].trim());
+check(desajustesLanding.length === 0,
+  `landing.html: el identificador coincide con el texto visible (${desajustesLanding.map(m => m[1]).join(', ') || 'sin desajustes'})`);
+
+const desajustesGuia = [...models.matchAll(/<tr data-model-id="([^"]+)"><td[^>]*>([^<]*)</g)]
+  .filter(m => m[1] !== m[2].trim());
+check(desajustesGuia.length === 0,
+  `models.html: cada fila coincide con el texto de su primera celda (${desajustesGuia.map(m => m[1]).join(', ') || 'sin desajustes'})`);
+const filasConTexto = [...models.matchAll(/<tr data-model-id="([^"]+)"><td[^>]*>([^<]*)</g)].length;
+check(filasConTexto === FICHAS_GUIA_V030,
+  `las ${FICHAS_GUIA_V030} filas canonicas exponen su identificador en la primera celda (${filasConTexto})`);
+
+// El enlace de privacidad del pie: se comprueban por separado el enlace y su
+// destino, sin depender del orden de los atributos.
+const ENLACE_PRIVACIDAD = /<a\b(?=[^>]*\bhref="#privacy")(?=[^>]*\bdata-i18n="footer\.privacy")[^>]*>/;
+check(ENLACE_PRIVACIDAD.test(landing),
+  'el enlace de privacidad apunta a #privacy');
+const destinosPrivacidad = (landing.match(/\bid="privacy"/g) || []).length;
+check(destinosPrivacidad === 1,
+  `existe exactamente un destino #privacy (${destinosPrivacidad})`);
+
+// Prueba negativa insensible al orden de los atributos: se localiza el anchor
+// con la propia expresion de validacion y se rompe el href *dentro* de la
+// etiqueta encontrada. Mutar con una regex que exija href antes de data-i18n
+// dejaria de funcionar en cuanto alguien reordenase los atributos.
+function romperHrefPrivacidad(html) {
+  const m = ENLACE_PRIVACIDAD.exec(html);
+  if (!m) return html;
+  const roto = m[0].replace('href="#privacy"', 'href="#"');
+  return html.slice(0, m.index) + roto + html.slice(m.index + m[0].length);
+}
+const landingRoto = romperHrefPrivacidad(landing);
+check(landingRoto !== landing, 'la prueba negativa altera realmente el markup');
+check(!ENLACE_PRIVACIDAD.test(landingRoto),
+  'con href="#" la validacion del enlace de privacidad falla, como debe');
+
+// La misma mutacion sobre un anchor con los atributos en orden inverso tiene
+// que seguir funcionando.
+const anchorInvertido = '<a data-i18n="footer.privacy" class="x" href="#privacy">Privacy</a>';
+check(ENLACE_PRIVACIDAD.test(anchorInvertido),
+  'la validacion acepta el enlace con los atributos en orden inverso');
+check(!ENLACE_PRIVACIDAD.test(romperHrefPrivacidad(anchorInvertido)),
+  'la mutacion rompe el enlace tambien con los atributos en orden inverso');
+
+// =====================================================================
+// Fixture: el contrato exige data-model-id exacto, y nada mas cuenta.
+// =====================================================================
+const FIXTURE_GUIA = `
+  <p>El modelo <code>mistral-small:latest</code> se evaluo y no se incluyo en
+     el catalogo editorial de esta version.</p>
+  <table><tbody>
+    <tr data-model-id="qwen2.5:7b"><td>qwen2.5:7b</td><td>Chat</td></tr>
+    <tr data-model-id="llama3.2:3b"><td>llama3.2:3b</td><td>Chat</td></tr>
+  </tbody></table>`;
+const idsFixture = new Set(idsDeModelo(FIXTURE_GUIA));
+
+check(FIXTURE_GUIA.includes('mistral-small:latest'),
+  'el fixture contiene el identificador exacto en prosa');
+check(!idsFixture.has('mistral-small:latest'),
+  'la presencia exacta en prosa no cuenta como ficha');
+check(idsFixture.has('qwen2.5:7b') && idsFixture.size === 2,
+  'solo las filas con data-model-id cuentan como ficha');
+for (const variante of ['qwen2.5:7', 'qwen2', 'llama3.2']) {
+  check(!idsFixture.has(variante), `un prefijo como «${variante}» no cuenta como ficha`);
+}
+for (const variante of ['qwen2.5:7b-extra', 'qwen2.5:7bb', 'llama3.2:3b-instruct']) {
+  check(!idsFixture.has(variante), `un sufijo adicional como «${variante}» no cuenta como ficha`);
+}
+// Y la comparacion real usada por el contrato rechaza los tres casos.
+const casosRechazados = ['mistral-small:latest', 'qwen2.5:7', 'qwen2.5:7b-extra']
+  .filter(id => !idsFixture.has(id));
+check(casosRechazados.length === 3,
+  'prosa, prefijo y sufijo se rechazan por igual; solo el identificador exacto satisface el contrato');
+// Un modelo promocionado sin ficha se detecta como ausente.
+check([...['modelo-sin-ficha:7b']].filter(id => !conjuntoGuia.has(id)).length === 1,
+  'un modelo de la landing sin ficha se detecta como ausente');
+
+// Todo ancla interna referenciada existe como id en su pagina.
+for (const [archivo, html] of [['landing.html', landing], ['models.html', models], ['whitepaper.html', paper]]) {
+  const anclas = [...html.matchAll(/href="#([a-zA-Z0-9-]+)"/g)].map(m => m[1]);
+  const rotas = [...new Set(anclas)].filter(a => !new RegExp(`id="${a}"`).test(html));
+  check(rotas.length === 0, `${archivo}: sin anclas internas rotas (${rotas.join(', ') || 'ninguna'})`);
+}
+
+// --- Novedades de v0.3.0 ---
+check(/id="whatsnew"/.test(landing), 'la landing publica el bloque de novedades de v0.3.0');
+const CLAVES_NOVEDADES = ['new.header', 'new.cloud', 'new.context', 'new.actions', 'new.composer',
+  'new.empty', 'new.projects', 'new.code', 'new.menu', 'new.scroll', 'new.a11y', 'new.tests'];
+for (const base of CLAVES_NOVEDADES) {
+  for (const sufijo of ['title', 'desc']) {
+    const clave = `${base}.${sufijo}`;
+    check(en.has(clave) && es.has(clave) && en.get(clave) !== es.get(clave),
+      `${clave} presente y traducida`);
+  }
+}
+// El aislamiento de pruebas no puede venderse como funcion de usuario.
+check(/engineering detail rather than a feature/i.test(en.get('new.tests.desc') || '')
+  && /detalle de ingenier[ií]a m[aá]s que una funci[oó]n/i.test(es.get('new.tests.desc') || ''),
+  'el aislamiento de pruebas se presenta como calidad de ingenieria, no como funcion');
+
+// --- Avisos por plataforma ---
+for (const clave of ['dl.win.warning', 'dl.mac.warning', 'dl.linux.warning']) {
+  check(en.has(clave) && es.has(clave) && en.get(clave) !== es.get(clave),
+    `${clave} presente y traducido`);
+}
+check(/Authenticode/.test(en.get('dl.win.warning')) && /SmartScreen/.test(en.get('dl.win.warning')),
+  'el aviso de Windows menciona Authenticode y SmartScreen');
+check(/App Store/.test(en.get('dl.mac.warning')) && /notarized/i.test(en.get('dl.mac.warning')),
+  'el aviso de macOS niega App Store y declara la falta de notarizacion');
+check(/x86-64/.test(en.get('dl.linux.warning')) && /no ARM build/i.test(en.get('dl.linux.warning')),
+  'el aviso de Linux acota la arquitectura publicada');
+
+// --- Enlaces de release ---
+const RELEASE = 'https://github.com/mika5app/mika5-releases/releases/download/v0.3.0';
+const ENLAZADOS = [
+  'MIKA5-Setup-0.3.0-win-x64.exe', 'MIKA5-Portable-0.3.0-win-x64.exe',
+  'MIKA5-0.3.0-mac-arm64.dmg', 'MIKA5-0.3.0-mac-x64.dmg',
+  'MIKA5-0.3.0-linux-x86_64.AppImage', 'MIKA5-0.3.0-linux-amd64.deb',
+  'MIKA5-0.3.0-linux-x86_64.rpm', 'MIKA5-0.3.0-source.tar.gz',
+  'SHA256SUMS.txt', 'BUILDING.md', 'COMMUNITY.md', 'BUILD-METADATA.json', 'LICENSE'
+];
+for (const asset of ENLAZADOS) {
+  check(landing.includes(`${RELEASE}/${asset}`), `la landing enlaza ${asset}`);
+}
+check(ENLAZADOS.length === 13, `se enlazan 13 assets de los 15 publicados (${ENLAZADOS.length})`);
+// Los dos ZIP de macOS se dejan publicados pero sin enlace, de forma deliberada.
+for (const zip of ['MIKA5-0.3.0-mac-arm64.zip', 'MIKA5-0.3.0-mac-x64.zip']) {
+  check(!landing.includes(zip), `${zip} deliberadamente sin enlace directo`);
+}
+check(/15 assets/.test(en.get('dl.extras.note')) && /15 assets/.test(es.get('dl.extras.note')),
+  'la nota declara los 15 assets publicados');
+check(/14 of them/.test(en.get('dl.extras.note')) && /14 de ellos/.test(es.get('dl.extras.note')),
+  'la nota declara las 14 entradas de checksum');
+// Ninguna pagina puede enlazar una release anterior.
+for (const [archivo, html] of [['landing.html', landing], ['models.html', models], ['whitepaper.html', paper]]) {
+  check(!/download\/v0\.[12]\.0\//.test(html) && !/0\.2\.0-(win|mac|linux)/.test(html),
+    `${archivo}: cero enlaces a releases anteriores`);
+}
+
+// --- Etiquetas del roadmap: cada elemento clasificado ---
+const IMPLEMENTADOS = ['implCross', 'implConsent', 'implCapabilities', 'implVisual',
+  'implCancel', 'implScope', 'implExport'];
+for (const nombre of IMPLEMENTADOS) {
+  const clave = `whitepaper.roadmap.${nombre}`;
+  check(/>Implemented in v0\.3\.0</.test(wp.en.get(clave) || ''),
+    `${clave} etiquetado como implementado (EN)`);
+  check(/>Implementado en v0\.3\.0</.test(wp.es.get(clave) || ''),
+    `${clave} etiquetado como implementado (ES)`);
+}
+// Todo punto del roadmap lleva exactamente una etiqueta de estado.
+const ESTADOS_EN = /Implemented in v0\.3\.0|Planned|Experimental|Not included in Community/;
+const puntosRoadmap = [...wp.en.keys()]
+  .filter(k => /^whitepaper\.roadmap\.(impl|streaming|dragdrop|tools|bm25|modelui|exportkb|routing|plugins|sync|mobile|agents|teams|vllm)/.test(k))
+  .filter(k => !/Intro$/.test(k));
+const sinEstado = puntosRoadmap.filter(k => !ESTADOS_EN.test(wp.en.get(k) || ''));
+check(sinEstado.length === 0, `todo punto del roadmap lleva estado (${sinEstado.join(', ') || 'ninguno sin etiqueta'})`);
+check(puntosRoadmap.length >= 19, `el roadmap clasifica ${puntosRoadmap.length} elementos`);
+
+console.log(`\n${'='.repeat(46)}`);
+console.log(`Website i18n tests passed (${passed} comprobaciones)`);
+console.log(`${'='.repeat(46)}`);
