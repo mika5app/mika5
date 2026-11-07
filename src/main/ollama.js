@@ -308,16 +308,21 @@ const ollamaApi = {
       const m = (model || "").trim();
       if (!m) return resolve({ ok: false, error: "INVALID_MODEL" });
 
-      const modelRe = /^[a-zA-Z0-9._-]+(:[a-zA-Z0-9._-]+)?$/;
-      if (!modelRe.test(m)) return resolve({ ok: false, error: "INVALID_MODEL" });
+      const modelRe = /^[a-zA-Z0-9][a-zA-Z0-9._-]*(?:\/[a-zA-Z0-9][a-zA-Z0-9._-]*)*(?::[a-zA-Z0-9][a-zA-Z0-9._-]*)?$/;
+      if (m.length > 512 || !modelRe.test(m)) return resolve({ ok: false, error: "INVALID_MODEL" });
 
       const p = spawn("ollama", ["pull", m]);
 
       let out = "";
       let err = "";
 
-      p.stdout.on("data", (d) => (out += d.toString()));
-      p.stderr.on("data", (d) => (err += d.toString()));
+      // Keep progress output bounded even for a long download.
+      p.stdout.on("data", (d) => { out = (out + d.toString()).slice(-65536); });
+      p.stderr.on("data", (d) => { err = (err + d.toString()).slice(-65536); });
+      p.on('error', error => resolve({
+        ok: false,
+        error: error.code === 'ENOENT' ? 'OLLAMA_NOT_INSTALLED' : 'OLLAMA_PULL_FAILED'
+      }));
 
       p.on("close", (code) => {
         if (code === 0) resolve({ ok: true, output: out });

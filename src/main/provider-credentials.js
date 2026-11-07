@@ -6,35 +6,39 @@
 // seguridad del módulo: aquí viven la derivación de clave, el formato
 // persistido y la compatibilidad con instalaciones anteriores.
 //
-// El código se mueve sin tocarlo. El formato persistido no cambia y no hay
-// migración: una base escrita por la versión anterior se lee igual, incluida la
-// ruta heredada por salt cuando `safeStorage` no está disponible.
+// Legacy records remain readable for migration. New persistence requires an
+// OS-protected secret; without it credentials stay in this process only.
 
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 
-// Encryption key - uses Electron safeStorage when available, else per-installation salt
+// New persistence always requires protected Electron safeStorage.
 let ENCRYPTION_KEY = null;
 let LEGACY_ENCRYPTION_KEY = null; // For backward-compat decryption
+let LEGACY_MARKER_KEY = null;
+let persistentStorage = false;
 
 function getEncryptionKey(userDataPath) {
   if (ENCRYPTION_KEY) return ENCRYPTION_KEY;
 
   // --- Per-installation salt (always needed) ---
   let salt;
+  let saltPersisted = Boolean(userDataPath);
   const saltPath = userDataPath ? path.join(userDataPath, '.mika5-salt') : null;
   try {
     if (saltPath && fs.existsSync(saltPath)) {
       salt = fs.readFileSync(saltPath);
+      if (salt.length !== 32) throw new Error('INVALID_CREDENTIAL_SALT');
     } else {
       salt = crypto.randomBytes(32);
       if (saltPath) {
         fs.mkdirSync(path.dirname(saltPath), { recursive: true });
-        fs.writeFileSync(saltPath, salt);
+        fs.writeFileSync(saltPath, salt, { mode: 0o600 });
       }
     }
   } catch (_) {
+    saltPersisted = false;
     salt = crypto.randomBytes(32);
   }
 
@@ -50,27 +54,32 @@ function getEncryptionKey(userDataPath) {
   try {
     const { safeStorage } = require('electron');
     if (safeStorage.isEncryptionAvailable()) {
+      const protectedBackend = safeStorage.getSelectedStorageBackend?.() !== 'basic_text';
       const markerPath = userDataPath ? path.join(userDataPath, '.mika5-key-marker') : null;
       if (markerPath && fs.existsSync(markerPath)) {
         const encryptedMarker = fs.readFileSync(markerPath);
         secret = safeStorage.decryptString(encryptedMarker);
-      } else {
+        if (!protectedBackend) {
+          LEGACY_MARKER_KEY = crypto.scryptSync(secret, salt, 32);
+          secret = null;
+        }
+      } else if (protectedBackend) {
         secret = crypto.randomBytes(48).toString('hex');
         if (markerPath) {
           const encryptedMarker = safeStorage.encryptString(secret);
           fs.mkdirSync(path.dirname(markerPath), { recursive: true });
-          fs.writeFileSync(markerPath, encryptedMarker);
+          fs.writeFileSync(markerPath, encryptedMarker, { mode: 0o600 });
         }
       }
     }
-  } catch (_) {}
+  } catch (_) { secret = null; }
 
   // --- Derive final key ---
   if (secret) {
     ENCRYPTION_KEY = crypto.scryptSync(secret, salt, 32);
+    persistentStorage = saltPersisted;
   } else {
-    // Fallback: use legacy key (env var or hardcoded — same as before)
-    ENCRYPTION_KEY = LEGACY_ENCRYPTION_KEY;
+    ENCRYPTION_KEY = crypto.randomBytes(32);
   }
 
   return ENCRYPTION_KEY;
@@ -79,6 +88,7 @@ function getEncryptionKey(userDataPath) {
 function encrypt(text) {
   if (!text) return null;
   const key = getEncryptionKey(null);
+  if (!persistentStorage) throw new Error('CREDENTIAL_STORAGE_UNAVAILABLE');
   const iv = crypto.randomBytes(16);
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
   let encrypted = cipher.update(text, 'utf8', 'hex');
@@ -100,24 +110,31 @@ function decryptWithKey(text, key) {
   return decrypted;
 }
 
-function decrypt(text) {
+function decryptRecord(text) {
   if (!text) return null;
   // Try current key first
   try {
-    return decryptWithKey(text, getEncryptionKey(null));
+    return { value: decryptWithKey(text, getEncryptionKey(null)), needsMigration: false };
   } catch (_) {}
   // Fallback: try legacy key (backward compat after safeStorage migration)
-  if (LEGACY_ENCRYPTION_KEY && LEGACY_ENCRYPTION_KEY !== ENCRYPTION_KEY) {
+  for (const legacy of [LEGACY_MARKER_KEY, LEGACY_ENCRYPTION_KEY]) {
+    if (!legacy || legacy === ENCRYPTION_KEY) continue;
     try {
-      return decryptWithKey(text, LEGACY_ENCRYPTION_KEY);
+      return { value: decryptWithKey(text, legacy), needsMigration: true };
     } catch (_) {}
   }
   console.error('Error decrypting: all keys failed');
   return null;
 }
 
+function decrypt(text) {
+  return decryptRecord(text)?.value ?? null;
+}
+
 module.exports = {
   getEncryptionKey,
+  canPersistCredentials: () => persistentStorage,
   encrypt,
+  decryptRecord,
   decrypt
 };

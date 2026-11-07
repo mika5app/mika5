@@ -56,7 +56,8 @@ contextBridge.exposeInMainWorld("mika5", {
     getAvailability: (providerId) => ipcRenderer.invoke('ai:get-availability', providerId),
     abort: (requestId) => ipcRenderer.invoke('ai:abort', requestId),
     getCapabilities: (providerId) => ipcRenderer.invoke('ai:get-capabilities', providerId),
-    resolveVision: (params) => ipcRenderer.invoke('ai:resolve-vision', params)
+    resolveVision: (params) => ipcRenderer.invoke('ai:resolve-vision', params),
+    resolvePrivacy: (params) => ipcRenderer.invoke('ai:resolve-privacy', params)
   },
   ollama: {
     status: () => ipcRenderer.invoke("ollama:status"),

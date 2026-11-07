@@ -1206,7 +1206,7 @@ function createDb() {
   assert.equal(forbiddenFetchCalled, false);
   global.fetch = originalFetch;
   const warning = manager.setApiKey('alibaba', 'not-a-token-plan-key');
-  assert.equal(warning.warning, 'Para Token Plan normalmente la clave debe empezar con sk-sp-');
+  assert(warning.warning.includes('Para Token Plan normalmente la clave debe empezar con sk-sp-'));
   manager.addProviderModel('alibaba', {
     id: 'vendor/custom-model',
     displayName: 'Custom',
@@ -1247,12 +1247,12 @@ function createDb() {
     require.resolve('../src/main/providers/alibaba.js')
   ].map(ruta => fs.readFileSync(ruta, 'utf8')).join('\n');
   const sendGuard = rendererSource.indexOf('Este modelo se usa desde Crear imagen, no desde chat.');
-  const chatCall = rendererSource.indexOf('window.mika5.ai.chat(payload)', sendGuard);
+  const chatCall = rendererSource.indexOf('sendAIChat(payload)', sendGuard);
   assert(sendGuard >= 0 && chatCall > sendGuard);
   assert(rendererSource.includes("!['chat', 'vision'].includes(m.taskType)"));
   const generateRoute = rendererSource.indexOf("route.action === 'generate-image'");
-  const generateCall = rendererSource.indexOf('window.mika5.ai.generateImage', generateRoute);
-  const routedChatCall = rendererSource.indexOf('window.mika5.ai.chat(payload)', generateRoute);
+  const generateCall = rendererSource.indexOf('sendAIImage', generateRoute);
+  const routedChatCall = rendererSource.indexOf('sendAIChat(payload)', generateRoute);
   assert(generateRoute >= 0 && generateCall > generateRoute && routedChatCall > generateCall);
   const terminalReturn = rendererSource.indexOf('\n        return;', generateCall);
   assert(terminalReturn > generateCall && terminalReturn < routedChatCall);
@@ -1267,7 +1267,7 @@ function createDb() {
   assert(rendererSource.includes('let pendingVisualAction = null'));
   assert(rendererSource.includes('handlePendingVisualActionReply(text)'));
   assert((rendererSource.match(/sourceImages: sourceImage \? \[sourceImage\] : \[\]/g) || []).length >= 2);
-  assert(rendererSource.includes('window.mika5.ai.generateImage(generationPayload)'));
+  assert(rendererSource.includes('sendAIImage(generationPayload)'));
   assert(rendererSource.includes('requestId: requestContext.requestId'));
   const pendingHandlerStart = rendererSource.indexOf('async function handlePendingVisualActionReply');
   const pendingHandlerEnd = rendererSource.indexOf('\nasync function send()', pendingHandlerStart);
@@ -1784,7 +1784,7 @@ function createDb() {
   assert(directRouteGuard.includes("route.detailed?.intentConflicts?.analysisAndGeneration"));
   assert(directRouteGuard.includes("route.action = 'chat'"));
   assert(!directRouteGuard.includes('throw new Error'));
-  assert(!directRouteGuard.includes('window.mika5.ai.generateImage'));
+  assert(!directRouteGuard.includes('sendAIImage'));
   assert(!directRouteGuard.includes('registerVisualImage('));
   assert(!directRouteGuard.includes('lastGeneratedImage'));
   assert(!directRouteGuard.includes('Store.addMessage'));
@@ -1991,7 +1991,7 @@ function createDb() {
   const autoRename = rendererSource.indexOf('// Auto-rename chat based on');
   assert(assistantSave >= 0 && offerCall > assistantSave && autoRename > offerCall);
   const offerSource = sliceRendererFunction('offerConflictAlternative');
-  assert(!offerSource.includes('window.mika5.ai.generateImage'));
+  assert(!offerSource.includes('sendAIImage'));
   assert(!offerSource.includes('registerVisualImage('));
   assert(!offerSource.includes('lastGeneratedImage'));
   assert(!offerSource.includes('throw new Error'));
@@ -2126,6 +2126,8 @@ function createDb() {
       );
       const buildEffectiveCloudScope = async () => ({ message: true, imageAttachments: true });
       const ensureCloudConsent = async () => true;
+      const sendAIImage = payload => window.mika5.ai.generateImage(payload);
+      const sendAIChat = payload => window.mika5.ai.chat(payload);
       ${identitySource}
       ${pendingParserSource}
       ${pendingHandlerSource}
@@ -2503,8 +2505,8 @@ function createDb() {
   // H: el renderer conserva el texto y añade el aviso; no lo transforma en error.
   const noticeSource = sliceRendererFunction('appendOutputLimitNotice');
   assert(!noticeSource.includes('throw new Error'));
-  assert(!noticeSource.includes('window.mika5.ai.chat'));       // sin reintento automático
-  assert(!noticeSource.includes('window.mika5.ai.generateImage'));
+  assert(!noticeSource.includes('sendAIChat'));       // sin reintento automático
+  assert(!noticeSource.includes('sendAIImage'));
   assert(!noticeSource.includes('registerVisualImage('));
   assert(!noticeSource.includes('**Error:**'));
   // Se invoca DESPUÉS de guardar la respuesta íntegra, así que el texto no se altera.
@@ -2655,7 +2657,7 @@ function createDb() {
   const chatCreation = pendingHandlerSource.indexOf('Store.createChat');
   assert(identityCheckAt >= 0 && firstStoreWrite > identityCheckAt && chatCreation > identityCheckAt);
   // La defensa interna del proveedor sigue ahí: hay awaits entre validación y generación.
-  assert(pendingHandlerSource.includes('pending.provider !== currentProvider'));
+  assert(pendingHandlerSource.includes('pending.provider !== requestContext.providerId'));
 
   // F: una solicitud textual nueva cancela el pendiente y sigue el routing normal.
   const r4 = runPendingGenerate(offeredPending, 'otra cosa cualquiera');

@@ -26,7 +26,7 @@ const { adaptadorGroq } = require('./providers/groq');
 const { adaptadorMoonshot } = require('./providers/moonshot');
 const { crearAdaptadorAlibaba } = require('./providers/alibaba');
 const { adaptadorLlamacpp } = require('./providers/llamacpp');
-const { getEncryptionKey, encrypt, decrypt } = require('./provider-credentials');
+const { getEncryptionKey, encrypt, decryptRecord, canPersistCredentials } = require('./provider-credentials');
 const {
   fetchWithProviderRetry,
   getAlibabaHttpError,
@@ -938,11 +938,17 @@ class AIProviderManager {
       // `undefined.privacy` y la rehidratación fallaría entera. Se ignora y se
       // conserva el local por defecto.
       if (row.key === 'ai_provider' && registroDeProveedores.has(row.value)) this.currentProvider = row.value;
-      if (row.key === 'openai_key') this.apiKeys.openai = decrypt(row.value);
-      if (row.key === 'anthropic_key') this.apiKeys.anthropic = decrypt(row.value);
-      if (row.key === 'groq_key') this.apiKeys.groq = decrypt(row.value);
-      if (row.key === 'moonshot_key') this.apiKeys.moonshot = decrypt(row.value);
-      if (row.key === 'alibaba_key') this.apiKeys.alibaba = decrypt(row.value);
+      if (['openai_key', 'anthropic_key', 'groq_key', 'moonshot_key', 'alibaba_key'].includes(row.key)) {
+        const record = decryptRecord(row.value);
+        const value = record?.value;
+        this.apiKeys[row.key.slice(0, -4)] = value;
+        // Migrate only successfully decrypted records. Never overwrite an
+        // unreadable credential when the OS key store is temporarily locked.
+        if (value && record.needsMigration) {
+          this.db.prepare('INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)')
+            .run(row.key, canPersistCredentials() ? encrypt(value) : '');
+        }
+      }
       if (row.key === ALIBABA_CONFIG_KEY) {
         hasAlibabaConfig = true;
         try {
@@ -984,6 +990,8 @@ class AIProviderManager {
       privacy,
       requiresKey: descriptor.traits.requiresKey,
       privacyLabel: privacy === 'private' ? 'Privado' : 'Cloud',
+      credentialStorage: canPersistCredentials() ? 'protected' : 'session',
+      credentialSessionOnly: Object.values(this.apiKeys).some(Boolean) && !canPersistCredentials(),
       capabilities: this.getCapabilities(this.currentProvider)
     };
   }
@@ -995,15 +1003,15 @@ class AIProviderManager {
     this.apiKeys[provider] = key;
     
     const stmt = this.db.prepare('INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)');
-    stmt.run(`${provider}_key`, encrypt(key));
+    stmt.run(`${provider}_key`, canPersistCredentials() ? encrypt(key) : '');
+    const warnings = [];
+    if (key && !canPersistCredentials()) warnings.push('El almacén seguro del sistema no está disponible. La clave funciona sólo durante esta sesión.');
     if (provider === ALIBABA_PROVIDER_ID
       && this.providerConfigs.alibaba.billingMode === 'token-plan'
       && !String(key).startsWith('sk-sp-')) {
-      return {
-        ok: true,
-        warning: 'Para Token Plan normalmente la clave debe empezar con sk-sp-'
-      };
+      warnings.push('Para Token Plan normalmente la clave debe empezar con sk-sp-');
     }
+    if (warnings.length) return { ok: true, persisted: canPersistCredentials(), warning: warnings.join(' ') };
     return true;
   }
 
@@ -1046,8 +1054,10 @@ class AIProviderManager {
   }
 
   async chat(params) {
-    const provider = registroDeProveedores.getAdapter(this.currentProvider);
-    if (this.currentProvider === ALIBABA_PROVIDER_ID) {
+    const providerId = params.providerId || this.currentProvider;
+    const provider = registroDeProveedores.getAdapter(providerId);
+    if (!provider) throw new Error('Proveedor no válido');
+    if (providerId === ALIBABA_PROVIDER_ID) {
       const selectedModelId = params.model || ALIBABA_DEFAULT_MODEL_ID;
       const selectedModel = this.providerConfigs.alibaba.models.find(model => model.id === selectedModelId);
       if (selectedModel?.taskType === 'image-generation') {
@@ -1060,13 +1070,13 @@ class AIProviderManager {
     
     const paramsWithKey = {
       ...params,
-      apiKey: this.apiKeys[this.currentProvider],
-      providerConfig: this.providerConfigs[this.currentProvider],
+      apiKey: this.apiKeys[providerId],
+      providerConfig: this.providerConfigs[providerId],
       sanitize: this.sanitizeCloud
     };
     
     const result = await provider.chat(paramsWithKey);
-    if (this.currentProvider === ALIBABA_PROVIDER_ID && result?.blockedToolUse) {
+    if (providerId === ALIBABA_PROVIDER_ID && result?.blockedToolUse) {
       // Sin un plan generativo activo, una herramienta visual jamás se ejecuta:
       // una petición de chat o de análisis nunca puede terminar en imagen.
       const mode = params.visualExecution?.plan?.mode;
@@ -1084,7 +1094,7 @@ class AIProviderManager {
       const terminal = await executeGenerateImageToolUse({
         toolUse: result.blockedToolUse,
         visualExecution: params.visualExecution,
-        generateImage: generationParams => this.generateImage(generationParams)
+        generateImage: generationParams => this.generateImage({ ...generationParams, providerId, signal: params.signal })
       });
       return {
         message: {
@@ -1143,21 +1153,24 @@ class AIProviderManager {
   }
 
   async generateImage(params) {
-    const provider = registroDeProveedores.getAdapter(this.currentProvider);
-    if (!provider || typeof provider.generateImage !== 'function') {
+    const providerId = params.providerId || this.currentProvider;
+    const provider = registroDeProveedores.getAdapter(providerId);
+    if (!provider) throw new Error('Proveedor no válido');
+    if (typeof provider.generateImage !== 'function') {
       throw new Error('El proveedor actual no soporta generación de imágenes');
     }
     return provider.generateImage({
       ...params,
-      apiKey: this.apiKeys[this.currentProvider],
-      providerConfig: this.providerConfigs[this.currentProvider]
+      apiKey: this.apiKeys[providerId],
+      providerConfig: this.providerConfigs[providerId]
     });
   }
 
   routeIntent(params) {
+    const providerId = params?.providerId || this.currentProvider;
     const detailed = detectUserIntentDetailed({
       ...params,
-      currentProvider: this.currentProvider
+      currentProvider: providerId
     });
     const visualContext = detailed.visualContext;
     // Guard de routing mixto: si la solicitud pide análisis y generación a la vez
@@ -1179,7 +1192,7 @@ class AIProviderManager {
     });
     const plan = buildPlan(effectiveIntent);
     const routed = routeIntent(effectiveIntent, {
-      currentProvider: this.currentProvider,
+      currentProvider: providerId,
       currentModel: params?.currentModel
     });
     const appliesPreviousSuggestions = detailed.variationSignals.includes('apply-previous-suggestions');
@@ -1195,7 +1208,7 @@ class AIProviderManager {
         routed.message = 'No se pudo generar la nueva imagen: falta una imagen de referencia.';
       }
     }
-    const capabilities = getProviderVisualCapabilities(this.currentProvider);
+    const capabilities = getProviderVisualCapabilities(providerId);
     // Cuando análisis y generación coexisten, la petición generativa no se descarta:
     // se conserva como alternativa que solo puede ejecutarse con confirmación explícita
     // del usuario. Aplica tanto si el guard degradó la ruta como si el análisis ya
@@ -1215,7 +1228,7 @@ class AIProviderManager {
         ? validateVisualTaskPlan(alternativePlan, capabilities)
         : null;
       const alternativeRoute = routeIntent(alternativeIntent, {
-        currentProvider: this.currentProvider,
+        currentProvider: providerId,
         currentModel: params?.currentModel
       });
       if (alternativePlan

@@ -224,10 +224,11 @@ console.log('\n=== js-yaml es dependencia directa, no un regalo transitivo ===')
 // desaparece sin aviso. Lo que se comprueba aquí es la DECLARACIÓN.
 
 const lock = JSON.parse(fs.readFileSync(path.join(ROOT, 'package-lock.json'), 'utf8'));
-// 4.3.1, no 4.1.1: la serie 4.0.0–4.2.0 arrastra dos avisos de DoS por
+// 4.3.2 incluye la corrección de seguridad adicional; no volver a 4.3.1.
+// Frente a 4.1.1: la serie 4.0.0–4.2.0 arrastra dos avisos de DoS por
 // complejidad cuadrática en el manejo de claves de fusión (GHSA-h67p-54hq-rp68 y
 // GHSA-52cp-r559-cp3m). Subirla era condición para dejar `npm audit` en cero.
-const VERSION_YAML = '4.3.1';
+const VERSION_YAML = '4.3.2';
 
 const declarada = (pkg.devDependencies || {})['js-yaml'];
 check(typeof declarada === 'string',

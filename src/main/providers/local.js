@@ -10,6 +10,7 @@ const { ollamaApi } = require('../ollama');
 const { assertVisionSupported, normalizeChatResult } = require('../provider-capabilities');
 const { probeDeError, probeDeExito, sanearMensaje } = require('../provider-errors');
 const { formatBytes, detectCapabilities, probeOllamaVision } = require('../provider-runtime');
+const { ollamaModelPrivacy } = require('../request-privacy');
 
 // MODO LOCAL - 100% Privado (delegado a ollama.js robusto)
 const adaptadorLocal = {
@@ -86,6 +87,7 @@ const adaptadorLocal = {
         const name = m.name || m.tag || m.id;
         const entry = {
           name,
+          privacy: ollamaModelPrivacy(m, name),
           size: m.size || 0,
           digest: (m.digest || m.id || '').toString().substring(0, 12) || 'local',
           sizeFormatted: formatBytes(m.size || 0),
@@ -96,7 +98,15 @@ const adaptadorLocal = {
         // Única fuente: la sonda. Si /api/show falla, el modelo queda sin visión
         // y adjuntar una imagen se bloqueará con un mensaje claro. Antes se caía
         // a detección por nombre y la imagen se perdía en silencio.
-        entry.supportsVision = await probeOllamaVision(name, { signal: options.signal });
+        try {
+          const info = await ollamaApi.show(name, { signal: options.signal });
+          entry.privacy = entry.privacy === 'cloud' ? 'cloud' : ollamaModelPrivacy(info, name);
+          const keys = Object.keys(info?.model_info || {});
+          entry.supportsVision = keys.some(key => key.includes('.vision.') || key.includes('image_token'))
+            || (Array.isArray(info?.capabilities) && info.capabilities.includes('vision'));
+        } catch (error) {
+          if (error?.name === 'AbortError' || error?.code === 'PROVIDER_TIMEOUT') throw error;
+        }
         if (entry.supportsVision && !entry.capabilities.includes('👁️ Visión')) {
           entry.capabilities.push('👁️ Visión');
         }

@@ -411,17 +411,12 @@ const absolutosRed = [...paper.matchAll(/zero (outbound|network)[^.<]*/gi)]
 check(absolutosRed.length === 0,
   `«zero outbound/network» solo aparece dentro de un desmentido (${absolutosRed.length} afirmaciones sueltas)`);
 
-// Lo mismo con el renderer en sandbox: la pagina puede decir que versiones
-// anteriores lo afirmaban, pero no puede afirmarlo ella.
+// The documented settings must follow the production window policy.
 const DESMENTIDO = /not true|no es cierto|earlier versions|versiones anteriores|afirmaban|claimed|<em>not<\/em>|<em>no<\/em>/i;
-const sandboxAfirmado = [...paper.matchAll(/(renderer[^.<]{0,60}(is sandboxed|en sandbox|sandboxed)|sandboxed renderer|renderer en sandbox)/gi)]
-  .filter(m => !DESMENTIDO.test(paper.slice(Math.max(0, m.index - 160), m.index + m[0].length)));
-check(sandboxAfirmado.length === 0,
-  `nunca se afirma que el renderer este en sandbox (${sandboxAfirmado.length} afirmaciones sueltas)`);
-
-// La configuracion real de las ventanas tiene que estar escrita, no resumida.
-check(/sandbox: false/.test(paper), 'declara sandbox: false en la ventana principal');
-check(/sandbox: true/.test(paper), 'declara sandbox: true en la ventana de PDF');
+const preferences = require('../src/main/window-security').MAIN_WEB_PREFERENCES;
+check(preferences.sandbox === true && !/sandbox: false/.test(paper),
+  'documenta el sandbox habilitado en la ventana principal');
+check(/sandbox: true/.test(paper), 'declara sandbox: true');
 check(/contextIsolation: true/.test(paper) && /nodeIntegration: false/.test(paper),
   'declara contextIsolation y nodeIntegration reales');
 check(/connect-src/.test(paper), 'documenta la CSP del renderer');
@@ -432,9 +427,8 @@ check(/It is not true that data never leaves the machine/.test(paper)
   'corrige el absoluto de red en ingles y en espanol');
 check(/no automatic redaction/i.test(paper) && /no aplica ninguna redacci[oó]n autom[aá]tica/i.test(paper),
   'declara que no hay redaccion automatica, en ambos idiomas');
-check(/not<\/em> sandboxed|is therefore <em>not<\/em> sandboxed/.test(paper)
-  || /no<\/em> est[aá] en sandbox/.test(paper),
-  'dice de forma expresa que el renderer no esta en sandbox');
+check(/sandboxing on/.test(paper) && /sandbox activado/.test(paper),
+  'describe la configuración actual de sandbox en ambos idiomas');
 
 console.log('\n=== whitepaper.html: funciones futuras ===');
 

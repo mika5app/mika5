@@ -1,10 +1,13 @@
 const path = require("path");
 const fs = require("fs").promises;
-const { app, BrowserWindow, ipcMain, shell, dialog, Menu, net } = require("electron");
+const { app, BrowserWindow, ipcMain: rawIpcMain, shell, dialog, Menu, session } = require("electron");
+const { MAIN_WEB_PREFERENCES, createTrustedIpc } = require('./window-security');
+const ipcMain = createTrustedIpc(rawIpcMain);
 const { buildApplicationMenuTemplate, shouldHideMenuBar } = require("./application-menu");
 const { initDb, dbApi, getDb } = require("./db");
 const { ollamaApi } = require("./ollama");
 const { AIProviderManager } = require("./ai-providers");
+const { resolveRequestPrivacy, assertRequestConsent } = require('./request-privacy');
 const { RequestRegistry } = require("./request-registry");
 const {
   downloadAndSaveElectronImage,
@@ -67,14 +70,10 @@ function createWindow() {
     // aceleradores de edición siguen activos porque el menú sí se registra.
     autoHideMenuBar: shouldHideMenuBar(process.platform),
     backgroundColor: "#0b0f14",
-    webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false,
-      spellcheck: false  // Fix: Disable spellcheck to prevent textarea freeze
-    }
+    webPreferences: { ...MAIN_WEB_PREFERENCES }
   });
+
+  ipcMain.trust(win.webContents);
 
   if (shouldHideMenuBar(process.platform)) win.setMenuBarVisibility(false);
 
@@ -264,17 +263,19 @@ ipcMain.handle("rag:getDocumentText", async (_e, knowledgeItemId) => {
 // Extract text from PDF using pdf-parse v2 (class-based API)
 ipcMain.handle("file:extractPDF", async (_e, base64Data) => {
   if (!PDFParseClass) return { ok: false, error: 'pdf-parse not available' };
+  let parser;
   try {
     const buffer = Buffer.from(base64Data, 'base64');
-    const parser = new PDFParseClass({ data: buffer });
-    await parser.load();
-    const text = (await parser.getText() || '').trim();
-    const info = await parser.getInfo().catch(() => ({}));
-    parser.destroy();
+    parser = new PDFParseClass({ data: buffer });
+    // Page-number markers are not document text: an image-only PDF needs OCR.
+    const result = await parser.getText({ pageJoiner: '' });
+    const text = String(result?.text || '').trim();
     if (!text) return { ok: false, error: 'PDF_NO_TEXT' };
-    return { ok: true, text, pages: info.numPages || 0 };
+    return { ok: true, text, pages: result.total || 0 };
   } catch (e) {
     return { ok: false, error: e.message };
+  } finally {
+    if (parser) await parser.destroy().catch(() => {});
   }
 });
 
@@ -314,7 +315,21 @@ ipcMain.handle("file:extractSpreadsheet", async (_e, base64Data) => {
 
 
 const CLOUD_CONSENT_KEY_PATTERN =
-  /^cloud-consent:v1:(openai|anthropic|groq|moonshot|alibaba):(global|project:[A-Za-z0-9._:-]{1,128})$/;
+  /^cloud-consent:v1:(local|openai|anthropic|groq|moonshot|alibaba):(global|project:[A-Za-z0-9._:-]{1,128})$/;
+const CLOUD_BANNER_KEY_PATTERN =
+  /^ui:cloudBanner:v1:(local|openai|anthropic|groq|moonshot|alibaba):(global|project:[A-Za-z0-9._:-]{1,128})$/;
+
+function validateCloudBannerValue(value) {
+  if (value === '') return '';
+  if (typeof value !== 'string' || value.length > 1024) throw new Error('INVALID_BANNER_STATE');
+  const parsed = JSON.parse(value);
+  if (parsed.schemaVersion !== 1 || typeof parsed.fingerprint !== 'string'
+    || !/^[A-Za-z+-]{1,256}$/.test(parsed.fingerprint)
+    || typeof parsed.dismissedAt !== 'string' || !Number.isFinite(Date.parse(parsed.dismissedAt))) {
+    throw new Error('INVALID_BANNER_STATE');
+  }
+  return JSON.stringify({ schemaVersion: 1, fingerprint: parsed.fingerprint, dismissedAt: parsed.dismissedAt });
+}
 
 function validateCloudConsentValue(key, value) {
   if (value === '') return '';
@@ -347,13 +362,15 @@ function validateCloudConsentValue(key, value) {
 }
 
 ipcMain.handle("appState:get", (_, key) => {
-  if (!CLOUD_CONSENT_KEY_PATTERN.test(String(key || ''))) return dbApi.getAppState(key);
+  if (!CLOUD_CONSENT_KEY_PATTERN.test(String(key || ''))
+    && !CLOUD_BANNER_KEY_PATTERN.test(String(key || ''))) return dbApi.getAppState(key);
   const row = getDb().prepare('SELECT value FROM app_state WHERE key = ?').get(key);
   return row ? row.value : null;
 });
 ipcMain.handle("appState:set", (_, key, value) => {
-  if (!CLOUD_CONSENT_KEY_PATTERN.test(String(key || ''))) return dbApi.setAppState(key, value);
-  const validated = validateCloudConsentValue(key, value);
+  const banner = CLOUD_BANNER_KEY_PATTERN.test(String(key || ''));
+  if (!banner && !CLOUD_CONSENT_KEY_PATTERN.test(String(key || ''))) return dbApi.setAppState(key, value);
+  const validated = banner ? validateCloudBannerValue(value) : validateCloudConsentValue(key, value);
   if (!validated) {
     getDb().prepare('DELETE FROM app_state WHERE key = ?').run(key);
     return { ok: true };
@@ -422,7 +439,7 @@ ipcMain.handle('files:download-image', async (_event, params) => {
 
     let mimeType = '';
     let imageBuffer = null;
-    const dataMatch = src.match(/^data:(image\/(?:png|jpeg|jpg|webp|bmp));base64,([\s\S]+)$/i);
+    const dataMatch = src.match(/^data:(image\/(?:png|jpeg|jpg|webp|bmp|gif));base64,([\s\S]+)$/i);
 
     if (dataMatch) {
       mimeType = dataMatch[1].toLowerCase();
@@ -430,11 +447,14 @@ ipcMain.handle('files:download-image', async (_event, params) => {
       if (!base64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(base64) || base64.length % 4 !== 0) {
         return { ok: false, error: 'Los datos de la imagen no son válidos' };
       }
+      if (base64.length > Math.ceil(MAX_IMAGE_BYTES / 3) * 4) return { ok: false, error: 'DOWNLOAD_TOO_LARGE' };
       imageBuffer = Buffer.from(base64, 'base64');
+      mimeType = detectImageMimeFromBuffer(imageBuffer);
+      if (!mimeType) return { ok: false, error: 'DOWNLOAD_INVALID_IMAGE' };
     } else {
       try {
         return await downloadAndSaveElectronImage(src, {
-          fetchImpl: net.fetch,
+          resolveProxy: url => session.defaultSession.resolveProxy(url),
           lookup: require('dns').promises.lookup,
           maxRedirects: 5,
           maxBytes: MAX_IMAGE_BYTES,
@@ -453,7 +473,9 @@ ipcMain.handle('files:download-image', async (_event, params) => {
         if (!app.isPackaged) console.warn(`Image download failed: ${code}`);
         return {
           ok: false,
-          error: 'No se pudo descargar la imagen remota',
+          error: ['DOWNLOAD_PROXY_AUTH_REQUIRED', 'DOWNLOAD_PROXY_UNSUPPORTED'].includes(code)
+            ? 'Este proxy necesita el navegador. Usa “Abrir en navegador” en la vista de imagen para descargarla.'
+            : 'No se pudo descargar la imagen remota',
           ...(!app.isPackaged ? { code } : {})
         };
       }
@@ -502,7 +524,7 @@ ipcMain.handle(
     writeFile: (filePath, buffer) => fs.writeFile(filePath, buffer),
     fetchRemoteImage: (url, options) => fetchElectronImage(url, {
       ...options,
-      fetchImpl: net.fetch,
+      resolveProxy: url => session.defaultSession.resolveProxy(url),
       lookup: require('dns').promises.lookup,
       maxRedirects: 5,
       appVersion: app.getVersion()
@@ -522,17 +544,22 @@ ipcMain.handle('ai:save-provider-config', (_e, provider, config) => aiManager.sa
 ipcMain.handle('ai:add-provider-model', (_e, provider, model) => aiManager.addProviderModel(provider, model));
 ipcMain.handle('ai:update-provider-model', (_e, provider, modelId, model) => aiManager.updateProviderModel(provider, modelId, model));
 ipcMain.handle('ai:delete-provider-model', (_e, provider, modelId) => aiManager.deleteProviderModel(provider, modelId));
-ipcMain.handle('ai:chat', (_e, params = {}) => {
+async function runAIRequest(method, params = {}) {
+  if (!params || typeof params !== 'object' || !params.providerId
+    || typeof params.model !== 'string' || !params.model.trim()
+    || !aiManager.getAllProviders().some(provider => provider.id === params.providerId)) {
+    throw new Error('INVALID_AI_REQUEST');
+  }
   const controller = aiRequests.start(params.requestId);
-  return aiManager.chat({ ...params, signal: controller.signal })
-    .finally(() => aiRequests.finish(params.requestId));
-});
-ipcMain.handle('ai:generate-image', (_e, params) => {
-  if (!params || typeof params !== 'object') throw new Error('Parámetros de generación inválidos');
-  const controller = aiRequests.start(params.requestId);
-  return aiManager.generateImage({ ...params, signal: controller.signal })
-    .finally(() => aiRequests.finish(params.requestId));
-});
+  try {
+    const resolved = await resolveRequestPrivacy(params.providerId, params.model, { signal: controller.signal });
+    assertRequestConsent(params, resolved.privacy);
+    return await aiManager[method]({ ...params, signal: controller.signal });
+  } finally { aiRequests.finish(params.requestId); }
+}
+ipcMain.handle('ai:chat', (_e, params) => runAIRequest('chat', params));
+ipcMain.handle('ai:generate-image', (_e, params) => runAIRequest('generateImage', params));
+ipcMain.handle('ai:resolve-privacy', (_e, params = {}) => resolveRequestPrivacy(params.providerId, params.model));
 ipcMain.handle('ai:route-intent', (_e, params) => aiManager.routeIntent(params));
 ipcMain.handle('ai:list-models', () => aiManager.listModels());
 ipcMain.handle('ai:status', () => aiManager.status());
@@ -583,7 +610,7 @@ ipcMain.handle('ai:abort', (_event, requestId) => aiRequests.abort(requestId));
 // Mantener compatibilidad con canales 'ollama:*' redirigiendo a aiManager
 ipcMain.handle("ollama:status", () => aiManager.status());
 ipcMain.handle("ollama:tags", () => aiManager.listModels());
-ipcMain.handle("ollama:chat", (_e, payload) => aiManager.chat(payload));
+ipcMain.handle("ollama:chat", (_e, payload) => runAIRequest('chat', payload));
 // Mantener pull específico de Ollama para descargas locales
 ipcMain.handle("ollama:pull", (_e, model) => ollamaApi.pull(model));
 

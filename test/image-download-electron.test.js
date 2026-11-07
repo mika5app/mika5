@@ -22,14 +22,9 @@ function headers(values = {}) {
 }
 
 function response(status, body = PNG, values = {}) {
-  return {
-    status,
-    headers: headers(values),
-    arrayBuffer: async () => {
-      const buffer = Buffer.from(body);
-      return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
-    }
-  };
+  return { status, headers: headers(values), body: new ReadableStream({
+    start(controller) { controller.enqueue(Buffer.from(body)); controller.close(); }
+  }) };
 }
 
 async function expectCode(promise, code) {

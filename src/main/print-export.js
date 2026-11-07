@@ -83,7 +83,7 @@ const PRINT_TO_PDF_OPTIONS = Object.freeze({
   pageSize: 'A4'
 });
 
-const ALLOWED_IMAGE_MIME = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+const ALLOWED_IMAGE_MIME = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/bmp']);
 
 // Códigos de network-security.js que significan "la política rechazó este
 // destino", frente a los que significan "la red falló".

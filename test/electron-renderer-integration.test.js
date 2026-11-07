@@ -39,7 +39,7 @@ async function run() {
     'appState:set': (_event, key, value) => {
       if (value === '') appState.delete(key);
       else appState.set(key, value);
-      return true;
+      return { ok: true };
     },
     'db:listProjects': () => [],
     'db:createProject': () => ({ ok: true, id: 'quick-chat' }),
@@ -80,6 +80,7 @@ async function run() {
     'ai:get-current-provider': () => ({ id: 'openai', name: 'OpenAI', privacy: 'cloud' }),
     'ai:list-models': () => [{ name: 'gpt-4o', supportsVision: true }],
     'ai:get-capabilities': () => ({ provider: 'openai', chat: true, vision: true }),
+    'ai:resolve-privacy': (_event, params) => ({ privacy: ['local', 'llamacpp'].includes(params.providerId) ? 'private' : 'cloud' }),
     'ai:resolve-vision': (_event, params = {}) => {
       state.resolveVisionCalls.push({ provider: params.provider, model: params.model });
       return {
@@ -169,7 +170,7 @@ async function run() {
       preload: path.join(__dirname, '../src/main/preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       offscreen: true
     }
   });

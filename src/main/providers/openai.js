@@ -14,6 +14,13 @@ const {
 } = require('../provider-errors');
 const { createAbortContext, sanitizeForCloud } = require('../provider-runtime');
 
+// Families served by this adapter's Chat Completions endpoint. Exclude
+// specialized endpoints even when their names share the gpt prefix.
+function isChatModel(id) {
+  return /^(?:gpt-(?:3\.5-turbo|4|5)|chatgpt-4o|o[134](?:-|$))/.test(id)
+    && !/(?:embedding|instruct|realtime|audio|transcribe|tts|image|codex|deep-research|(?:^|-)pro(?:-|$))/.test(id);
+}
+
 // OPENAI - Cloud (No privado)
 const adaptadorOpenai = {
   name: 'OpenAI (Cloud)',
@@ -51,7 +58,7 @@ const adaptadorOpenai = {
         body: JSON.stringify({
           model: selectedModel,
           messages: finalMessages,
-          temperature: 0.7
+          ...(/^(?:o[134](?:-|$)|gpt-5)/.test(selectedModel) ? {} : { temperature: 0.7 })
         }),
         signal: abortContext.signal
       });
@@ -127,7 +134,7 @@ const adaptadorOpenai = {
     }
     return {
       models: data.data
-        .filter(m => m && typeof m.id === 'string' && m.id.includes('gpt'))
+        .filter(m => m && typeof m.id === 'string' && isChatModel(m.id))
         .map(m => ({
           name: m.id,
           size: 0,

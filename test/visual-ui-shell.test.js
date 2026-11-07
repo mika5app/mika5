@@ -44,7 +44,7 @@ function makeAppState(initial = {}) {
   return {
     store,
     getAppState: async key => (key in store ? store[key] : null),
-    setAppState: async (key, value) => { store[key] = value; }
+    setAppState: async (key, value) => { store[key] = value; return { ok: true }; }
   };
 }
 
