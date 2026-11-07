@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-11-07
+
+### Changed
+- Provider registry/adapters, availability reporting, model selection and request cancellation stabilized.
+- Ollama local and cloud models supported with explicit cloud notices and consent tied to provider, model, request and outgoing data.
+- Electron updated to 43.8.7; better-sqlite3 13.0.3 uses N-API; SheetJS 0.20.3 vendored.
+- Canonical Node 22.23.2/npm 10.9.8 workflow validates four native producers and nine packages using hashes, source commit and architecture proofs.
+- Website, bilingual model guide, white paper and contributor documentation updated for 0.3.1.
+
+### Fixed
+- PDF extraction, bounded image downloads, DNS/proxy handling and trusted IPC sender validation.
+- Windows installation/upgrade verification with real installers and synthetic AppData; ASAR metadata refreshed after package replacement.
+
+### Security and privacy
+- Renderer remains sandboxed with context isolation and no Node integration.
+- Automatic PII rewriting is disabled; cloud consent does not imply anonymization.
+- Windows/Linux run nine quality gates; macOS icon and architecture checks run natively.
+- Windows binaries remain unsigned and macOS builds are not notarized. Updates are manual.
+
+Earlier entries below are historical records and may describe behavior superseded by 0.3.1.
+
 ## [0.1.0] - 2026-03-29
 
 ### Added

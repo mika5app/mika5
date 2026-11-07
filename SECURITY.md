@@ -4,10 +4,10 @@
 
 | Version | Supported |
 |---------|-----------|
-| 0.1.x   | Yes       |
-| < 0.1   | No        |
+| 0.3.1 (latest) | Yes |
+| Earlier releases | No |
 
-Only the latest release in the v0.1.x line receives security updates.
+Only the latest Community release receives security updates. Install 0.3.1 to use the current provider, IPC, download and packaged-runtime protections.
 
 ## Reporting a Vulnerability
 
@@ -32,7 +32,7 @@ The following areas are of particular interest:
 
 - **Electron security** -- context isolation, `nodeIntegration`, sandbox bypass.
 - **IPC channel safety** -- unauthorized access to main-process handlers via `window.mika5.*`.
-- **Encryption** -- AES-256-GCM key management for cloud API keys in `ai-providers.js`.
+- **Encryption** -- AES-256-GCM key management in `provider-credentials.js` and provider request handling in `ai-providers.js`.
 - **File system access** -- path traversal or unauthorized reads/writes through knowledge document handling or `saveFile`.
 - **Cross-site scripting (XSS)** -- injection via chat messages, knowledge documents, or rendered HTML exports.
 

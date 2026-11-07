@@ -1,224 +1,37 @@
-# MIKA5 Architecture
+# MIKA5 Community 0.3.1 Architecture
 
-This document describes the internal architecture of MIKA5 for contributors who want to understand, modify, or extend the codebase.
+MIKA5 uses Electron 43.8.7 with a sandboxed renderer, a restricted preload bridge and a main process that owns providers, SQLite and file/network operations. This document describes the current contributor-facing structure; version-specific audits in `docs/` remain historical records.
 
-MIKA5 is an Electron desktop app for working with local AI models (Ollama) and cloud providers, organized by projects, chats, and knowledge documents, with a fully local RAG engine backed by SQLite.
+## Processes and boundaries
 
----
+The renderer in `src/renderer/` manages conversations, projects, attachments, translations and interface state. It calls the `window.mika5` API exposed by `src/main/preload.js`; it has no direct Node.js access.
 
-## Process Model
+`src/main/window-security.js` sets `contextIsolation: true`, `nodeIntegration: false` and `sandbox: true`. The trusted IPC wrapper accepts only registered web contents, their main frame and the application renderer URL. `src/main/main.js` owns lifecycle, handlers, provider setup and indexing queues. Database/native modules run in the main process; they do not require disabling the renderer sandbox.
 
-Electron splits the app into two OS processes:
+## Providers and request privacy
 
-```
-┌─────────────────────────────────────────────────┐
-│  Main Process (Node.js)                         │
-│                                                 │
-│  main.js ─── db.js (SQLite)                     │
-│    │    ├── ai-providers.js (6 providers)        │
-│    │    ├── ollama.js (local HTTP client)         │
-│    │    └── rag.js (chunking + embeddings)        │
-│    │                                             │
-│    └── preload.js (contextBridge)                │
-│              │                                   │
-├──────────────┼───────────────────────────────────┤
-│  Renderer Process (Chromium)                     │
-│              │                                   │
-│         window.mika5 API                         │
-│              │                                   │
-│  app.js ─── index.html ─── i18n.js              │
-└─────────────────────────────────────────────────┘
-```
+`src/main/ai-providers.js` manages providers through `src/main/provider-registry.js`. Seven adapters live in `src/main/providers/`: Ollama, llama.cpp, OpenAI, Anthropic, Groq, Moonshot and Alibaba Cloud Model Studio. Credentials, runtime behavior and errors are separated into the corresponding `provider-credentials.js`, `provider-runtime.js` and `provider-errors.js` modules.
 
-All communication between processes goes through IPC via the `window.mika5` bridge. The renderer never has direct access to Node.js APIs.
+Ollama can provide local or cloud inference. `src/main/request-privacy.js` resolves the selected model's privacy and validates cloud consent. The renderer captures request identity and approval before dispatch; changing the visible provider while approval is pending must not reroute that request. Cloud consent is tied to the provider, model, request and data scope. Automatic PII rewriting is disabled, so consent must not be interpreted as anonymization.
 
----
+Capabilities are declared through the provider contracts. Model availability depends on runtime connectivity, configuration and account access. See [adapter architecture](docs/provider-adapter-architecture.md) and the [availability contract](docs/provider-availability-contract.md).
 
-## Main Process (`src/main/`)
+## Storage and retrieval
 
-### main.js (267 lines)
+`src/main/db.js` uses better-sqlite3 13.0.3 with N-API, WAL and foreign keys. The database contains `projects`, `chats`, `messages`, `knowledge_items`, `knowledge_chunks` and `app_state`. Application data and knowledge files belong to the active user profile; tests use isolated profiles.
 
-Entry point. Creates the BrowserWindow, registers all 34 IPC handlers, calls `initDb()`, and runs a startup RAG sweep to re-index any pending knowledge items.
+`src/main/rag.js` splits text into 4,200-character chunks with 700-character overlap, embeds through Ollama using `nomic-embed-text` by default, and ranks stored vectors by cosine similarity. Retrieval is scoped by project/chat. Its in-memory embedding cache has a five-minute TTL. Background indexing uses the queue managed by the main process.
 
-### db.js (~495 lines)
+## Documents, downloads and export
 
-SQLite database layer using `better-sqlite3` in WAL mode with foreign keys enabled.
+Document handling is split across renderer operations and validated main-process handlers. Generated image downloads pass through `src/main/network-security.js`, with destination checks, bounded redirects/body sizes, deadlines and image-byte validation. PDF export uses the dedicated print window and export modules. Conversation exports support Markdown, plain text, HTML, Python and PDF.
 
-**Tables:**
+## Validation and distribution
 
-| Table | Purpose |
-|---|---|
-| `projects` | Top-level containers for organizing work |
-| `chats` | Conversations within a project |
-| `messages` | Individual messages in a chat |
-| `knowledge_items` | Source documents uploaded by the user |
-| `knowledge_chunks` | Chunked + embedded fragments used for RAG |
-| `app_state` | Key-value store for settings and UI state |
+`npm test` runs the Node regression suites; `npm run test:all` runs nine gates including database, knowledge isolation, Electron security/UI, image download, PDF export, provider selection and native bindings. Linux headless testing uses Xvfb.
 
-All CRUD operations are exposed as prepared statements. The renderer calls them through IPC (`window.mika5.db.*`).
+The reusable canonical workflow audits source/dependencies and builds Windows x64, macOS Intel, macOS Apple Silicon and Linux x64 on native runners. macOS uses native icon and binary tooling. Producers create `artifact-proof.json`; aggregate verification requires exactly nine packages bound to hashes, architecture and source commit.
 
-### ai-providers.js (~737 lines)
+Windows installation QA runs only on disposable GitHub-hosted runners and uses published 0.3.0 bytes plus synthetic data to test upgrading. Its documented baseline preparation avoids an old NSIS folder-lookup issue; the current install is tested cleanly first.
 
-`AIProviderManager` class that abstracts over six providers:
-
-| Provider | Type | Notes |
-|---|---|---|
-| Ollama | Local | Default, no API key needed |
-| llama.cpp | Local | Direct HTTP to llama.cpp server |
-| OpenAI | Cloud | API key required |
-| Anthropic | Cloud | API key required |
-| Groq | Cloud | API key required |
-| Moonshot | Cloud | API key required |
-
-Cloud provider API keys are encrypted at rest using AES-256-GCM. Outbound messages to cloud providers pass through a PII sanitization step. The UI shows privacy indicators so users know when data leaves their machine.
-
-### ollama.js (~241 lines)
-
-HTTP client targeting `http://127.0.0.1:11434`. Handles status checks, model listing (`/api/tags`), chat completions, embeddings, and model pulls. Model pulling uses `child_process.spawn` to stream progress. Includes custom timeout management for long-running requests.
-
-### rag.js (~216 lines)
-
-Local RAG engine with the following pipeline:
-
-1. **Chunk** documents into segments of 4200 characters with 700-character overlap
-2. **Embed** each chunk via Ollama using `nomic-embed-text`
-3. **Store** chunk text and embedding vectors in `knowledge_chunks`
-4. **Query** by embedding the user's message, then ranking stored chunks by cosine similarity
-5. **Return** top-3 matching chunks for context injection
-
-Embeddings are cached in memory per project with a 5-minute TTL to avoid redundant Ollama calls.
-
-### preload.js (63 lines)
-
-Uses Electron's `contextBridge` to expose the `window.mika5` API object to the renderer. This is the only bridge between the two processes. Groups: `db`, `ai`, `rag`, `ollama`, `saveFile`.
-
----
-
-## Renderer Process (`src/renderer/`)
-
-### app.js (4063 lines)
-
-Monolithic SPA that handles all UI logic. This is intentional for v0.1.0; modularization is planned for v0.2.
-
-**Section map:**
-
-| Lines | Responsibility |
-|---|---|
-| 1-87 | Global state, vision model detection |
-| 208-377 | Custom modal dialogs (prompt/confirm/select) |
-| 516-910 | Document extraction (DOCX/XLSX/PPTX/ODF/RTF/PDF via binary parsing) |
-| 1083-1143 | Markdown rendering + HTML sanitization |
-| 1241-1365 | Context management (conversation trimming, 25/40 message limits) |
-| 1365-1530 | Provider and runtime loading |
-| 1570-1823 | Project CRUD |
-| 1823-2208 | Chat management with pagination (50 messages per page) |
-| 2221-2748 | Message rendering, search (Ctrl+F), reply threading |
-| 2759-3120 | Core `send()` function with RAG context injection |
-| 3062-3305 | Export (MD/TXT/HTML/PY/PDF) |
-| 3374-3554 | Ollama model pull UI |
-| 3554-3904 | Event wiring, sidebar |
-| 3994-4063 | Boot sequence |
-
-### index.html
-
-Main layout file. Most CSS lives inline here rather than in external stylesheets.
-
-### i18n.js (314 lines)
-
-Internationalization module with 112 translation keys. Spanish and English are supported with full parity between the two languages.
-
-### styles.css
-
-Supplemental styles only. The bulk of styling is inline in `index.html`.
-
----
-
-## IPC Architecture
-
-34 IPC handlers total, organized into namespaces:
-
-- **`db.*`** -- CRUD for projects, chats, messages, knowledge, app_state
-- **`ai.*`** -- Provider management, chat, model listing
-- **`rag.*`** -- Query and indexKnowledgeItem
-- **`ollama.*`** -- Legacy compatibility layer (redirects to AIProviderManager)
-- **`saveFile`** -- Native file dialog export
-- **`printToPDF`** -- PDF generation
-
-**Validation strategy:**
-
-- 31 handlers delegate validation to `db.js` and `ai-providers.js`
-- 3 handlers validate at the IPC boundary itself:
-  - `openExternal` -- protocol whitelist (prevents arbitrary URL opening)
-  - `saveFile` -- 50 MB file size limit
-  - `printToPDF` -- HTML sanitization
-
-**Security model:**
-
-- `contextIsolation: true` -- renderer cannot access Node.js globals
-- `nodeIntegration: false` -- no `require()` in renderer
-- `sandbox: false` -- required by `better-sqlite3` native module
-
----
-
-## Data Flow
-
-### Sending a message
-
-```
-User types message
-  → Saved to messages table
-  → RAG query: embed message, cosine search, return top-3 chunks
-  → Chunks injected as a system message in the conversation context
-  → Sent to active provider (Ollama / cloud)
-  → Full response returned (no streaming yet)
-  → Rendered as Markdown with HTML sanitization
-  → Saved to messages table
-```
-
-### Indexing a knowledge document
-
-```
-User adds document
-  → Saved to knowledge_items table
-  → Written to disk
-  → Queued for background indexing
-  → Chunked (4200 chars, 700 overlap)
-  → Each chunk embedded via nomic-embed-text
-  → Stored in knowledge_chunks with vector
-  → Available for RAG queries in that project
-```
-
-### Context management
-
-Conversations are trimmed to stay within model context limits: 25-message window for standard models, 40 for larger context models. Older messages are dropped from the request but remain in the database.
-
----
-
-## Testing
-
-3 test files with 98 total assertions:
-
-```bash
-npm test              # Run all tests
-npm run test:rag      # Chunking, cosine similarity, cache TTL
-npm run test:vision   # Vision model detection patterns
-npm run test:db       # DB CRUD (requires: npx electron)
-```
-
----
-
-## Known Technical Debt
-
-| Item | Status |
-|---|---|
-| `app.js` monolith (4063 lines) | Planned modularization in v0.2 |
-| IPC validation mostly delegated to inner modules | Boundary validation planned for v0.2 |
-| No streaming (full response load before rendering) | Planned |
-
----
-
-## Other Directories
-
-- **`web/`** -- Static landing page (not part of the Electron app)
-- **`mika5-desktop/`** -- Experimental alternate package.json with different dependency versions (unused)
-- **`dist/`** -- Build output (NSIS installer)
+Tag publication consumes the verified Actions artifact by ID, adds corresponding source/documentation/checksums and verifies uploaded bytes before publishing. The separately deployed static site in `web/` is outside the Electron package. See [BUILDING.md](BUILDING.md) for reproducible commands.
