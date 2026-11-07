@@ -43,3 +43,19 @@ Official Community installers and corresponding source archives are published
 through the public MIKA5 releases repository:
 
 https://github.com/mika5app/mika5-releases
+
+## Current release: 0.3.1
+
+Download Windows, macOS Intel/Apple Silicon and Linux packages, corresponding
+source and checksums from:
+
+https://github.com/mika5app/mika5-releases/releases/tag/v0.3.1
+
+This release updates provider handling, cloud consent, document/image handling
+and native packaging validation. Ollama local and cloud models are supported;
+cloud use retains explicit privacy notices and consent. Pro and Cloud services
+remain future editions, separate from Community.
+
+Updates are manual. Close the application and keep a backup of its data before
+installing a newer version. Windows builds are not Authenticode-signed and
+macOS builds are not notarized. Verify downloads using `SHA256SUMS.txt`.

@@ -65,7 +65,7 @@
               "name": "Which embedding model does MIKA5 use for RAG?",
               "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "nomic-embed-text, 274 MB. It is the default embedding model of the RAG engine in MIKA5 v0.3.0 and the knowledge base cannot index documents without one installed. Install it with: ollama pull nomic-embed-text. mxbai-embed-large (670 MB) is an alternative for longer documents."
+                "text": "nomic-embed-text, 274 MB. It is the default embedding model of the RAG engine in MIKA5 v0.3.1 and the knowledge base cannot index documents without one installed. Install it with: ollama pull nomic-embed-text. mxbai-embed-large (670 MB) is an alternative for longer documents."
               }
             },
             {
@@ -142,7 +142,7 @@
     <section class="py-16 md:py-20 space-y-6 max-w-3xl">
         <div class="flex items-center gap-2 text-xs uppercase tracking-widest text-[#7C3AED] font-bold">
             <span class="w-2 h-2 rounded-full bg-[#7C3AED]"></span>
-            <span data-i18n="models.hero.badge">MIKA5 official guide · Updated August 2026 · Verified against MIKA5 Community v0.3.0</span>
+            <span data-i18n="models.hero.badge">MIKA5 official guide · Updated November 2026 · Verified against MIKA5 Community v0.3.1</span>
         </div>
         <h1 class="text-4xl md:text-5xl font-bold leading-tight">
             <span data-i18n="models.hero.titleTop">Choosing the right AI model</span><br>
@@ -590,7 +590,7 @@
                     <div class="grid sm:grid-cols-2 gap-4">
                         <div class="glass p-5 rounded-xl space-y-2">
                             <div class="flex items-center gap-2"><span class="font-mono font-semibold">nomic-embed-text</span><span class="tier-badge px-2 py-0.5 rounded-full bg-green-900/30 text-green-300" data-i18n="models.tag.required">Required</span></div>
-                            <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.useCases.docIndexDesc">The knowledge base does not work without an embedding model installed. nomic-embed-text is the default in MIKA5 v0.3.0 and costs 274 MB. Install it before adding documents, or indexing fails with an explicit error.</p>
+                            <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.useCases.docIndexDesc">The knowledge base does not work without an embedding model installed. nomic-embed-text is the default in MIKA5 v0.3.1 and costs 274 MB. Install it before adding documents, or indexing fails with an explicit error.</p>
                         </div>
                         <div class="glass p-5 rounded-xl space-y-2">
                             <div class="flex items-center gap-2"><span class="font-mono font-semibold">qwen2.5:14b</span><span class="tag-local tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.local">Local</span></div>
@@ -623,7 +623,7 @@
                         <span class="tier-badge px-3 py-1 rounded-full bg-[#374151] text-[#D1D5DB]" data-i18n="models.useCases.privacyBadge">Maximum privacy</span>
                     </h3>
                     <p class="text-[#9CA3AF] text-sm leading-relaxed" data-i18n="models.useCases.privacyIntro">
-                        If nothing may leave the machine, configure no cloud provider. With Ollama alone, MIKA5 talks to 127.0.0.1:11434 and to the local SQLite database, and to nothing else: no MIKA5 server is involved at any point. Adding a cloud provider changes that, and MIKA5 asks for explicit consent before the first send, listing what is going to leave: message, history, project instructions, attachments, images and RAG context. The authorization is scoped to that provider and that project, and it can be revoked.
+                        For fully local inference, select a locally installed Ollama model or llama.cpp. Ollama also supports cloud models: those requests leave the device and MIKA5 shows privacy notices and asks for explicit consent for the selected model and data. Conversations and knowledge remain stored locally. No MIKA5-operated inference server is involved.
                     </p>
                     <div class="grid sm:grid-cols-2 gap-4">
                         <div class="glass p-5 rounded-xl space-y-2">
@@ -642,7 +642,7 @@
             <section id="cloud" class="space-y-6">
                 <h2 class="text-3xl font-heading" data-i18n="models.cloud.title">Cloud providers</h2>
                 <p class="text-[#9CA3AF] text-sm leading-relaxed" data-i18n="models.cloud.intro">
-                    MIKA5 v0.3.0 ships adapters for OpenAI, Anthropic, Groq, Moonshot and Alibaba Cloud Model Studio. They are optional: the app works without any of them. This guide lists no cloud model identifiers, because the catalogue belongs to the provider and to your account — MIKA5 requests it once you configure a key, and what you see depends on what that account has enabled. Your API key is stored encrypted with AES-256-GCM.
+                    MIKA5 v0.3.1 ships adapters for OpenAI, Anthropic, Groq, Moonshot and Alibaba Cloud Model Studio. They are optional: the app works without any of them. This guide lists no cloud model identifiers, because the catalogue belongs to the provider and to your account — MIKA5 requests it once you configure a key, and what you see depends on what that account has enabled. Your API key is stored encrypted with AES-256-GCM.
                 </p>
                 <div class="grid sm:grid-cols-2 gap-4">
                     <div class="glass p-5 rounded-xl space-y-2">
@@ -655,15 +655,15 @@
                     </div>
                     <div class="glass p-5 rounded-xl space-y-2">
                         <div class="flex items-center gap-2"><span class="font-semibold">Groq</span><span class="tag-cloud tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.cloud">Cloud</span></div>
-                        <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.cloud.groq">Chat. Image input is not verified for this adapter in v0.3.0, so MIKA5 refuses attachments instead of sending them blind.</p>
+                        <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.cloud.groq">Chat. Image input is not verified for this adapter in v0.3.1, so MIKA5 refuses attachments instead of sending them blind.</p>
                     </div>
                     <div class="glass p-5 rounded-xl space-y-2">
                         <div class="flex items-center gap-2"><span class="font-semibold">Moonshot</span><span class="tag-cloud tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.cloud">Cloud</span></div>
-                        <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.cloud.moonshot">Chat, under the same rule as Groq for image input: not verified in v0.3.0, so attachments are refused rather than discarded silently.</p>
+                        <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.cloud.moonshot">Chat, under the same rule as Groq for image input: not verified in v0.3.1, so attachments are refused rather than discarded silently.</p>
                     </div>
                     <div class="glass p-5 rounded-xl space-y-2 sm:col-span-2">
                         <div class="flex items-center gap-2"><span class="font-semibold">Alibaba Cloud Model Studio</span><span class="tag-cloud tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.cloud">Cloud</span></div>
-                        <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.cloud.alibaba">Implemented in v0.3.0 as an Anthropic-compatible endpoint. Its adapter declares chat, vision and image generation, but the catalogue, the region and the billing mode are configured by you, and the capability of each model comes from that catalogue. This guide names no Alibaba model: nothing in the published v0.3.0 tag pins those identifiers down.</p>
+                        <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.cloud.alibaba">Implemented in v0.3.1 as an Anthropic-compatible endpoint. Its adapter declares chat, vision and image generation, but the catalogue, the region and the billing mode are configured by you, and the capability of each model comes from that catalogue. This guide names no Alibaba model: nothing in the published v0.3.1 tag pins those identifiers down.</p>
                     </div>
                 </div>
                 <p class="text-sm text-[#6B7280] leading-relaxed" data-i18n="models.cloud.statusNote">
@@ -678,10 +678,10 @@
                     This guide publishes no benchmark scores. Reported numbers move with quantization, prompt format, sampling parameters and evaluation harness, and a figure that cannot be traced to the exact build you are running is not useful for choosing a model. What follows is what can be stated exactly: the tag, where it runs, its role, the size of the published Q4 build, the hardware it needs and its status in MIKA5. Every tag and every size was read from registry.ollama.ai on 4 August 2026; each model card on ollama.com/library documents licence, context window and evaluations.
                 </p>
                 <div class="glass p-5 rounded-xl space-y-2 text-xs text-[#9CA3AF] leading-relaxed">
-                    <p><span class="tier-badge text-[#6EE7B7]" data-i18n="models.status.validated">VALIDATED IN MIKA5 v0.3.0</span> — <span data-i18n="models.status.validatedNote">MIKA5 references the model itself: it is a default or a suggested download in v0.3.0.</span></p>
+                    <p><span class="tier-badge text-[#6EE7B7]" data-i18n="models.status.validated">VALIDATED IN MIKA5 v0.3.1</span> — <span data-i18n="models.status.validatedNote">MIKA5 references the model itself: it is a default or a suggested download in v0.3.1.</span></p>
                     <p><span class="tier-badge text-[#93C5FD]" data-i18n="models.status.ollama">AVAILABLE VIA OLLAMA</span> — <span data-i18n="models.status.ollamaNote">the tag exists in the official registry and MIKA5 can run it, which is not the same as MIKA5 having tested it.</span></p>
                     <p><span class="tier-badge text-[#FBBF24]" data-i18n="models.status.adapter">PROVIDER ADAPTER COMPATIBLE, NOT VALIDATED</span> — <span data-i18n="models.status.adapterNote">reachable through an implemented cloud adapter; the model itself is the provider's, not verified by MIKA5.</span></p>
-                    <p><span class="tier-badge text-[#6B7280]" data-i18n="models.status.future">FUTURE / NOT INCLUDED</span> — <span data-i18n="models.status.futureNote">does not exist in Community v0.3.0 and is not scheduled in this guide.</span></p>
+                    <p><span class="tier-badge text-[#6B7280]" data-i18n="models.status.future">FUTURE / NOT INCLUDED</span> — <span data-i18n="models.status.futureNote">does not exist in Community v0.3.1 and is not scheduled in this guide.</span></p>
                 </div>
                 <div class="glass rounded-2xl overflow-x-auto">
                     <table>
@@ -694,7 +694,7 @@
                             <th data-i18n="models.table.colStatus">Status &amp; notes</th>
                         </tr></thead>
                         <tbody>
-                            <tr data-model-id="llama3.2:3b"><td class="font-mono text-sm text-[#D1D5DB]">llama3.2:3b</td><td class="text-[#9CA3AF]" data-i18n="models.table.runsLocal">Local</td><td class="text-[#9CA3AF]" data-i18n="models.role.chat">Chat</td><td class="text-[#9CA3AF]" data-i18n="models.size.llama32-3b">2.0 GB</td><td class="text-[#9CA3AF]" data-i18n="models.hw.cpu8">8 GB RAM, CPU</td><td class="text-[#9CA3AF]"><span class="tier-badge text-[#6EE7B7]" data-i18n="models.status.validated">VALIDATED IN MIKA5 v0.3.0</span><br><span data-i18n="models.notes.llama32-3b">The download MIKA5 suggests when no local model is installed.</span></td></tr>
+                            <tr data-model-id="llama3.2:3b"><td class="font-mono text-sm text-[#D1D5DB]">llama3.2:3b</td><td class="text-[#9CA3AF]" data-i18n="models.table.runsLocal">Local</td><td class="text-[#9CA3AF]" data-i18n="models.role.chat">Chat</td><td class="text-[#9CA3AF]" data-i18n="models.size.llama32-3b">2.0 GB</td><td class="text-[#9CA3AF]" data-i18n="models.hw.cpu8">8 GB RAM, CPU</td><td class="text-[#9CA3AF]"><span class="tier-badge text-[#6EE7B7]" data-i18n="models.status.validated">VALIDATED IN MIKA5 v0.3.1</span><br><span data-i18n="models.notes.llama32-3b">The download MIKA5 suggests when no local model is installed.</span></td></tr>
                             <tr data-model-id="qwen2.5:3b"><td class="font-mono text-sm text-[#D1D5DB]">qwen2.5:3b</td><td class="text-[#9CA3AF]" data-i18n="models.table.runsLocal">Local</td><td class="text-[#9CA3AF]" data-i18n="models.role.chat">Chat</td><td class="text-[#9CA3AF]" data-i18n="models.size.qwen25-3b">1.9 GB</td><td class="text-[#9CA3AF]" data-i18n="models.hw.cpu8">8 GB RAM, CPU</td><td class="text-[#9CA3AF]"><span class="tier-badge text-[#93C5FD]" data-i18n="models.status.ollama">AVAILABLE VIA OLLAMA</span><br><span data-i18n="models.notes.qwen25-3b">Multilingual option at entry level.</span></td></tr>
                             <tr data-model-id="gemma2:2b"><td class="font-mono text-sm text-[#D1D5DB]">gemma2:2b</td><td class="text-[#9CA3AF]" data-i18n="models.table.runsLocal">Local</td><td class="text-[#9CA3AF]" data-i18n="models.role.chat">Chat</td><td class="text-[#9CA3AF]" data-i18n="models.size.gemma2-2b">1.6 GB</td><td class="text-[#9CA3AF]" data-i18n="models.hw.cpu8">8 GB RAM, CPU</td><td class="text-[#9CA3AF]"><span class="tier-badge text-[#93C5FD]" data-i18n="models.status.ollama">AVAILABLE VIA OLLAMA</span><br><span data-i18n="models.notes.gemma2-2b">The lightest in the guide; Gemma 2, one generation behind.</span></td></tr>
                             <tr data-model-id="gemma3:4b"><td class="font-mono text-sm text-[#D1D5DB]">gemma3:4b</td><td class="text-[#9CA3AF]" data-i18n="models.table.runsLocal">Local</td><td class="text-[#9CA3AF]" data-i18n="models.role.vision">Vision</td><td class="text-[#9CA3AF]" data-i18n="models.size.gemma3-4b">3.3 GB</td><td class="text-[#9CA3AF]" data-i18n="models.hw.cpu8">8 GB RAM, CPU</td><td class="text-[#9CA3AF]"><span class="tier-badge text-[#93C5FD]" data-i18n="models.status.ollama">AVAILABLE VIA OLLAMA</span><br><span data-i18n="models.notes.gemma3-4b">Smallest build with image input; subject to the capability probe.</span></td></tr>
@@ -718,14 +718,14 @@
                             <tr data-model-id="deepseek-r1:70b"><td class="font-mono text-sm text-[#D1D5DB]">deepseek-r1:70b</td><td class="text-[#9CA3AF]" data-i18n="models.table.runsLocal">Local</td><td class="text-[#9CA3AF]" data-i18n="models.role.reasoning">Reasoning</td><td class="text-[#9CA3AF]" data-i18n="models.size.deepseekr1-70b">42.5 GB</td><td class="text-[#9CA3AF]" data-i18n="models.hw.gpu48">64 GB RAM or 48 GB VRAM</td><td class="text-[#9CA3AF]"><span class="tier-badge text-[#93C5FD]" data-i18n="models.status.ollama">AVAILABLE VIA OLLAMA</span><br><span data-i18n="models.notes.deepseekr1-70b">Reasoning at 70B scale; slow on a single consumer GPU.</span></td></tr>
                             <tr data-model-id="qwen2.5:72b"><td class="font-mono text-sm text-[#D1D5DB]">qwen2.5:72b</td><td class="text-[#9CA3AF]" data-i18n="models.table.runsLocal">Local</td><td class="text-[#9CA3AF]" data-i18n="models.role.chat">Chat</td><td class="text-[#9CA3AF]" data-i18n="models.size.qwen25-72b">47.4 GB</td><td class="text-[#9CA3AF]" data-i18n="models.hw.gpu48">64 GB RAM or 48 GB VRAM</td><td class="text-[#9CA3AF]"><span class="tier-badge text-[#93C5FD]" data-i18n="models.status.ollama">AVAILABLE VIA OLLAMA</span><br><span data-i18n="models.notes.qwen25-72b">Workstation class, multilingual.</span></td></tr>
                             <tr data-model-id="qwen2.5vl:72b"><td class="font-mono text-sm text-[#D1D5DB]">qwen2.5vl:72b</td><td class="text-[#9CA3AF]" data-i18n="models.table.runsLocal">Local</td><td class="text-[#9CA3AF]" data-i18n="models.role.vision">Vision</td><td class="text-[#9CA3AF]" data-i18n="models.size.qwen25vl-72b">48.7 GB</td><td class="text-[#9CA3AF]" data-i18n="models.hw.gpu48">64 GB RAM or 48 GB VRAM</td><td class="text-[#9CA3AF]"><span class="tier-badge text-[#93C5FD]" data-i18n="models.status.ollama">AVAILABLE VIA OLLAMA</span><br><span data-i18n="models.notes.qwen25vl-72b">The largest vision build in this guide.</span></td></tr>
-                            <tr data-model-id="nomic-embed-text"><td class="font-mono text-sm text-[#D1D5DB]">nomic-embed-text</td><td class="text-[#9CA3AF]" data-i18n="models.table.runsLocal">Local</td><td class="text-[#9CA3AF]" data-i18n="models.role.embedding">Embedding</td><td class="text-[#9CA3AF]" data-i18n="models.size.nomicembedtext">274 MB</td><td class="text-[#9CA3AF]" data-i18n="models.hw.any">Any</td><td class="text-[#9CA3AF]"><span class="tier-badge text-[#6EE7B7]" data-i18n="models.status.validated">VALIDATED IN MIKA5 v0.3.0</span><br><span data-i18n="models.notes.nomicembedtext">Default embedding model of the RAG engine. Required to index documents.</span></td></tr>
+                            <tr data-model-id="nomic-embed-text"><td class="font-mono text-sm text-[#D1D5DB]">nomic-embed-text</td><td class="text-[#9CA3AF]" data-i18n="models.table.runsLocal">Local</td><td class="text-[#9CA3AF]" data-i18n="models.role.embedding">Embedding</td><td class="text-[#9CA3AF]" data-i18n="models.size.nomicembedtext">274 MB</td><td class="text-[#9CA3AF]" data-i18n="models.hw.any">Any</td><td class="text-[#9CA3AF]"><span class="tier-badge text-[#6EE7B7]" data-i18n="models.status.validated">VALIDATED IN MIKA5 v0.3.1</span><br><span data-i18n="models.notes.nomicembedtext">Default embedding model of the RAG engine. Required to index documents.</span></td></tr>
                             <tr data-model-id="mxbai-embed-large"><td class="font-mono text-sm text-[#D1D5DB]">mxbai-embed-large</td><td class="text-[#9CA3AF]" data-i18n="models.table.runsLocal">Local</td><td class="text-[#9CA3AF]" data-i18n="models.role.embedding">Embedding</td><td class="text-[#9CA3AF]" data-i18n="models.size.mxbaiembedlarge">670 MB</td><td class="text-[#9CA3AF]" data-i18n="models.hw.any">Any</td><td class="text-[#9CA3AF]"><span class="tier-badge text-[#93C5FD]" data-i18n="models.status.ollama">AVAILABLE VIA OLLAMA</span><br><span data-i18n="models.notes.mxbaiembedlarge">Alternative embedding model for longer documents.</span></td></tr>
                         </tbody>
                     </table>
                 </div>
                 <p class="text-sm text-[#9CA3AF] leading-relaxed">
-                    <strong data-i18n="models.notes.notIncludedTitle">Not included in Community v0.3.0.</strong>
-                    <span data-i18n="models.notes.notIncluded">vLLM and other server-side runtimes are not part of this edition. Team collaboration, cloud sync, mobile clients and background agents do not exist in v0.3.0. Status: FUTURE / NOT INCLUDED.</span>
+                    <strong data-i18n="models.notes.notIncludedTitle">Not included in Community v0.3.1.</strong>
+                    <span data-i18n="models.notes.notIncluded">vLLM and other server-side runtimes are not part of this edition. Team collaboration, cloud sync, mobile clients and background agents do not exist in v0.3.1. Status: FUTURE / NOT INCLUDED.</span>
                 </p>
             </section>
 
@@ -777,7 +777,7 @@
                 <div class="grid sm:grid-cols-2 gap-4">
                     <div class="glass p-5 rounded-xl space-y-2">
                         <div class="flex items-center gap-2 font-mono font-semibold">nomic-embed-text <span class="tier-badge px-2 py-0.5 rounded-full bg-green-900/30 text-green-300" data-i18n="models.tag.recommended">Recommended</span></div>
-                        <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.embeddings.nomic">The default embedding model in MIKA5 v0.3.0, set in the RAG engine itself. It weighs 274 MB, indexes quickly and works well with documents in English and Spanish. Unless you configure another one, this is the model that indexes your knowledge base.</p>
+                        <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.embeddings.nomic">The default embedding model in MIKA5 v0.3.1, set in the RAG engine itself. It weighs 274 MB, indexes quickly and works well with documents in English and Spanish. Unless you configure another one, this is the model that indexes your knowledge base.</p>
                         <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull nomic-embed-text</div>
                     </div>
                     <div class="glass p-5 rounded-xl space-y-2">
@@ -807,7 +807,7 @@
             <a href="whitepaper.html" class="hover:text-white transition-colors" data-i18n="models.footer.whitepaper">White Paper</a>
             <a href="https://github.com/mika5app/mika5-releases" target="_blank" rel="noopener" class="hover:text-white transition-colors" data-i18n="models.footer.github">GitHub</a>
         </div>
-        <p class="text-xs text-[#4B5563]" data-i18n="models.footer.tagline">v0.3.0 · 2026 · Tags and sizes verified against registry.ollama.ai on 4 August 2026</p>
+        <p class="text-xs text-[#4B5563]" data-i18n="models.footer.tagline">v0.3.1 · 2026 · Tags and sizes verified against registry.ollama.ai on 4 August 2026</p>
     </div>
 </footer>
 
@@ -827,7 +827,7 @@ const STRINGS = {
     'models.meta.faq1Q': 'How much RAM do I need to run local models with MIKA5?',
     'models.meta.faq1A': 'With 8 GB of RAM you can run 2B-4B models on CPU: llama3.2:3b weighs 2.0 GB and gemma2:2b weighs 1.6 GB. With 16 GB of RAM, or a GPU with 6-8 GB of VRAM, the 7B-8B class fits: qwen2.5:7b weighs 4.7 GB. The 70B class needs 64 GB of RAM or 48 GB of VRAM: llama3.3:70b weighs 42.5 GB.',
     'models.meta.faq2Q': 'Which embedding model does MIKA5 use for RAG?',
-    'models.meta.faq2A': 'nomic-embed-text, 274 MB. It is the default embedding model of the RAG engine in MIKA5 v0.3.0 and the knowledge base cannot index documents without one installed. Install it with: ollama pull nomic-embed-text. mxbai-embed-large (670 MB) is an alternative for longer documents.',
+    'models.meta.faq2A': 'nomic-embed-text, 274 MB. It is the default embedding model of the RAG engine in MIKA5 v0.3.1 and the knowledge base cannot index documents without one installed. Install it with: ollama pull nomic-embed-text. mxbai-embed-large (670 MB) is an alternative for longer documents.',
     'models.meta.faq3Q': 'Which model should I use for coding in MIKA5?',
     'models.meta.faq3A': 'qwen2.5-coder, published at 7b (4.7 GB), 14b (9.0 GB) and 32b (19.9 GB): pick the size your hardware holds. MIKA5 publishes no benchmark scores; consult each model card on ollama.com/library.',
     // --- models.nav.* ---
@@ -837,7 +837,7 @@ const STRINGS = {
     'models.nav.logoAlt': 'MIKA5 logo',
     'models.nav.langLabel': 'Switch language to Spanish',
     // --- models.hero.* ---
-    'models.hero.badge': 'MIKA5 official guide · Updated August 2026 · Verified against MIKA5 Community v0.3.0',
+    'models.hero.badge': 'MIKA5 official guide · Updated November 2026 · Verified against MIKA5 Community v0.3.1',
     'models.hero.titleTop': 'Choosing the right AI model',
     'models.hero.titleBottom': 'for your hardware and workflow',
     'models.hero.lead': 'Not every model runs on every machine. This guide lists the models MIKA5 can work with today, what each one needs in memory and disk, what it is good for and where it falls short. Every figure below — size, parameters and quantization — comes from the model\'s own manifest in the official Ollama registry, read on 4 August 2026.',
@@ -982,25 +982,25 @@ const STRINGS = {
     'models.useCases.llamaVisionDesc': 'Meta\'s vision build of Llama 3.2, 7.8 GB in Q4. It is listed here as the Llama-family option for image input; MIKA5 does not attribute any OCR specialisation to it.',
     'models.useCases.documentsBadge': 'Documents & RAG',
     'models.useCases.documentsIntro': 'MIKA5 indexes the documents you add to a project: it splits them into fragments, embeds each fragment with the embedding model and stores the vectors in the local SQLite database. On every message it retrieves the three closest fragments and injects them into the prompt as a system message. Two models are involved and they are not interchangeable: the embedding model indexes and retrieves, the chat model writes the answer.',
-    'models.useCases.docIndexDesc': 'The knowledge base does not work without an embedding model installed. nomic-embed-text is the default in MIKA5 v0.3.0 and costs 274 MB. Install it before adding documents, or indexing fails with an explicit error.',
+    'models.useCases.docIndexDesc': 'The knowledge base does not work without an embedding model installed. nomic-embed-text is the default in MIKA5 v0.3.1 and costs 274 MB. Install it before adding documents, or indexing fails with an explicit error.',
     'models.useCases.docAnswerDesc': 'Any chat model in this guide can answer over the retrieved fragments. Size matters here more than anywhere else: a 3B model paraphrases the fragments, a 14B model reconciles them and tells you when they contradict each other.',
     'models.useCases.multilingualBadge': 'Multilingual',
     'models.useCases.multilingualIntro': 'Most open models are trained mainly on English. If you work in Spanish the difference between families is noticeable: the same 7B can write natural professional Spanish or something that reads like a translation, depending on what it was trained on.',
     'models.useCases.qwenMultiDesc': 'Alibaba publishes Qwen with broad multilingual coverage, Spanish included, and the behaviour is consistent from 3b up to 72b. It is the family to start with if most of your work is not in English.',
     'models.useCases.mistralMultiDesc': 'Mistral is a French lab and its models are trained with European languages well represented. Worth trying alongside Qwen if you work in French, Italian, Portuguese or Spanish; which one fits your texts better is something to check on your own material, not to take from a table.',
     'models.useCases.privacyBadge': 'Maximum privacy',
-    'models.useCases.privacyIntro': 'If nothing may leave the machine, configure no cloud provider. With Ollama alone, MIKA5 talks to 127.0.0.1:11434 and to the local SQLite database, and to nothing else: no MIKA5 server is involved at any point. Adding a cloud provider changes that, and MIKA5 asks for explicit consent before the first send, listing what is going to leave: message, history, project instructions, attachments, images and RAG context. The authorization is scoped to that provider and that project, and it can be revoked.',
+    'models.useCases.privacyIntro': 'For fully local inference, select a locally installed Ollama model or llama.cpp. Ollama also supports cloud models: those requests leave the device and MIKA5 shows privacy notices and asks for explicit consent for the selected model and data. Conversations and knowledge remain stored locally. No MIKA5-operated inference server is involved.',
     'models.useCases.privacyStackDesc': 'A fully local setup: one chat model from your hardware tier plus nomic-embed-text for the knowledge base. Nothing else is needed and no API key is involved.',
     'models.useCases.privacyNoRewriteTitle': 'Your prompt is not rewritten',
     'models.useCases.privacyNoRewriteDesc': 'MIKA5 does not rewrite or redact what you send. Automatic redaction is disabled by default: what the consent dialog lists is exactly what is transmitted. Any future redaction will be opt-in, visible and auditable.',
     // --- models.cloud.* ---
     'models.cloud.title': 'Cloud providers',
-    'models.cloud.intro': 'MIKA5 v0.3.0 ships adapters for OpenAI, Anthropic, Groq, Moonshot and Alibaba Cloud Model Studio. They are optional: the app works without any of them. This guide lists no cloud model identifiers, because the catalogue belongs to the provider and to your account — MIKA5 requests it once you configure a key, and what you see depends on what that account has enabled. Your API key is stored encrypted with AES-256-GCM.',
+    'models.cloud.intro': 'MIKA5 v0.3.1 ships adapters for OpenAI, Anthropic, Groq, Moonshot and Alibaba Cloud Model Studio. They are optional: the app works without any of them. This guide lists no cloud model identifiers, because the catalogue belongs to the provider and to your account — MIKA5 requests it once you configure a key, and what you see depends on what that account has enabled. Your API key is stored encrypted with AES-256-GCM.',
     'models.cloud.openai': 'Chat and vision. Which models accept images is resolved from a curated list kept inside the adapter, never guessed from the model name.',
     'models.cloud.anthropic': 'Chat and vision, resolved from the same kind of curated list. It is also the protocol Alibaba Cloud Model Studio is reached with.',
-    'models.cloud.groq': 'Chat. Image input is not verified for this adapter in v0.3.0, so MIKA5 refuses attachments instead of sending them blind.',
-    'models.cloud.moonshot': 'Chat, under the same rule as Groq for image input: not verified in v0.3.0, so attachments are refused rather than discarded silently.',
-    'models.cloud.alibaba': 'Implemented in v0.3.0 as an Anthropic-compatible endpoint. Its adapter declares chat, vision and image generation, but the catalogue, the region and the billing mode are configured by you, and the capability of each model comes from that catalogue. This guide names no Alibaba model: nothing in the published v0.3.0 tag pins those identifiers down.',
+    'models.cloud.groq': 'Chat. Image input is not verified for this adapter in v0.3.1, so MIKA5 refuses attachments instead of sending them blind.',
+    'models.cloud.moonshot': 'Chat, under the same rule as Groq for image input: not verified in v0.3.1, so attachments are refused rather than discarded silently.',
+    'models.cloud.alibaba': 'Implemented in v0.3.1 as an Anthropic-compatible endpoint. Its adapter declares chat, vision and image generation, but the catalogue, the region and the billing mode are configured by you, and the capability of each model comes from that catalogue. This guide names no Alibaba model: nothing in the published v0.3.1 tag pins those identifiers down.',
     'models.cloud.statusNote': 'Status of every cloud model: PROVIDER ADAPTER COMPATIBLE, NOT VALIDATED. MIKA5 implements the protocol; it does not certify any particular model behind it.',
     // --- models.table.* ---
     'models.table.title': 'Practical table',
@@ -1030,14 +1030,14 @@ const STRINGS = {
     'models.hw.gpu48': '64 GB RAM or 48 GB VRAM',
     'models.hw.any': 'Any',
     // --- models.status.* ---
-    'models.status.validated': 'VALIDATED IN MIKA5 v0.3.0',
-    'models.status.validatedNote': 'MIKA5 references the model itself: it is a default or a suggested download in v0.3.0.',
+    'models.status.validated': 'VALIDATED IN MIKA5 v0.3.1',
+    'models.status.validatedNote': 'MIKA5 references the model itself: it is a default or a suggested download in v0.3.1.',
     'models.status.ollama': 'AVAILABLE VIA OLLAMA',
     'models.status.ollamaNote': 'the tag exists in the official registry and MIKA5 can run it, which is not the same as MIKA5 having tested it.',
     'models.status.adapter': 'PROVIDER ADAPTER COMPATIBLE, NOT VALIDATED',
     'models.status.adapterNote': 'reachable through an implemented cloud adapter; the model itself is the provider\'s, not verified by MIKA5.',
     'models.status.future': 'FUTURE / NOT INCLUDED',
-    'models.status.futureNote': 'does not exist in Community v0.3.0 and is not scheduled in this guide.',
+    'models.status.futureNote': 'does not exist in Community v0.3.1 and is not scheduled in this guide.',
     // --- models.notes.* (columna de la tabla practica) ---
     'models.notes.llama32-3b': 'The download MIKA5 suggests when no local model is installed.',
     'models.notes.qwen25-3b': 'Multilingual option at entry level.',
@@ -1065,8 +1065,8 @@ const STRINGS = {
     'models.notes.qwen25vl-72b': 'The largest vision build in this guide.',
     'models.notes.nomicembedtext': 'Default embedding model of the RAG engine. Required to index documents.',
     'models.notes.mxbaiembedlarge': 'Alternative embedding model for longer documents.',
-    'models.notes.notIncludedTitle': 'Not included in Community v0.3.0.',
-    'models.notes.notIncluded': 'vLLM and other server-side runtimes are not part of this edition. Team collaboration, cloud sync, mobile clients and background agents do not exist in v0.3.0. Status: FUTURE / NOT INCLUDED.',
+    'models.notes.notIncludedTitle': 'Not included in Community v0.3.1.',
+    'models.notes.notIncluded': 'vLLM and other server-side runtimes are not part of this edition. Team collaboration, cloud sync, mobile clients and background agents do not exist in v0.3.1. Status: FUTURE / NOT INCLUDED.',
     // --- models.install.* ---
     'models.install.title': 'Quick install reference',
     'models.install.intro': 'Copy these into your terminal with Ollama already installed. Each command downloads the model and leaves it ready for MIKA5.',
@@ -1084,7 +1084,7 @@ const STRINGS = {
     // --- models.embeddings.* ---
     'models.embeddings.title': 'Embedding models — required for RAG',
     'models.embeddings.intro': 'The RAG engine turns your documents into vectors so that semantically close passages can be found. An embedding model is not a chat model: it produces vectors, not text, and selecting it in the chat dropdown will not work. It only has to be installed; MIKA5 uses it on its own when you add documents to a project.',
-    'models.embeddings.nomic': 'The default embedding model in MIKA5 v0.3.0, set in the RAG engine itself. It weighs 274 MB, indexes quickly and works well with documents in English and Spanish. Unless you configure another one, this is the model that indexes your knowledge base.',
+    'models.embeddings.nomic': 'The default embedding model in MIKA5 v0.3.1, set in the RAG engine itself. It weighs 274 MB, indexes quickly and works well with documents in English and Spanish. Unless you configure another one, this is the model that indexes your knowledge base.',
     'models.embeddings.mxbai': 'A larger alternative: 670 MB and slower to index, in exchange for a wider vector representation. Worth trying if retrieval brings back fragments that are not the relevant ones, especially with long documents.',
     'models.embeddings.note': 'Embedding models run in the background when you add documents to MIKA5. You never talk to them directly: they only need to be installed. Do not select them as your chat model in the model dropdown — they do not produce text.',
     // --- models.footer.* ---
@@ -1092,7 +1092,7 @@ const STRINGS = {
     'models.footer.home': 'Home',
     'models.footer.whitepaper': 'White Paper',
     'models.footer.github': 'GitHub',
-    'models.footer.tagline': 'v0.3.0 · 2026 · Tags and sizes verified against registry.ollama.ai on 4 August 2026'
+    'models.footer.tagline': 'v0.3.1 · 2026 · Tags and sizes verified against registry.ollama.ai on 4 August 2026'
   },
   es: {
     // --- models.meta.* (título, descripción, Open Graph, Twitter, JSON-LD) ---
@@ -1108,7 +1108,7 @@ const STRINGS = {
     'models.meta.faq1Q': '¿Cuánta RAM necesito para ejecutar modelos locales con MIKA5?',
     'models.meta.faq1A': 'Con 8 GB de RAM puedes ejecutar modelos de 2B a 4B por CPU: llama3.2:3b pesa 2,0 GB y gemma2:2b pesa 1,6 GB. Con 16 GB de RAM, o una GPU con 6-8 GB de VRAM, cabe la clase de 7B-8B: qwen2.5:7b pesa 4,7 GB. La clase de 70B necesita 64 GB de RAM o 48 GB de VRAM: llama3.3:70b pesa 42,5 GB.',
     'models.meta.faq2Q': '¿Qué modelo de embeddings usa MIKA5 para el RAG?',
-    'models.meta.faq2A': 'nomic-embed-text, 274 MB. Es el modelo de embeddings por defecto del motor RAG en MIKA5 v0.3.0 y la base de conocimiento no puede indexar documentos sin uno instalado. Se instala con: ollama pull nomic-embed-text. mxbai-embed-large (670 MB) es la alternativa para documentos largos.',
+    'models.meta.faq2A': 'nomic-embed-text, 274 MB. Es el modelo de embeddings por defecto del motor RAG en MIKA5 v0.3.1 y la base de conocimiento no puede indexar documentos sin uno instalado. Se instala con: ollama pull nomic-embed-text. mxbai-embed-large (670 MB) es la alternativa para documentos largos.',
     'models.meta.faq3Q': '¿Qué modelo conviene para programar en MIKA5?',
     'models.meta.faq3A': 'qwen2.5-coder, publicado en 7b (4,7 GB), 14b (9,0 GB) y 32b (19,9 GB): elige el tamaño que soporte tu hardware. MIKA5 no publica puntuaciones de benchmark; consulta la ficha de cada modelo en ollama.com/library.',
     // --- models.nav.* ---
@@ -1118,7 +1118,7 @@ const STRINGS = {
     'models.nav.logoAlt': 'Logotipo de MIKA5',
     'models.nav.langLabel': 'Cambiar el idioma a inglés',
     // --- models.hero.* ---
-    'models.hero.badge': 'Guía oficial de MIKA5 · Actualizada en agosto de 2026 · Verificada contra MIKA5 Community v0.3.0',
+    'models.hero.badge': 'Guía oficial de MIKA5 · Actualizada en noviembre de 2026 · Verificada contra MIKA5 Community v0.3.1',
     'models.hero.titleTop': 'Elegir el modelo de IA adecuado',
     'models.hero.titleBottom': 'para tu hardware y tu forma de trabajar',
     'models.hero.lead': 'No todos los modelos caben en todas las máquinas. Esta guía enumera los modelos con los que MIKA5 puede trabajar hoy, qué necesita cada uno en memoria y disco, para qué sirve y dónde se queda corto. Todas las cifras de abajo —tamaño, parámetros y cuantización— salen del manifiesto del propio modelo en el registro oficial de Ollama, leído el 4 de agosto de 2026.',
@@ -1263,25 +1263,25 @@ const STRINGS = {
     'models.useCases.llamaVisionDesc': 'La compilación de visión de Llama 3.2, de Meta, 7,8 GB en Q4. Figura aquí como la opción de la familia Llama para entrada de imágenes; MIKA5 no le atribuye ninguna especialización en OCR.',
     'models.useCases.documentsBadge': 'Documentos y RAG',
     'models.useCases.documentsIntro': 'MIKA5 indexa los documentos que añades a un proyecto: los divide en fragmentos, calcula el embedding de cada fragmento con el modelo de embeddings y guarda los vectores en la base SQLite local. En cada mensaje recupera los tres fragmentos más cercanos y los inyecta en el prompt como mensaje de sistema. Intervienen dos modelos y no son intercambiables: el de embeddings indexa y recupera, el de chat redacta la respuesta.',
-    'models.useCases.docIndexDesc': 'La base de conocimiento no funciona sin un modelo de embeddings instalado. nomic-embed-text es el valor por defecto en MIKA5 v0.3.0 y cuesta 274 MB. Instálalo antes de añadir documentos o la indexación falla con un error explícito.',
+    'models.useCases.docIndexDesc': 'La base de conocimiento no funciona sin un modelo de embeddings instalado. nomic-embed-text es el valor por defecto en MIKA5 v0.3.1 y cuesta 274 MB. Instálalo antes de añadir documentos o la indexación falla con un error explícito.',
     'models.useCases.docAnswerDesc': 'Cualquier modelo de chat de esta guía puede responder sobre los fragmentos recuperados. Aquí el tamaño importa más que en ningún otro sitio: un modelo de 3B parafrasea los fragmentos, uno de 14B los concilia y te avisa cuando se contradicen.',
     'models.useCases.multilingualBadge': 'Multilingüe',
     'models.useCases.multilingualIntro': 'La mayoría de los modelos abiertos se entrenan sobre todo en inglés. Si trabajas en español la diferencia entre familias se nota: un mismo 7B puede escribir un español profesional natural o algo que suena a traducción, según con qué se haya entrenado.',
     'models.useCases.qwenMultiDesc': 'Alibaba publica Qwen con una cobertura multilingüe amplia, español incluido, y el comportamiento es coherente de 3b hasta 72b. Es la familia por la que empezar si la mayor parte de tu trabajo no está en inglés.',
     'models.useCases.mistralMultiDesc': 'Mistral es un laboratorio francés y sus modelos se entrenan con las lenguas europeas bien representadas. Merece la pena probarlo junto a Qwen si trabajas en francés, italiano, portugués o español; cuál encaja mejor con tus textos es algo que conviene comprobar sobre tu propio material, no dar por hecho desde una tabla.',
     'models.useCases.privacyBadge': 'Privacidad máxima',
-    'models.useCases.privacyIntro': 'Si nada puede salir de la máquina, no configures ningún proveedor cloud. Sólo con Ollama, MIKA5 habla con 127.0.0.1:11434 y con la base SQLite local, y con nada más: en ningún momento interviene un servidor de MIKA5. Añadir un proveedor cloud cambia eso, y MIKA5 pide consentimiento explícito antes del primer envío, enumerando qué va a salir: mensaje, historial, instrucciones del proyecto, adjuntos, imágenes y contexto RAG. La autorización queda acotada a ese proveedor y ese proyecto, y se puede revocar.',
+    'models.useCases.privacyIntro': 'Para inferencia totalmente local, selecciona un modelo instalado localmente en Ollama o llama.cpp. Ollama también admite modelos cloud: esas solicitudes salen del dispositivo y MIKA5 muestra avisos de privacidad y pide consentimiento explícito para el modelo y los datos seleccionados. Las conversaciones y el conocimiento siguen almacenados localmente. No interviene un servidor de inferencia operado por MIKA5.',
     'models.useCases.privacyStackDesc': 'Una instalación totalmente local: un modelo de chat de tu gama de hardware más nomic-embed-text para la base de conocimiento. No hace falta nada más y no interviene ninguna API key.',
     'models.useCases.privacyNoRewriteTitle': 'Tu prompt no se reescribe',
     'models.useCases.privacyNoRewriteDesc': 'MIKA5 no reescribe ni censura lo que envías. La redacción automática está desactivada por defecto: se transmite exactamente lo que enumera el diálogo de consentimiento. Cualquier redacción futura será opcional, visible y auditable.',
     // --- models.cloud.* ---
     'models.cloud.title': 'Proveedores cloud',
-    'models.cloud.intro': 'MIKA5 v0.3.0 incluye adaptadores para OpenAI, Anthropic, Groq, Moonshot y Alibaba Cloud Model Studio. Son opcionales: la app funciona sin ninguno. Esta guía no enumera identificadores de modelos cloud, porque el catálogo es del proveedor y de tu cuenta: MIKA5 se lo pide en cuanto configuras una clave, y lo que ves depende de lo que esa cuenta tenga habilitado. Tu API key se guarda cifrada con AES-256-GCM.',
+    'models.cloud.intro': 'MIKA5 v0.3.1 incluye adaptadores para OpenAI, Anthropic, Groq, Moonshot y Alibaba Cloud Model Studio. Son opcionales: la app funciona sin ninguno. Esta guía no enumera identificadores de modelos cloud, porque el catálogo es del proveedor y de tu cuenta: MIKA5 se lo pide en cuanto configuras una clave, y lo que ves depende de lo que esa cuenta tenga habilitado. Tu API key se guarda cifrada con AES-256-GCM.',
     'models.cloud.openai': 'Chat y visión. Qué modelos aceptan imágenes se resuelve con una lista curada que vive dentro del adaptador, nunca deduciéndolo del nombre del modelo.',
     'models.cloud.anthropic': 'Chat y visión, resueltos con el mismo tipo de lista curada. Es además el protocolo con el que se alcanza Alibaba Cloud Model Studio.',
-    'models.cloud.groq': 'Chat. La entrada de imágenes no está verificada para este adaptador en v0.3.0, así que MIKA5 rechaza los adjuntos en lugar de enviarlos a ciegas.',
-    'models.cloud.moonshot': 'Chat, con la misma regla que Groq para la entrada de imágenes: sin verificar en v0.3.0, así que los adjuntos se rechazan en vez de descartarse en silencio.',
-    'models.cloud.alibaba': 'Implementado en v0.3.0 como endpoint compatible con Anthropic. Su adaptador declara chat, visión y generación de imagen, pero el catálogo, la región y el modo de facturación los configuras tú, y la capacidad de cada modelo viene de ese catálogo. Esta guía no nombra ningún modelo de Alibaba: nada del tag v0.3.0 publicado fija esos identificadores.',
+    'models.cloud.groq': 'Chat. La entrada de imágenes no está verificada para este adaptador en v0.3.1, así que MIKA5 rechaza los adjuntos en lugar de enviarlos a ciegas.',
+    'models.cloud.moonshot': 'Chat, con la misma regla que Groq para la entrada de imágenes: sin verificar en v0.3.1, así que los adjuntos se rechazan en vez de descartarse en silencio.',
+    'models.cloud.alibaba': 'Implementado en v0.3.1 como endpoint compatible con Anthropic. Su adaptador declara chat, visión y generación de imagen, pero el catálogo, la región y el modo de facturación los configuras tú, y la capacidad de cada modelo viene de ese catálogo. Esta guía no nombra ningún modelo de Alibaba: nada del tag v0.3.1 publicado fija esos identificadores.',
     'models.cloud.statusNote': 'Estado de todo modelo cloud: COMPATIBLE POR ADAPTADOR, SIN VALIDAR. MIKA5 implementa el protocolo; no certifica ningún modelo concreto detrás de él.',
     // --- models.table.* ---
     'models.table.title': 'Tabla práctica',
@@ -1311,14 +1311,14 @@ const STRINGS = {
     'models.hw.gpu48': '64 GB de RAM o 48 GB de VRAM',
     'models.hw.any': 'Cualquiera',
     // --- models.status.* ---
-    'models.status.validated': 'VALIDADO EN MIKA5 v0.3.0',
-    'models.status.validatedNote': 'MIKA5 referencia el modelo por sí misma: es un valor por defecto o una descarga sugerida en v0.3.0.',
+    'models.status.validated': 'VALIDADO EN MIKA5 v0.3.1',
+    'models.status.validatedNote': 'MIKA5 referencia el modelo por sí misma: es un valor por defecto o una descarga sugerida en v0.3.1.',
     'models.status.ollama': 'DISPONIBLE VÍA OLLAMA',
     'models.status.ollamaNote': 'el tag existe en el registro oficial y MIKA5 puede ejecutarlo, que no es lo mismo que haberlo probado.',
     'models.status.adapter': 'COMPATIBLE POR ADAPTADOR, SIN VALIDAR',
     'models.status.adapterNote': 'accesible por un adaptador cloud implementado; el modelo es del proveedor y MIKA5 no lo verifica.',
     'models.status.future': 'FUTURO / NO INCLUIDO',
-    'models.status.futureNote': 'no existe en Community v0.3.0 y esta guía no lo planifica.',
+    'models.status.futureNote': 'no existe en Community v0.3.1 y esta guía no lo planifica.',
     // --- models.notes.* (columna de la tabla práctica) ---
     'models.notes.llama32-3b': 'La descarga que MIKA5 sugiere cuando no hay ningún modelo local instalado.',
     'models.notes.qwen25-3b': 'Opción multilingüe de la gama de entrada.',
@@ -1346,8 +1346,8 @@ const STRINGS = {
     'models.notes.qwen25vl-72b': 'La mayor compilación de visión de esta guía.',
     'models.notes.nomicembedtext': 'Modelo de embeddings por defecto del motor RAG. Necesario para indexar documentos.',
     'models.notes.mxbaiembedlarge': 'Modelo de embeddings alternativo para documentos largos.',
-    'models.notes.notIncludedTitle': 'No incluido en Community v0.3.0.',
-    'models.notes.notIncluded': 'vLLM y otros runtimes de servidor no forman parte de esta edición. El trabajo en equipo, la sincronización cloud, los clientes móviles y los agentes en segundo plano no existen en v0.3.0. Estado: FUTURO / NO INCLUIDO.',
+    'models.notes.notIncludedTitle': 'No incluido en Community v0.3.1.',
+    'models.notes.notIncluded': 'vLLM y otros runtimes de servidor no forman parte de esta edición. El trabajo en equipo, la sincronización cloud, los clientes móviles y los agentes en segundo plano no existen en v0.3.1. Estado: FUTURO / NO INCLUIDO.',
     // --- models.install.* ---
     'models.install.title': 'Referencia rápida de instalación',
     'models.install.intro': 'Cópialos en tu terminal con Ollama ya instalado. Cada comando descarga el modelo y lo deja listo para MIKA5.',
@@ -1365,7 +1365,7 @@ const STRINGS = {
     // --- models.embeddings.* ---
     'models.embeddings.title': 'Modelos de embeddings — necesarios para el RAG',
     'models.embeddings.intro': 'El motor RAG convierte tus documentos en vectores para poder encontrar los pasajes semánticamente cercanos. Un modelo de embeddings no es un modelo de chat: produce vectores, no texto, y seleccionarlo en el desplegable de chat no funciona. Sólo hace falta instalarlo; MIKA5 lo usa por su cuenta cuando añades documentos a un proyecto.',
-    'models.embeddings.nomic': 'El modelo de embeddings por defecto en MIKA5 v0.3.0, fijado en el propio motor RAG. Pesa 274 MB, indexa rápido y funciona bien con documentos en español e inglés. Salvo que configures otro, este es el modelo que indexa tu base de conocimiento.',
+    'models.embeddings.nomic': 'El modelo de embeddings por defecto en MIKA5 v0.3.1, fijado en el propio motor RAG. Pesa 274 MB, indexa rápido y funciona bien con documentos en español e inglés. Salvo que configures otro, este es el modelo que indexa tu base de conocimiento.',
     'models.embeddings.mxbai': 'Una alternativa mayor: 670 MB y más lenta al indexar, a cambio de una representación vectorial más amplia. Merece la pena probarla si la recuperación devuelve fragmentos que no son los relevantes, sobre todo con documentos largos.',
     'models.embeddings.note': 'Los modelos de embeddings trabajan en segundo plano cuando añades documentos a MIKA5. No hablas con ellos directamente: sólo hay que tenerlos instalados. No los selecciones como modelo de chat en el desplegable, porque no producen texto.',
     // --- models.footer.* ---
@@ -1373,7 +1373,7 @@ const STRINGS = {
     'models.footer.home': 'Inicio',
     'models.footer.whitepaper': 'White Paper',
     'models.footer.github': 'GitHub',
-    'models.footer.tagline': 'v0.3.0 · 2026 · Tags y tamaños verificados contra registry.ollama.ai el 4 de agosto de 2026'
+    'models.footer.tagline': 'v0.3.1 · 2026 · Tags y tamaños verificados contra registry.ollama.ai el 4 de agosto de 2026'
   }
 };
 

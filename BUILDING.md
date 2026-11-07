@@ -139,3 +139,19 @@ rejects missing, additional, tampered, or mismatched artifacts. Tagged releases
 download the verified Actions artifact by ID and verify it again before upload;
 they do not rebuild it. A tag triggers publication, so create it only after
 review and platform validation.
+
+## Windows installation and upgrade QA
+
+The Windows producer runs `scripts/ci/verify-windows-installation.js` against the
+published 0.3.0 installer and the newly built 0.3.1 installer. The baseline is
+pinned by SHA-256. Tests cover real installation, normal startup/shutdown,
+registration, upgrade, restart, SQLite integrity and preservation of synthetic
+AppData records and knowledge files. Results are saved as the separate
+`windows-installation-report` Actions artifact.
+
+This script refuses to run outside disposable GitHub-hosted Windows runners.
+Do not run it against a personal installation. To prepare the old installer on
+modern Windows, CI seeds only its owned `InstallLocation`; this avoids the
+legacy electron-builder folder-lookup issue documented in upstream #8536.
+The old installer must still install, register and run its original bytes.
+The new release's clean installation is tested before that preparation.

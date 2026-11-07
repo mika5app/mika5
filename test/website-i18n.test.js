@@ -456,12 +456,12 @@ check(/vLLM is not part of Community/.test(paper) && /vLLM no forma parte de Com
   'vLLM declarado fuera de Community en ambos idiomas');
 
 // Pro y Cloud descritos como inexistentes hoy.
-check(/does not exist in v0\.3\.0/.test(wp.en.get('whitepaper.editions.proBody') || '')
-  && /No existe en v0\.3\.0/.test(wp.es.get('whitepaper.editions.proBody') || ''),
-  'Pro declarado inexistente en v0.3.0');
-check(/None of them exists in Community v0\.3\.0/.test(wp.en.get('whitepaper.editions.cloudBody') || '')
-  && /Ninguno existe en Community v0\.3\.0/.test(wp.es.get('whitepaper.editions.cloudBody') || ''),
-  'Cloud declarado inexistente en v0.3.0');
+check(/does not exist in v0\.3\.1/.test(wp.en.get('whitepaper.editions.proBody') || '')
+  && /No existe en v0\.3\.1/.test(wp.es.get('whitepaper.editions.proBody') || ''),
+  'Pro declarado inexistente en v0.3.1');
+check(/None of them exists in Community v0\.3\.1/.test(wp.en.get('whitepaper.editions.cloudBody') || '')
+  && /Ninguno existe en Community v0\.3\.1/.test(wp.es.get('whitepaper.editions.cloudBody') || ''),
+  'Cloud declarado inexistente en v0.3.1');
 check(/whitepaper\.editions\.statusPlanned/.test(paper),
   'Pro y Cloud llevan estado planificado');
 
@@ -469,10 +469,10 @@ console.log('\n=== whitepaper.html: versiones, enlaces y datos de release ===');
 
 // Versiones anteriores solo valdrian dentro de una seccion historica
 // etiquetada; no existe tal seccion, asi que no pueden aparecer.
-for (const version of ['0.1.0', '0.2.0']) {
+for (const version of ['0.1.0', '0.2.0', '0.3.0']) {
   check(!paper.includes(version), `no queda ninguna referencia a v${version}`);
 }
-check((paper.match(/0\.3\.0/g) || []).length > 5, 'la version vigente aparece de forma consistente');
+check((paper.match(/0\.3\.1/g) || []).length > 5, 'la version vigente aparece de forma consistente');
 
 // Enlaces internos y archivos citados del repositorio. El inicio se enlaza por
 // la raiz canonica; el resto por su archivo, que debe existir en web/.
@@ -688,7 +688,7 @@ function duplicados(lista) {
   return [...repetidos];
 }
 
-// Conteos del catalogo editorial de v0.3.0. Cambiarlos exige actualizarlos
+// Conteos del catalogo editorial de v0.3.1. Cambiarlos exige actualizarlos
 // aqui a proposito: una version futura con otro catalogo hara fallar la suite
 // hasta que alguien confirme la cifra nueva.
 const MODELOS_LANDING_V030 = 15;
@@ -811,8 +811,8 @@ for (const [archivo, html] of [['landing.html', landing], ['models.html', models
   check(rotas.length === 0, `${archivo}: sin anclas internas rotas (${rotas.join(', ') || 'ninguna'})`);
 }
 
-// --- Novedades de v0.3.0 ---
-check(/id="whatsnew"/.test(landing), 'la landing publica el bloque de novedades de v0.3.0');
+// --- Novedades de v0.3.1 ---
+check(/id="whatsnew"/.test(landing), 'la landing publica el bloque de novedades de v0.3.1');
 const CLAVES_NOVEDADES = ['new.header', 'new.cloud', 'new.context', 'new.actions', 'new.composer',
   'new.empty', 'new.projects', 'new.code', 'new.menu', 'new.scroll', 'new.a11y', 'new.tests'];
 for (const base of CLAVES_NOVEDADES) {
@@ -840,12 +840,12 @@ check(/x86-64/.test(en.get('dl.linux.warning')) && /no ARM build/i.test(en.get('
   'el aviso de Linux acota la arquitectura publicada');
 
 // --- Enlaces de release ---
-const RELEASE = 'https://github.com/mika5app/mika5-releases/releases/download/v0.3.0';
+const RELEASE = 'https://github.com/mika5app/mika5-releases/releases/download/v0.3.1';
 const ENLAZADOS = [
-  'MIKA5-Setup-0.3.0-win-x64.exe', 'MIKA5-Portable-0.3.0-win-x64.exe',
-  'MIKA5-0.3.0-mac-arm64.dmg', 'MIKA5-0.3.0-mac-x64.dmg',
-  'MIKA5-0.3.0-linux-x86_64.AppImage', 'MIKA5-0.3.0-linux-amd64.deb',
-  'MIKA5-0.3.0-linux-x86_64.rpm', 'MIKA5-0.3.0-source.tar.gz',
+  'MIKA5-Setup-0.3.1-win-x64.exe', 'MIKA5-Portable-0.3.1-win-x64.exe',
+  'MIKA5-0.3.1-mac-arm64.dmg', 'MIKA5-0.3.1-mac-x64.dmg',
+  'MIKA5-0.3.1-linux-x86_64.AppImage', 'MIKA5-0.3.1-linux-amd64.deb',
+  'MIKA5-0.3.1-linux-x86_64.rpm', 'MIKA5-0.3.1-source.tar.gz',
   'SHA256SUMS.txt', 'BUILDING.md', 'COMMUNITY.md', 'BUILD-METADATA.json', 'LICENSE'
 ];
 for (const asset of ENLAZADOS) {
@@ -853,7 +853,7 @@ for (const asset of ENLAZADOS) {
 }
 check(ENLAZADOS.length === 13, `se enlazan 13 assets de los 15 publicados (${ENLAZADOS.length})`);
 // Los dos ZIP de macOS se dejan publicados pero sin enlace, de forma deliberada.
-for (const zip of ['MIKA5-0.3.0-mac-arm64.zip', 'MIKA5-0.3.0-mac-x64.zip']) {
+for (const zip of ['MIKA5-0.3.1-mac-arm64.zip', 'MIKA5-0.3.1-mac-x64.zip']) {
   check(!landing.includes(zip), `${zip} deliberadamente sin enlace directo`);
 }
 check(/15 assets/.test(en.get('dl.extras.note')) && /15 assets/.test(es.get('dl.extras.note')),
@@ -862,7 +862,7 @@ check(/14 of them/.test(en.get('dl.extras.note')) && /14 de ellos/.test(es.get('
   'la nota declara las 14 entradas de checksum');
 // Ninguna pagina puede enlazar una release anterior.
 for (const [archivo, html] of [['landing.html', landing], ['models.html', models], ['whitepaper.html', paper]]) {
-  check(!/download\/v0\.[12]\.0\//.test(html) && !/0\.2\.0-(win|mac|linux)/.test(html),
+  check(!/download\/v0\.[123]\.0\//.test(html) && !/0\.2\.0-(win|mac|linux)/.test(html),
     `${archivo}: cero enlaces a releases anteriores`);
 }
 
@@ -871,13 +871,13 @@ const IMPLEMENTADOS = ['implCross', 'implConsent', 'implCapabilities', 'implVisu
   'implCancel', 'implScope', 'implExport'];
 for (const nombre of IMPLEMENTADOS) {
   const clave = `whitepaper.roadmap.${nombre}`;
-  check(/>Implemented in v0\.3\.0</.test(wp.en.get(clave) || ''),
+  check(/>Implemented in v0\.3\.1</.test(wp.en.get(clave) || ''),
     `${clave} etiquetado como implementado (EN)`);
-  check(/>Implementado en v0\.3\.0</.test(wp.es.get(clave) || ''),
+  check(/>Implementado en v0\.3\.1</.test(wp.es.get(clave) || ''),
     `${clave} etiquetado como implementado (ES)`);
 }
 // Todo punto del roadmap lleva exactamente una etiqueta de estado.
-const ESTADOS_EN = /Implemented in v0\.3\.0|Planned|Experimental|Not included in Community/;
+const ESTADOS_EN = /Implemented in v0\.3\.1|Planned|Experimental|Not included in Community/;
 const puntosRoadmap = [...wp.en.keys()]
   .filter(k => /^whitepaper\.roadmap\.(impl|streaming|dragdrop|tools|bm25|modelui|exportkb|routing|plugins|sync|mobile|agents|teams|vllm)/.test(k))
   .filter(k => !/Intro$/.test(k));

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- MIKA5 Landing v0.3.0 -->
+<!-- MIKA5 Landing v0.3.1 -->
 <html lang="en" class="scroll-smooth">
 <head>
     <meta charset="UTF-8">
@@ -61,10 +61,10 @@
           "operatingSystem": "Windows 10+, macOS 12+, Linux",
           "description": "Free AI desktop app that runs 100% on your computer. Local RAG, projects, per-chat knowledge, vision models. Powered by Ollama.",
           "url": "https://mika5.xyz/",
-          "downloadUrl": "https://github.com/mika5app/mika5-releases/releases/tag/v0.3.0",
+          "downloadUrl": "https://github.com/mika5app/mika5-releases/releases/tag/v0.3.1",
       "datePublished": "2026-08-04",
-          "softwareVersion": "0.3.0",
-          "license": "https://github.com/mika5app/mika5-releases/releases/download/v0.3.0/LICENSE",
+          "softwareVersion": "0.3.1",
+          "license": "https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/LICENSE",
           "offers": {
             "@type": "Offer",
             "price": "0",
@@ -261,7 +261,7 @@
         <div class="flex items-center gap-3 shrink-0">
             <img src="icon.png" alt="MIKA5" class="w-7 h-7 rounded-lg">
             <span class="text-xl font-bold tracking-tight font-heading">MIKA5</span>
-            <span class="version-tag badge px-2 py-0.5 rounded-full ml-1 hidden lg:inline-block">v0.3.0</span>
+            <span class="version-tag badge px-2 py-0.5 rounded-full ml-1 hidden lg:inline-block">v0.3.1</span>
         </div>
         <nav class="hidden md:flex items-center gap-4 lg:gap-7 min-w-0 text-sm font-medium text-[#9CA3AF]">
             <a href="#features" class="hover:text-white transition-colors" data-i18n="nav.features">Features</a>
@@ -306,7 +306,7 @@
         <div class="flex-1 space-y-8">
             <div class="flex items-center gap-2">
                 <span class="pulse-dot w-2 h-2 rounded-full bg-green-400 inline-block"></span>
-                <span class="text-xs uppercase tracking-widest text-green-400 font-bold" data-i18n="hero.badge">v0.3.0 — Windows · macOS · Linux</span>
+                <span class="text-xs uppercase tracking-widest text-green-400 font-bold" data-i18n="hero.badge">v0.3.1 — Windows · macOS · Linux</span>
             </div>
             <h1 class="text-5xl md:text-[4.2rem] font-bold leading-[1.08] tracking-tight">
                 <span data-i18n="hero.h1a">AI on your machine.</span><br>
@@ -534,32 +534,32 @@
 
     <hr class="border-white/5">
 
-    <!-- ─── WHAT'S NEW IN v0.3.0 ──────────────────────────────── -->
+    <!-- ─── WHAT'S NEW IN v0.3.1 ──────────────────────────────── -->
     <section id="whatsnew" class="py-24 space-y-12">
         <div class="text-center space-y-4">
-            <h2 class="text-4xl md:text-5xl font-heading" data-i18n="new.title">What's new in v0.3.0</h2>
+            <h2 class="text-4xl md:text-5xl font-heading" data-i18n="new.title">What's new in v0.3.1</h2>
             <p class="text-xl text-[#9CA3AF] max-w-2xl mx-auto" data-i18n="new.subtitle">This release is about the interface and about being explicit: knowing which model answered, what leaves your machine, and where you are working.</p>
         </div>
         <div class="grid md:grid-cols-2 gap-x-12 gap-y-5 max-w-4xl mx-auto">
             <div class="flex gap-4">
                 <span class="text-green-400 mt-0.5">&#10003;</span>
                 <div>
-                    <p class="font-medium" data-i18n="new.header.title">Reorganized top bar</p>
-                    <p class="text-[#9CA3AF] text-sm mt-1" data-i18n="new.header.desc">The header separates what you are reading from what you can act on, and no longer mixes both in a single row.</p>
+                    <p class="font-medium" data-i18n="new.header.title">Stable providers and model selection</p>
+                    <p class="text-[#9CA3AF] text-sm mt-1" data-i18n="new.header.desc">Provider availability and model selection remain consistent while requests can be cancelled safely.</p>
                 </div>
             </div>
             <div class="flex gap-4">
                 <span class="text-green-400 mt-0.5">&#10003;</span>
                 <div>
-                    <p class="font-medium" data-i18n="new.cloud.title">One cloud notice, and explicit consent</p>
-                    <p class="text-[#9CA3AF] text-sm mt-1" data-i18n="new.cloud.desc">A single cloud indicator instead of several competing signals. Before the first send, a dialog lists what will leave the device and the authorization can be revoked per provider and project.</p>
+                    <p class="font-medium" data-i18n="new.cloud.title">Ollama local and cloud, with explicit consent</p>
+                    <p class="text-[#9CA3AF] text-sm mt-1" data-i18n="new.cloud.desc">Use local or cloud models through Ollama. Cloud requests show privacy notices and require consent for the selected provider, model and data being sent.</p>
                 </div>
             </div>
             <div class="flex gap-4">
                 <span class="text-green-400 mt-0.5">&#10003;</span>
                 <div>
-                    <p class="font-medium" data-i18n="new.context.title">Active project and chat, marked</p>
-                    <p class="text-[#9CA3AF] text-sm mt-1" data-i18n="new.context.desc">The sidebar states where you are working, so a message never lands in the wrong project by accident.</p>
+                    <p class="font-medium" data-i18n="new.context.title">Safer documents and image downloads</p>
+                    <p class="text-[#9CA3AF] text-sm mt-1" data-i18n="new.context.desc">Improved PDF extraction and bounded image downloads support legitimate attachments while preserving network and IPC safeguards.</p>
                 </div>
             </div>
             <div class="flex gap-4">
@@ -622,7 +622,7 @@
                 <span class="text-green-400 mt-0.5">&#10003;</span>
                 <div>
                     <p class="font-medium" data-i18n="new.tests.title">Tests that cannot touch your data</p>
-                    <p class="text-[#9CA3AF] text-sm mt-1" data-i18n="new.tests.desc">An engineering detail rather than a feature: the Electron test suite runs against its own temporary profile, so running the tests can never read or delete a real installation database.</p>
+                    <p class="text-[#9CA3AF] text-sm mt-1" data-i18n="new.tests.desc">An engineering detail rather than a feature: nine gates validate Windows and Linux, native jobs verify macOS packages, and disposable Windows runners test installation and upgrades with synthetic data.</p>
                 </div>
             </div>
         </div>
@@ -653,18 +653,18 @@
                     <p class="font-heading font-semibold text-white" data-i18n="dl.win.name">Windows</p>
                     <p class="text-xs text-[#6B7280] mt-1" data-i18n="dl.win.desc">Windows 10 / 11 · x64</p>
                 </div>
-                <span class="version-tag badge px-2 py-0.5 rounded-full">v0.3.0</span>
+                <span class="version-tag badge px-2 py-0.5 rounded-full">v0.3.1</span>
                 <div class="w-full space-y-2 mt-1">
-                    <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.0/MIKA5-Setup-0.3.0-win-x64.exe"
+                    <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/MIKA5-Setup-0.3.1-win-x64.exe"
                        class="block w-full bg-[#7C3AED] text-white text-xs font-semibold py-2 rounded-xl text-center hover:brightness-110 transition-all" data-i18n="dl.win.installer">
                         Download Installer (.exe)
                     </a>
-                    <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.0/MIKA5-Portable-0.3.0-win-x64.exe"
+                    <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/MIKA5-Portable-0.3.1-win-x64.exe"
                        class="block w-full bg-white/5 border border-white/10 text-[#9CA3AF] text-xs font-semibold py-2 rounded-xl text-center hover:bg-white/10 transition-all" data-i18n="dl.win.portable">
                         Portable (.exe)
                     </a>
                 </div>
-                <p class="text-[10px] leading-relaxed text-[#6B7280] text-left w-full" data-i18n="dl.win.warning">Not signed with Authenticode: SmartScreen may warn on first run. Check that the file name carries 0.3.0 and compare its SHA-256 against SHA256SUMS.txt before installing.</p>
+                <p class="text-[10px] leading-relaxed text-[#6B7280] text-left w-full" data-i18n="dl.win.warning">Not signed with Authenticode: SmartScreen may warn on first run. Check that the file name carries 0.3.1 and compare its SHA-256 against SHA256SUMS.txt before installing.</p>
             </div>
 
             <!-- macOS -->
@@ -676,13 +676,13 @@
                     <p class="font-heading font-semibold text-white" data-i18n="dl.mac.name">macOS</p>
                     <p class="text-xs text-[#6B7280] mt-1" data-i18n="dl.mac.desc">Apple Silicon · Intel x64</p>
                 </div>
-                <span class="version-tag badge px-2 py-0.5 rounded-full">v0.3.0</span>
+                <span class="version-tag badge px-2 py-0.5 rounded-full">v0.3.1</span>
                 <div class="w-full space-y-2 mt-1">
-                    <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.0/MIKA5-0.3.0-mac-arm64.dmg"
+                    <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/MIKA5-0.3.1-mac-arm64.dmg"
                        class="block w-full bg-[#7C3AED] text-white text-xs font-semibold py-2 rounded-xl text-center hover:brightness-110 transition-all" data-i18n="dl.mac.arm">
                         Apple Silicon (.dmg)
                     </a>
-                    <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.0/MIKA5-0.3.0-mac-x64.dmg"
+                    <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/MIKA5-0.3.1-mac-x64.dmg"
                        class="block w-full bg-white/5 border border-white/10 text-[#9CA3AF] text-xs font-semibold py-2 rounded-xl text-center hover:bg-white/10 transition-all" data-i18n="dl.mac.intel">
                         Intel x64 (.dmg)
                     </a>
@@ -699,18 +699,18 @@
                     <p class="font-heading font-semibold text-white" data-i18n="dl.linux.name">Linux</p>
                     <p class="text-xs text-[#6B7280] mt-1" data-i18n="dl.linux.desc">x64 · AppImage · deb · rpm</p>
                 </div>
-                <span class="version-tag badge px-2 py-0.5 rounded-full">v0.3.0</span>
+                <span class="version-tag badge px-2 py-0.5 rounded-full">v0.3.1</span>
                 <div class="w-full space-y-2 mt-1">
-                    <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.0/MIKA5-0.3.0-linux-x86_64.AppImage"
+                    <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/MIKA5-0.3.1-linux-x86_64.AppImage"
                        class="block w-full bg-[#7C3AED] text-white text-xs font-semibold py-2 rounded-xl text-center hover:brightness-110 transition-all" data-i18n="dl.linux.appimage">
                         AppImage (universal)
                     </a>
                     <div class="flex gap-2">
-                        <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.0/MIKA5-0.3.0-linux-amd64.deb"
+                        <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/MIKA5-0.3.1-linux-amd64.deb"
                            class="flex-1 bg-white/5 border border-white/10 text-[#9CA3AF] text-xs font-semibold py-2 rounded-xl text-center hover:bg-white/10 transition-all">
                             .deb
                         </a>
-                        <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.0/MIKA5-0.3.0-linux-x86_64.rpm"
+                        <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/MIKA5-0.3.1-linux-x86_64.rpm"
                            class="flex-1 bg-white/5 border border-white/10 text-[#9CA3AF] text-xs font-semibold py-2 rounded-xl text-center hover:bg-white/10 transition-all">
                             .rpm
                         </a>
@@ -732,22 +732,22 @@
         <div class="max-w-4xl mx-auto">
             <div class="terminal rounded-xl p-5 text-xs space-y-2">
                 <p class="text-[#4B5563]" data-i18n="dl.verify.comment1"># Verify download integrity</p>
-                <p><span class="prompt">PS&gt;</span> <span class="text-white">Get-FileHash "MIKA5-Setup-0.3.0-win-x64.exe" -Algorithm SHA256</span> <span class="comment" data-i18n="landing.verify.win"># Windows</span></p>
-                <p><span class="prompt">$</span> <span class="text-white">shasum -a 256 MIKA5-0.3.0-mac-arm64.dmg</span> <span class="comment" data-i18n="landing.verify.mac"># macOS</span></p>
-                <p><span class="prompt">$</span> <span class="text-white">sha256sum MIKA5-0.3.0-linux-x86_64.AppImage</span> <span class="comment" data-i18n="landing.verify.linux"># Linux</span></p>
+                <p><span class="prompt">PS&gt;</span> <span class="text-white">Get-FileHash "MIKA5-Setup-0.3.1-win-x64.exe" -Algorithm SHA256</span> <span class="comment" data-i18n="landing.verify.win"># Windows</span></p>
+                <p><span class="prompt">$</span> <span class="text-white">shasum -a 256 MIKA5-0.3.1-mac-arm64.dmg</span> <span class="comment" data-i18n="landing.verify.mac"># macOS</span></p>
+                <p><span class="prompt">$</span> <span class="text-white">sha256sum MIKA5-0.3.1-linux-x86_64.AppImage</span> <span class="comment" data-i18n="landing.verify.linux"># Linux</span></p>
                 <p class="text-[#6B7280]" data-i18n="dl.verify.comment2"># Compare with the checksums published in SHA256SUMS.txt</p>
             </div>
             <p class="text-xs text-[#6B7280] mt-4 leading-relaxed">
                 <span data-i18n="dl.extras.label">Source and verification:</span>
-                <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.0/MIKA5-0.3.0-source.tar.gz" target="_blank" rel="noopener" class="text-[#A78BFA] hover:text-white underline underline-offset-2 transition-colors" data-i18n="dl.extras.source">Corresponding source (.tar.gz)</a>
+                <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/MIKA5-0.3.1-source.tar.gz" target="_blank" rel="noopener" class="text-[#A78BFA] hover:text-white underline underline-offset-2 transition-colors" data-i18n="dl.extras.source">Corresponding source (.tar.gz)</a>
                 <span class="text-[#4B5563]">·</span>
-                <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.0/SHA256SUMS.txt" target="_blank" rel="noopener" class="text-[#A78BFA] hover:text-white underline underline-offset-2 transition-colors">SHA256SUMS.txt</a>
+                <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/SHA256SUMS.txt" target="_blank" rel="noopener" class="text-[#A78BFA] hover:text-white underline underline-offset-2 transition-colors">SHA256SUMS.txt</a>
                 <span class="text-[#4B5563]">·</span>
-                <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.0/BUILDING.md" target="_blank" rel="noopener" class="text-[#A78BFA] hover:text-white underline underline-offset-2 transition-colors">BUILDING.md</a>
+                <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/BUILDING.md" target="_blank" rel="noopener" class="text-[#A78BFA] hover:text-white underline underline-offset-2 transition-colors">BUILDING.md</a>
                 <span class="text-[#4B5563]">·</span>
-                <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.0/COMMUNITY.md" target="_blank" rel="noopener" class="text-[#A78BFA] hover:text-white underline underline-offset-2 transition-colors">COMMUNITY.md</a>
+                <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/COMMUNITY.md" target="_blank" rel="noopener" class="text-[#A78BFA] hover:text-white underline underline-offset-2 transition-colors">COMMUNITY.md</a>
                 <span class="text-[#4B5563]">·</span>
-                <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.0/BUILD-METADATA.json" target="_blank" rel="noopener" class="text-[#A78BFA] hover:text-white underline underline-offset-2 transition-colors">BUILD-METADATA.json</a>
+                <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/BUILD-METADATA.json" target="_blank" rel="noopener" class="text-[#A78BFA] hover:text-white underline underline-offset-2 transition-colors">BUILD-METADATA.json</a>
             </p>
             <p class="text-xs text-[#4B5563] mt-2 leading-relaxed" data-i18n="dl.extras.note">The release publishes 15 assets and SHA256SUMS.txt lists 14 of them: a checksum file cannot contain its own hash. The two macOS .zip builds are published but not linked here, because the .dmg is the recommended download for the same architectures.</p>
         </div>
@@ -810,7 +810,7 @@
                         <div class="step-num rounded-full flex items-center justify-center shrink-0">3</div>
                         <div class="space-y-2">
                             <p class="font-medium" data-i18n="qs.win.s3.title">Install and launch MIKA5</p>
-                            <p class="text-sm text-[#9CA3AF]" data-i18n="qs.win.s3.desc">Run the MIKA5-Setup-0.3.0-win-x64.exe installer, then open MIKA5 from the Start Menu or Desktop shortcut.</p>
+                            <p class="text-sm text-[#9CA3AF]" data-i18n="qs.win.s3.desc">Run the MIKA5-Setup-0.3.1-win-x64.exe installer, then open MIKA5 from the Start Menu or Desktop shortcut.</p>
                         </div>
                     </div>
                 </div>
@@ -912,12 +912,12 @@
                             <p class="font-medium" data-i18n="qs.linux.s3.title">Install MIKA5</p>
                             <div class="terminal rounded-xl p-4 text-xs space-y-1">
                                 <p class="comment" data-i18n="landing.qs.appimageNote"># AppImage (no install needed):</p>
-                                <p><span class="prompt">$</span> chmod +x MIKA5-0.3.0-linux-x86_64.AppImage</p>
-                                <p><span class="prompt">$</span> ./MIKA5-0.3.0-linux-x86_64.AppImage</p>
+                                <p><span class="prompt">$</span> chmod +x MIKA5-0.3.1-linux-x86_64.AppImage</p>
+                                <p><span class="prompt">$</span> ./MIKA5-0.3.1-linux-x86_64.AppImage</p>
                                 <p class="comment" data-i18n="landing.qs.debNote"># Or Debian/Ubuntu:</p>
-                                <p><span class="prompt">$</span> sudo dpkg -i MIKA5-0.3.0-linux-amd64.deb</p>
+                                <p><span class="prompt">$</span> sudo dpkg -i MIKA5-0.3.1-linux-amd64.deb</p>
                                 <p class="comment" data-i18n="landing.qs.rpmNote"># Or Fedora/RHEL:</p>
-                                <p><span class="prompt">$</span> sudo rpm -i MIKA5-0.3.0-linux-x86_64.rpm</p>
+                                <p><span class="prompt">$</span> sudo rpm -i MIKA5-0.3.1-linux-x86_64.rpm</p>
                             </div>
                         </div>
                     </div>
@@ -991,14 +991,14 @@
                 <span data-i18n="cta.github">View on GitHub</span>
             </a>
         </div>
-        <p class="text-sm text-[#6B7280]" data-i18n="cta.tagline">v0.3.0 · Windows · macOS · Linux · Free &amp; Open Source</p>
+        <p class="text-sm text-[#6B7280]" data-i18n="cta.tagline">v0.3.1 · Windows · macOS · Linux · Free &amp; Open Source</p>
     </section>
 
     <!-- ─── NOTIFY PRO ────────────────────────────────────────── -->
     <section class="py-16 text-center">
         <div class="max-w-lg mx-auto p-8 rounded-2xl border border-white/10 bg-[#111827]/60 backdrop-blur space-y-4">
             <h3 class="text-2xl font-heading" data-i18n="notify.title">MIKA5 Pro is in development</h3>
-            <p class="text-sm text-[#9CA3AF]" data-i18n="notify.desc">Team collaboration, cloud sync and advanced RAG are in development. None of them exists in Community v0.3.0. Get notified when Pro launches.</p>
+            <p class="text-sm text-[#9CA3AF]" data-i18n="notify.desc">Team collaboration, cloud sync and advanced RAG are in development. None of them exists in Community v0.3.1. Get notified when Pro launches.</p>
             <form id="notifyForm"
       action="https://buttondown.com/api/emails/embed-subscribe/mika5"
       method="post"
@@ -1037,7 +1037,7 @@
                 MIKA5
             </div>
             <p class="text-xs" data-i18n="footer.tagline">AI on your machine. Under your control.</p>
-            <p class="text-xs text-[#4B5563]" data-i18n="footer.copyright">v0.3.0 · © 2026 MIKA5 · AGPL-3.0</p>
+            <p class="text-xs text-[#4B5563]" data-i18n="footer.copyright">v0.3.1 · © 2026 MIKA5 · AGPL-3.0</p>
         </div>
         <div class="flex flex-col md:flex-row gap-8 text-sm">
             <div class="space-y-2">
@@ -1062,7 +1062,7 @@
                 <p class="text-[#4B5563] text-xs uppercase tracking-widest" data-i18n="footer.legal">Legal</p>
                 <div class="space-y-1.5">
                     <a href="#privacy" class="block hover:text-white transition-colors" data-i18n="footer.privacy">Privacy</a>
-                    <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.0/LICENSE" target="_blank" rel="noopener" class="block hover:text-white transition-colors" data-i18n="footer.license">License (AGPL-3.0)</a>
+                    <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/LICENSE" target="_blank" rel="noopener" class="block hover:text-white transition-colors" data-i18n="footer.license">License (AGPL-3.0)</a>
                     <span class="block" data-i18n="footer.trademark">Trademark</span>
                 </div>
             </div>
@@ -1132,7 +1132,7 @@ const STRINGS = {
     'nav.downloadbtn': 'Download Free',
 
     // Hero
-    'hero.badge': 'v0.3.0 — Windows · macOS · Linux',
+    'hero.badge': 'v0.3.1 — Windows · macOS · Linux',
     'hero.h1a': 'AI on your machine.',
     'hero.h1b': 'Under your control.',
     'hero.subtitle': 'A local-first, multi-model AI workspace with built-in RAG, project organization and optional cloud providers — in English and Spanish. Community is free and AGPL-3.0.',
@@ -1185,15 +1185,15 @@ const STRINGS = {
     // Download
     'dl.title': 'Download MIKA5',
     'dl.subtitle': 'Free. No account. No license key.',
-    // --- new.* (novedades de v0.3.0) ---
-    'new.title': 'What\'s new in v0.3.0',
+    // --- new.* (novedades de v0.3.1) ---
+    'new.title': 'What\'s new in v0.3.1',
     'new.subtitle': 'This release is about the interface and about being explicit: knowing which model answered, what leaves your machine, and where you are working.',
-    'new.header.title': 'Reorganized top bar',
-    'new.header.desc': 'The header separates what you are reading from what you can act on, and no longer mixes both in a single row.',
-    'new.cloud.title': 'One cloud notice, and explicit consent',
-    'new.cloud.desc': 'A single cloud indicator instead of several competing signals. Before the first send, a dialog lists what will leave the device and the authorization can be revoked per provider and project.',
-    'new.context.title': 'Active project and chat, marked',
-    'new.context.desc': 'The sidebar states where you are working, so a message never lands in the wrong project by accident.',
+    'new.header.title': 'Stable providers and model selection',
+    'new.header.desc': 'Provider availability and model selection remain consistent while requests can be cancelled safely.',
+    'new.cloud.title': 'Ollama local and cloud, with explicit consent',
+    'new.cloud.desc': 'Use local or cloud models through Ollama. Cloud requests show privacy notices and require consent for the selected provider, model and data being sent.',
+    'new.context.title': 'Safer documents and image downloads',
+    'new.context.desc': 'Improved PDF extraction and bounded image downloads support legitimate attachments while preserving network and IPC safeguards.',
     'new.actions.title': 'Safer chat actions',
     'new.actions.desc': 'Chat actions are grouped and separated, so deleting is no longer one pixel away from renaming.',
     'new.composer.title': 'Composer aligned with the conversation',
@@ -1211,11 +1211,11 @@ const STRINGS = {
     'new.a11y.title': 'Contrast and accessibility',
     'new.a11y.desc': 'Secondary text, labels and focus states were reworked for contrast, and interactive elements carry accessible names.',
     'new.tests.title': 'Tests that cannot touch your data',
-    'new.tests.desc': 'An engineering detail rather than a feature: the Electron test suite runs against its own temporary profile, so running the tests can never read or delete a real installation database.',
+    'new.tests.desc': 'An engineering detail rather than a feature: nine gates validate Windows and Linux, native jobs verify macOS packages, and disposable Windows runners test installation and upgrades with synthetic data.',
     'new.more': 'Architecture and security detail in the',
     'new.more.link': 'White Paper',
     // --- dl.*.warning / dl.extras.* (avisos por plataforma y enlaces secundarios) ---
-    'dl.win.warning': 'Not signed with Authenticode: SmartScreen may warn on first run. Check that the file name carries 0.3.0 and compare its SHA-256 against SHA256SUMS.txt before installing.',
+    'dl.win.warning': 'Not signed with Authenticode: SmartScreen may warn on first run. Check that the file name carries 0.3.1 and compare its SHA-256 against SHA256SUMS.txt before installing.',
     'dl.mac.warning': 'Not notarized by Apple and not distributed through the App Store. macOS asks for manual authorization on first launch. The .zip builds exist in the release but the .dmg is the recommended download.',
     'dl.linux.warning': 'x86-64 only; no ARM build is published. AppImage runs without installing (chmod +x and launch); .deb is for Debian and Ubuntu; .rpm is for Fedora and RHEL.',
     'dl.extras.label': 'Source and verification:',
@@ -1247,7 +1247,7 @@ const STRINGS = {
     'qs.win.s1.desc': 'Download from ollama.com and install it. It runs a local server at 127.0.0.1:11434.',
     'qs.win.s2.title': 'Pull a model + the embedding model',
     'qs.win.s3.title': 'Install and launch MIKA5',
-    'qs.win.s3.desc': 'Run the MIKA5-Setup-0.3.0-win-x64.exe installer, then open MIKA5 from the Start Menu or Desktop shortcut.',
+    'qs.win.s3.desc': 'Run the MIKA5-Setup-0.3.1-win-x64.exe installer, then open MIKA5 from the Start Menu or Desktop shortcut.',
     'qs.win.req.title': 'System Requirements',
     'qs.win.req.1': 'Windows 10 or 11 (64-bit)',
     'qs.win.req.2': '8 GB RAM minimum (16 GB recommended)',
@@ -1293,11 +1293,11 @@ const STRINGS = {
     'cta.title2': 'your terms.',
     'cta.download': 'Download MIKA5 — Free',
     'cta.github': 'View on GitHub',
-    'cta.tagline': 'v0.3.0 · Windows · macOS · Linux · Free &amp; Open Source',
+    'cta.tagline': 'v0.3.1 · Windows · macOS · Linux · Free &amp; Open Source',
 
     // Footer
     'notify.title': 'MIKA5 Pro is in development',
-    'notify.desc': 'Team collaboration, cloud sync and advanced RAG are in development. None of them exists in Community v0.3.0. Get notified when Pro launches.',
+    'notify.desc': 'Team collaboration, cloud sync and advanced RAG are in development. None of them exists in Community v0.3.1. Get notified when Pro launches.',
     'notify.btn': 'Notify me',
     'notify.privacy': 'No spam. Unsubscribe anytime.',
     'footer.tagline': 'AI on your machine. Under your control.',
@@ -1311,7 +1311,7 @@ const STRINGS = {
     'footer.whitepaper': 'White Paper',
     'footer.releases': 'Releases',
     'footer.issues': 'Issues',
-    'footer.copyright': 'v0.3.0 · © 2026 MIKA5 · AGPL-3.0',
+    'footer.copyright': 'v0.3.1 · © 2026 MIKA5 · AGPL-3.0',
     'footer.privacy': 'Privacy',
     'footer.license': 'License (AGPL-3.0)',
     'footer.trademark': 'Trademark'
@@ -1375,7 +1375,7 @@ const STRINGS = {
     'nav.downloadbtn': 'Descargar Gratis',
 
     // Hero
-    'hero.badge': 'v0.3.0 — Windows · macOS · Linux',
+    'hero.badge': 'v0.3.1 — Windows · macOS · Linux',
     'hero.h1a': 'IA en tu máquina.',
     'hero.h1b': 'Bajo tu control.',
     'hero.subtitle': 'Un espacio de trabajo de IA local-first y multimodelo, con RAG integrado, organización por proyectos y proveedores cloud opcionales — en español e inglés. Community es gratis y AGPL-3.0.',
@@ -1428,15 +1428,15 @@ const STRINGS = {
     // Download
     'dl.title': 'Descargar MIKA5',
     'dl.subtitle': 'Gratis. Sin cuenta. Sin clave de licencia.',
-    // --- new.* (novedades de v0.3.0) ---
-    'new.title': 'Novedades de v0.3.0',
+    // --- new.* (novedades de v0.3.1) ---
+    'new.title': 'Novedades de v0.3.1',
     'new.subtitle': 'Esta versión va de la interfaz y de ser explícita: saber qué modelo respondió, qué sale de tu equipo y dónde estás trabajando.',
-    'new.header.title': 'Barra superior reorganizada',
-    'new.header.desc': 'La cabecera separa lo que estás leyendo de aquello sobre lo que puedes actuar, y ya no mezcla ambas cosas en una sola fila.',
-    'new.cloud.title': 'Un único aviso cloud, con consentimiento explícito',
-    'new.cloud.desc': 'Un solo indicador de cloud en lugar de varias señales que competían entre sí. Antes del primer envío, un diálogo enumera qué va a salir del dispositivo, y la autorización se puede revocar por proveedor y proyecto.',
-    'new.context.title': 'Proyecto y chat activos, señalados',
-    'new.context.desc': 'La barra lateral indica dónde estás trabajando, así que ningún mensaje acaba por descuido en el proyecto equivocado.',
+    'new.header.title': 'Proveedores y selección de modelos estables',
+    'new.header.desc': 'La disponibilidad de proveedores y la selección de modelos se mantienen coherentes, con cancelación segura de solicitudes.',
+    'new.cloud.title': 'Ollama local y cloud, con consentimiento explícito',
+    'new.cloud.desc': 'Usa modelos locales o cloud mediante Ollama. Las solicitudes cloud muestran avisos de privacidad y requieren consentimiento para el proveedor, modelo y datos enviados.',
+    'new.context.title': 'Documentos y descargas de imágenes más seguros',
+    'new.context.desc': 'La extracción PDF y las descargas de imágenes con límites admiten adjuntos legítimos y conservan las protecciones de red e IPC.',
     'new.actions.title': 'Acciones de chat más seguras',
     'new.actions.desc': 'Las acciones del chat están agrupadas y separadas: borrar ya no queda a un píxel de renombrar.',
     'new.composer.title': 'Compositor alineado con la conversación',
@@ -1454,11 +1454,11 @@ const STRINGS = {
     'new.a11y.title': 'Contraste y accesibilidad',
     'new.a11y.desc': 'Se han rehecho el texto secundario, las etiquetas y los estados de foco para mejorar el contraste, y los elementos interactivos llevan nombre accesible.',
     'new.tests.title': 'Pruebas que no pueden tocar tus datos',
-    'new.tests.desc': 'Un detalle de ingeniería más que una función: la suite de pruebas de Electron corre contra su propio perfil temporal, así que ejecutar las pruebas no puede leer ni borrar la base de datos de una instalación real.',
+    'new.tests.desc': 'Un detalle de ingeniería más que una función: nueve gates validan Windows y Linux, jobs nativos verifican macOS y runners Windows desechables prueban instalación y actualización con datos ficticios.',
     'new.more': 'Detalle de arquitectura y seguridad en el',
     'new.more.link': 'White Paper',
     // --- dl.*.warning / dl.extras.* (avisos por plataforma y enlaces secundarios) ---
-    'dl.win.warning': 'Sin firma Authenticode: SmartScreen puede avisar en la primera ejecución. Comprueba que el nombre del archivo lleva 0.3.0 y compara su SHA-256 contra SHA256SUMS.txt antes de instalar.',
+    'dl.win.warning': 'Sin firma Authenticode: SmartScreen puede avisar en la primera ejecución. Comprueba que el nombre del archivo lleva 0.3.1 y compara su SHA-256 contra SHA256SUMS.txt antes de instalar.',
     'dl.mac.warning': 'Sin notarizar por Apple y no distribuido por la App Store. macOS pide autorización manual en el primer arranque. Las compilaciones .zip existen en la release, pero el .dmg es la descarga recomendada.',
     'dl.linux.warning': 'Sólo x86-64; no se publica compilación para ARM. AppImage se ejecuta sin instalar (chmod +x y lanzar); el .deb es para Debian y Ubuntu; el .rpm para Fedora y RHEL.',
     'dl.extras.label': 'Fuente y verificación:',
@@ -1490,7 +1490,7 @@ const STRINGS = {
     'qs.win.s1.desc': 'Descarga desde ollama.com e instálalo. Ejecuta un servidor local en 127.0.0.1:11434.',
     'qs.win.s2.title': 'Descargar un modelo + el modelo de embeddings',
     'qs.win.s3.title': 'Instalar e iniciar MIKA5',
-    'qs.win.s3.desc': 'Ejecuta el instalador MIKA5-Setup-0.3.0-win-x64.exe, luego abre MIKA5 desde el Menú de Inicio o el acceso directo del escritorio.',
+    'qs.win.s3.desc': 'Ejecuta el instalador MIKA5-Setup-0.3.1-win-x64.exe, luego abre MIKA5 desde el Menú de Inicio o el acceso directo del escritorio.',
     'qs.win.req.title': 'Requisitos del sistema',
     'qs.win.req.1': 'Windows 10 u 11 (64-bit)',
     'qs.win.req.2': '8 GB RAM mínimo (16 GB recomendado)',
@@ -1536,11 +1536,11 @@ const STRINGS = {
     'cta.title2': 'tus términos.',
     'cta.download': 'Descargar MIKA5 — Gratis',
     'cta.github': 'Ver en GitHub',
-    'cta.tagline': 'v0.3.0 · Windows · macOS · Linux · Gratis y Open Source',
+    'cta.tagline': 'v0.3.1 · Windows · macOS · Linux · Gratis y Open Source',
 
     // Footer
     'notify.title': 'MIKA5 Pro está en desarrollo',
-    'notify.desc': 'La colaboración en equipo, la sincronización en la nube y el RAG avanzado están en desarrollo. Nada de eso existe en Community v0.3.0. Recibe un aviso cuando se lance Pro.',
+    'notify.desc': 'La colaboración en equipo, la sincronización en la nube y el RAG avanzado están en desarrollo. Nada de eso existe en Community v0.3.1. Recibe un aviso cuando se lance Pro.',
     'notify.btn': 'Notificarme',
     'notify.privacy': 'Sin spam. Cancela cuando quieras.',
     'footer.tagline': 'IA en tu máquina. Bajo tu control.',
@@ -1554,7 +1554,7 @@ const STRINGS = {
     'footer.whitepaper': 'White Paper',
     'footer.releases': 'Versiones',
     'footer.issues': 'Problemas',
-    'footer.copyright': 'v0.3.0 · © 2026 MIKA5 · AGPL-3.0',
+    'footer.copyright': 'v0.3.1 · © 2026 MIKA5 · AGPL-3.0',
     'footer.privacy': 'Privacidad',
     'footer.license': 'Licencia (AGPL-3.0)',
     'footer.trademark': 'Marca Registrada'

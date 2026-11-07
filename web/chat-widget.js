@@ -9,8 +9,8 @@
       keywords: { en: ['what', 'mika5', 'about', 'overview', 'explain'], es: ['que', 'mika5', 'sobre', 'descripcion', 'explicar'] },
       question: { en: 'What is MIKA5?', es: 'Que es MIKA5?' },
       answer: {
-        en: 'MIKA5 is a free, open-source AI desktop app that runs 100% on your computer. It connects to Ollama for local AI models, includes a built-in RAG engine, project organization, vision model support, and optional cloud providers. Licensed under AGPL-3.0.',
-        es: 'MIKA5 es una app de escritorio de IA gratuita y de codigo abierto que funciona 100% en tu computadora. Se conecta a Ollama para modelos locales, incluye motor RAG integrado, organizacion por proyectos, soporte de modelos de vision y proveedores cloud opcionales. Licencia AGPL-3.0.'
+        en: "MIKA5 Community 0.3.1 is a free AGPL-3.0 desktop application with projects, chats and a local knowledge base. It supports local inference and optional cloud providers, including Ollama cloud models with privacy notices and consent.",
+        es: "MIKA5 Community 0.3.1 es una aplicación de escritorio gratuita bajo AGPL-3.0, con proyectos, chats y conocimiento local. Admite inferencia local y proveedores cloud opcionales, incluidos modelos cloud de Ollama con avisos de privacidad y consentimiento."
       }
     },
     {
@@ -19,8 +19,8 @@
       keywords: { en: ['free', 'cost', 'price', 'pay', 'subscription', 'license'], es: ['gratis', 'gratuito', 'costo', 'precio', 'pagar', 'suscripcion', 'licencia'] },
       question: { en: 'Is MIKA5 free?', es: 'MIKA5 es gratis?' },
       answer: {
-        en: 'Yes! MIKA5 is 100% free with no subscriptions, no license key, and no hidden costs. It is open-source under the AGPL-3.0 license.',
-        es: 'Si! MIKA5 es 100% gratuito, sin suscripciones, sin clave de licencia y sin costos ocultos. Es open-source bajo licencia AGPL-3.0.'
+        en: "MIKA5 Community is free and open-source under AGPL-3.0. Optional cloud providers can charge for their services; local hardware and model requirements still apply.",
+        es: "MIKA5 Community es gratuita y de código abierto bajo AGPL-3.0. Los proveedores cloud opcionales pueden cobrar por sus servicios; siguen aplicándose los requisitos de hardware y modelos locales."
       }
     },
     {
@@ -69,8 +69,8 @@
       keywords: { en: ['vision', 'image', 'photo', 'picture', 'llava', 'see', 'visual', 'ocr'], es: ['vision', 'imagen', 'foto', 'visual', 'llava', 'ver', 'ocr'] },
       question: { en: 'Does MIKA5 support vision models?', es: 'MIKA5 soporta modelos de vision?' },
       answer: {
-        en: 'Yes! Attach images to any message. MIKA5 auto-detects vision-capable models (LLaVA, GLM-OCR, Gemma3, Qwen2.5-VL, GPT-4o, Claude) and warns you when the active model cannot process images.',
-        es: 'Si! Adjunta imagenes a cualquier mensaje. MIKA5 detecta automaticamente modelos con vision (LLaVA, GLM-OCR, Gemma3, Qwen2.5-VL, GPT-4o, Claude) y te avisa cuando el modelo activo no puede procesar imagenes.'
+        en: "Image input is available when the provider and selected model declare support. MIKA5 checks capabilities and shows an explicit error when image input is unsupported or unverified.",
+        es: "La entrada de imágenes está disponible cuando el proveedor y el modelo seleccionado declaran soporte. MIKA5 comprueba capacidades y muestra un error explícito cuando no hay soporte o no está verificado."
       }
     },
     {
@@ -79,8 +79,8 @@
       keywords: { en: ['cloud', 'openai', 'anthropic', 'groq', 'moonshot', 'gpt', 'claude', 'api', 'provider', 'online'], es: ['cloud', 'nube', 'openai', 'anthropic', 'groq', 'moonshot', 'gpt', 'claude', 'api', 'proveedor', 'online'] },
       question: { en: 'Can I use cloud AI providers?', es: 'Puedo usar proveedores de IA en la nube?' },
       answer: {
-        en: 'Yes, optionally. MIKA5 supports OpenAI, Anthropic, Groq, and Moonshot. API keys are encrypted with AES-256-GCM. A privacy indicator always shows when cloud is active. Cloud is never required - MIKA5 works fully offline with Ollama.',
-        es: 'Si, opcionalmente. MIKA5 soporta OpenAI, Anthropic, Groq y Moonshot. Las claves API se cifran con AES-256-GCM. Un indicador de privacidad siempre muestra cuando la nube esta activa. La nube nunca es obligatoria - MIKA5 funciona 100% offline con Ollama.'
+        en: "Optional cloud providers include OpenAI, Anthropic, Groq, Moonshot and Alibaba Cloud Model Studio. Ollama also supports cloud models. MIKA5 displays cloud privacy notices and requires explicit consent for the selected provider, model and data. Fully local inference requires a locally installed model.",
+        es: "Los proveedores cloud opcionales incluyen OpenAI, Anthropic, Groq, Moonshot y Alibaba Cloud Model Studio. Ollama también admite modelos cloud. MIKA5 muestra avisos de privacidad y exige consentimiento explícito para el proveedor, modelo y datos seleccionados. La inferencia totalmente local requiere un modelo instalado localmente."
       }
     },
     {
@@ -109,8 +109,8 @@
       keywords: { en: ['privacy', 'telemetry', 'tracking', 'data', 'collect', 'spy', 'safe', 'secure'], es: ['privacidad', 'telemetria', 'rastreo', 'datos', 'recopilar', 'seguro', 'seguridad', 'espiar'] },
       question: { en: 'Does MIKA5 collect any data?', es: 'MIKA5 recopila datos?' },
       answer: {
-        en: 'No. MIKA5 has zero telemetry, zero tracking, and zero data collection. All conversations, documents, and settings stay on your machine in a local SQLite database. Nothing is ever sent anywhere unless you explicitly enable a cloud provider.',
-        es: 'No. MIKA5 tiene cero telemetria, cero rastreo y cero recopilacion de datos. Todas las conversaciones, documentos y configuraciones permanecen en tu maquina en una base de datos SQLite local. Nada se envia a ningun lado a menos que actives explicitamente un proveedor cloud.'
+        en: "Community has no MIKA5 telemetry or account service. Conversations and knowledge are stored locally. Cloud requests, including Ollama cloud models, send the data listed in the consent dialog outside the device. Choose locally installed models for local inference.",
+        es: "Community no tiene telemetría ni servicio de cuentas de MIKA5. Las conversaciones y el conocimiento se almacenan localmente. Las solicitudes cloud, incluidos modelos cloud de Ollama, envían fuera del dispositivo los datos enumerados en el consentimiento. Elige modelos instalados localmente para inferencia local."
       }
     },
     {
@@ -119,8 +119,8 @@
       keywords: { en: ['encrypt', 'aes', 'key', 'credential', 'secure', 'storage', 'password'], es: ['cifrar', 'cifrado', 'aes', 'clave', 'credencial', 'seguro', 'almacenamiento', 'contrasena'] },
       question: { en: 'How are API keys stored?', es: 'Como se almacenan las claves API?' },
       answer: {
-        en: 'API keys are encrypted with AES-256-GCM using Electron safeStorage (OS credential store). PII in messages sent to cloud providers is sanitized: emails, phone numbers, and IDs are replaced with tokens.',
-        es: 'Las claves API se cifran con AES-256-GCM usando Electron safeStorage (almacen de credenciales del SO). La informacion personal en mensajes enviados a proveedores cloud se sanitiza: emails, telefonos e IDs se reemplazan con tokens.'
+        en: "Provider credentials are encrypted locally. Automatic PII redaction is disabled: do not assume that emails, phone numbers or identifiers are removed from a cloud request. Review the data and consent before sending.",
+        es: "Las credenciales de proveedores se cifran localmente. La redacción automática de datos personales está desactivada: no asumas que se eliminan emails, teléfonos o identificadores de una solicitud cloud. Revisa los datos y el consentimiento antes de enviar."
       }
     },
     {
@@ -149,8 +149,8 @@
       keywords: { en: ['recommend', 'model', 'best', 'which', 'choose', 'suggest', 'good'], es: ['recomendar', 'modelo', 'mejor', 'cual', 'elegir', 'sugerir', 'bueno'] },
       question: { en: 'Which models do you recommend?', es: 'Que modelos recomiendas?' },
       answer: {
-        en: 'Depends on your RAM:\n- 8 GB: Qwen2.5:3B, Phi-4-mini, Llama3.2:3B\n- 16 GB: Llama3.2:8B, Mistral:7B, Gemma3:12B, Qwen2.5:7B\n- 32 GB+: Llama3.3:70B, DeepSeek-R1, Qwen2.5:32B\n\nFor coding: Qwen2.5-Coder:7B. Always install nomic-embed-text for RAG.',
-        es: 'Depende de tu RAM:\n- 8 GB: Qwen2.5:3B, Phi-4-mini, Llama3.2:3B\n- 16 GB: Llama3.2:8B, Mistral:7B, Gemma3:12B, Qwen2.5:7B\n- 32 GB+: Llama3.3:70B, DeepSeek-R1, Qwen2.5:32B\n\nPara codigo: Qwen2.5-Coder:7B. Siempre instala nomic-embed-text para RAG.'
+        en: "Use the model guide at https://mika5.xyz/models.html to compare model sizes and hardware requirements. Availability depends on your installed models or cloud account. Local knowledge indexing uses nomic-embed-text by default.",
+        es: "Consulta https://mika5.xyz/models.html para comparar tamaños y requisitos de hardware. La disponibilidad depende de los modelos instalados o de tu cuenta cloud. La indexación local usa nomic-embed-text por defecto."
       }
     },
     {
@@ -169,8 +169,8 @@
       keywords: { en: ['code', 'coding', 'programming', 'developer', 'coder'], es: ['codigo', 'codificar', 'programacion', 'desarrollador', 'coder', 'programar'] },
       question: { en: 'Best model for coding?', es: 'Mejor modelo para programar?' },
       answer: {
-        en: 'Qwen2.5-Coder:7B is the top recommendation for coding. It achieves the highest coding benchmarks among 7B models. For lighter setups (8 GB RAM), try DeepSeek-Coder-V2-Lite.',
-        es: 'Qwen2.5-Coder:7B es la mejor recomendacion para programar. Logra los benchmarks de codigo mas altos entre modelos de 7B. Para equipos mas ligeros (8 GB RAM), prueba DeepSeek-Coder-V2-Lite.'
+        en: "See https://mika5.xyz/models.html for coding model options and hardware requirements. Select a model available in your runtime or provider catalogue; the guide distinguishes verified references from editorial suggestions.",
+        es: "Consulta https://mika5.xyz/models.html para ver opciones de programación y requisitos de hardware. Selecciona un modelo disponible en tu runtime o catálogo del proveedor; la guía distingue referencias verificadas y sugerencias editoriales."
       }
     },
     {
@@ -179,8 +179,8 @@
       keywords: { en: ['download', 'get', 'install', 'mika5', 'where', 'link'], es: ['descargar', 'obtener', 'instalar', 'mika5', 'donde', 'enlace', 'link'] },
       question: { en: 'Where can I download MIKA5?', es: 'Donde puedo descargar MIKA5?' },
       answer: {
-        en: 'Download MIKA5 from GitHub Releases:\nhttps://github.com/mika5app/mika5-releases/releases\n\nAvailable for Windows (.exe installer + portable), macOS (DMG for Intel and Apple Silicon), and Linux (AppImage, .deb, .rpm).',
-        es: 'Descarga MIKA5 desde GitHub Releases:\nhttps://github.com/mika5app/mika5-releases/releases\n\nDisponible para Windows (.exe instalador + portable), macOS (DMG para Intel y Apple Silicon), y Linux (AppImage, .deb, .rpm).'
+        en: 'Download MIKA5 from GitHub Releases:\nhttps://github.com/mika5app/mika5-releases/releases/tag/v0.3.1\n\nAvailable for Windows (.exe installer + portable), macOS (DMG for Intel and Apple Silicon), and Linux (AppImage, .deb, .rpm).',
+        es: 'Descarga MIKA5 desde GitHub Releases:\nhttps://github.com/mika5app/mika5-releases/releases/tag/v0.3.1\n\nDisponible para Windows (.exe instalador + portable), macOS (DMG para Intel y Apple Silicon), y Linux (AppImage, .deb, .rpm).'
       }
     },
     {
