@@ -1,0 +1,19 @@
+name: Canonical integration (no publishing)
+
+on:
+  push:
+    branches: ['integration/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mika5-integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  canonical:
+    uses: ./.github/workflows/_canonical.yml
+    with:
+      force-package: true

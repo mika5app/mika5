@@ -19,128 +19,14 @@ concurrency:
   cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
 jobs:
-  validate:
-    name: Validate Community source
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+  canonical:
+    uses: ./.github/workflows/_canonical.yml
+    with:
+      force-package: ${{ github.ref_type == 'tag' }}
 
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - name: Validate release metadata
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          VERSION="$(node -p "require('./package.json').version")"
-
-          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Invalid package version: $VERSION"
-            exit 1
-          fi
-
-          test -s LICENSE
-          test -s BUILDING.md
-          test -s COMMUNITY.md
-          test -s TRADEMARK.md
-          test -s SECURITY.md
-
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            TAG="${GITHUB_REF_NAME}"
-
-            if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              echo "Invalid release tag: $TAG"
-              exit 1
-            fi
-
-            if [[ "${TAG#v}" != "$VERSION" ]]; then
-              echo "Tag $TAG does not match package version $VERSION"
-              exit 1
-            fi
-          fi
-
-      - name: Install dependencies
-        run: npm ci
-
-  quality-gates:
-    name: Quality gates (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
-
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      # Electron abre una BrowserWindow en electron-security y en la suite de
-      # integración del renderer, así que en Linux necesita display virtual.
-      # En Windows el runner ya tiene sesión gráfica.
-      - name: Install virtual display for Electron tests
-        if: runner.os == 'Linux'
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends xvfb
-
-      - name: Run complete gate battery (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        env:
-          MIKA5_ELECTRON_ARGS: --no-sandbox
-        run: xvfb-run -a npm run test:all
-
-      # Sin normalizar finales de línea a propósito: el checkout de Windows
-      # materializa CRLF y la batería tiene que pasar tal cual.
-      - name: Run complete gate battery (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: npm run test:all
-
-      # Sin esto, un gate en rojo sólo deja las 20 últimas líneas que imprime
-      # el script: 40 fallos se diagnostican a ciegas. Los logs completos viven
-      # en .gate-logs/ y desaparecen con el runner.
-      - name: Upload gate logs
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gate-logs-${{ matrix.os }}
-          path: .gate-logs/
-          retention-days: 7
-          if-no-files-found: warn
-          # .gate-logs empieza por punto y upload-artifact lo trata como oculto.
-          include-hidden-files: true
-
-      - name: Check whitespace errors
-        shell: bash
-        run: git diff --check
   prepare-release:
     name: Prepare public draft release
-    needs:
-      - validate
-      - quality-gates
+    needs: canonical
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -185,9 +71,9 @@ jobs:
 
           ## Runtime requirements
 
-          - Ollama running locally at http://127.0.0.1:11434
-          - Embedding model: nomic-embed-text
-          - At least one compatible chat model
+          - A configured AI provider: Ollama (local or cloud models), llama.cpp, or an optional cloud provider
+          - For local document indexing: Ollama with an embedding model (default: nomic-embed-text)
+          - Cloud requests retain their privacy notices and consent
 
           ## macOS notice
 
@@ -224,187 +110,9 @@ jobs:
               --notes-file release-notes.md
           fi
 
-  build-windows:
-    name: Windows x64
-    needs: prepare-release
-    if: github.ref_type == 'tag'
-    runs-on: windows-latest
-    timeout-minutes: 45
-    env:
-      GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
-      RELEASES_REPO: ${{ vars.RELEASES_REPO }}
-      TAG: ${{ github.ref_name }}
-
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build Windows packages
-        run: npm run build:win -- --publish never
-
-      - name: Verify and upload Windows packages
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $version = node -p "require('./package.json').version"
-
-          $files = @(
-            "dist/MIKA5-Setup-$version-win-x64.exe",
-            "dist/MIKA5-Portable-$version-win-x64.exe"
-          )
-
-          foreach ($file in $files) {
-            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
-              throw "Missing expected package: $file"
-            }
-
-            if ((Get-Item -LiteralPath $file).Length -le 0) {
-              throw "Empty package: $file"
-            }
-          }
-
-          gh release upload $env:TAG @files `
-            --repo $env:RELEASES_REPO `
-            --clobber
-
-  build-macos:
-    name: macOS Intel and Apple Silicon
-    needs: prepare-release
-    if: github.ref_type == 'tag'
-    runs-on: macos-15-intel
-    timeout-minutes: 90
-    env:
-      GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
-      RELEASES_REPO: ${{ vars.RELEASES_REPO }}
-      TAG: ${{ github.ref_name }}
-      CSC_IDENTITY_AUTO_DISCOVERY: false
-
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - name: Generate macOS icon
-        run: bash scripts/gen-icns.sh
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Rebuild native modules
-        run: npx electron-builder install-app-deps
-
-      # Las dos arquitecturas se piden por la CLI, no por electron-builder.json:
-      # `mac.target` ya no declara `arch`, y sin flag electron-builder construye
-      # sólo la del host — x64 en este runner — así que el paso siguiente no
-      # encontraría los artefactos arm64 que exige.
-      - name: Build macOS packages
-        run: npm run build:mac -- --x64 --arm64 --publish never
-
-      - name: Verify and upload macOS packages
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          VERSION="$(node -p "require('./package.json').version")"
-
-          FILES=(
-            "dist/MIKA5-${VERSION}-mac-x64.dmg"
-            "dist/MIKA5-${VERSION}-mac-arm64.dmg"
-            "dist/MIKA5-${VERSION}-mac-x64.zip"
-            "dist/MIKA5-${VERSION}-mac-arm64.zip"
-          )
-
-          for FILE in "${FILES[@]}"; do
-            test -s "$FILE"
-          done
-
-          gh release upload "$TAG" "${FILES[@]}" \
-            --repo "$RELEASES_REPO" \
-            --clobber
-
-  build-linux:
-    name: Linux x64
-    needs: prepare-release
-    if: github.ref_type == 'tag'
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    env:
-      GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
-      RELEASES_REPO: ${{ vars.RELEASES_REPO }}
-      TAG: ${{ github.ref_name }}
-
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - name: Install Linux packaging dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            rpm python3 make g++ libc6-dev
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Rebuild native modules
-        run: npx electron-builder install-app-deps
-
-      - name: Build Linux packages
-        run: npm run build:linux -- --publish never
-
-      - name: Verify and upload Linux packages
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          VERSION="$(node -p "require('./package.json').version")"
-
-          FILES=(
-            "dist/MIKA5-${VERSION}-linux-x86_64.AppImage"
-            "dist/MIKA5-${VERSION}-linux-amd64.deb"
-            "dist/MIKA5-${VERSION}-linux-x86_64.rpm"
-          )
-
-          for FILE in "${FILES[@]}"; do
-            test -s "$FILE"
-          done
-
-          gh release upload "$TAG" "${FILES[@]}" \
-            --repo "$RELEASES_REPO" \
-            --clobber
-
   finalize-release:
     name: Verify and publish Community release
-    needs:
-      - build-windows
-      - build-macos
-      - build-linux
+    needs: [canonical, prepare-release]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -419,6 +127,24 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+
+      - name: Require verified artifact identity
+        env:
+          VERIFIED_ARTIFACT_ID: ${{ needs.canonical.outputs.artifact-id }}
+        run: test -n "$VERIFIED_ARTIFACT_ID"
+
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.canonical.outputs.artifact-id }}
+          merge-multiple: true
+          path: staging
+
+      - name: Verify the downloaded producer proofs again
+        run: node scripts/ci/verify-artifacts.js --dir=staging --commit="$GITHUB_SHA"
 
       - name: Create corresponding source archive
         shell: bash
@@ -460,73 +186,45 @@ jobs:
           }
           EOF
 
-      - name: Upload source and legal files
+      - name: Assemble exact release inventory and checksums
         shell: bash
         run: |
           set -euo pipefail
-
-          VERSION="${TAG#v}"
-
-          gh release upload "$TAG" \
-            "release-assets/MIKA5-${VERSION}-source.tar.gz" \
-            release-assets/BUILD-METADATA.json \
-            LICENSE \
-            BUILDING.md \
-            COMMUNITY.md \
-            --repo "$RELEASES_REPO" \
-            --clobber
-
-      - name: Download and verify every release asset
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          VERSION="${TAG#v}"
-          mkdir -p verify-assets
-
-          gh release download "$TAG" \
-            --repo "$RELEASES_REPO" \
-            --dir verify-assets
-
-          EXPECTED=(
-            "MIKA5-Setup-${VERSION}-win-x64.exe"
-            "MIKA5-Portable-${VERSION}-win-x64.exe"
-            "MIKA5-${VERSION}-mac-x64.dmg"
-            "MIKA5-${VERSION}-mac-arm64.dmg"
-            "MIKA5-${VERSION}-mac-x64.zip"
-            "MIKA5-${VERSION}-mac-arm64.zip"
-            "MIKA5-${VERSION}-linux-x86_64.AppImage"
-            "MIKA5-${VERSION}-linux-amd64.deb"
-            "MIKA5-${VERSION}-linux-x86_64.rpm"
-            "MIKA5-${VERSION}-source.tar.gz"
-            "LICENSE"
-            "BUILDING.md"
-            "COMMUNITY.md"
-            "BUILD-METADATA.json"
+          node - <<'NODE'
+          const fs = require('fs'), path = require('path');
+          const { construirManifiesto } = require('./scripts/ci/artifact-manifest');
+          const manifest = construirManifiesto({ commit: process.env.GITHUB_SHA });
+          for (const item of manifest.artifacts) {
+            fs.copyFileSync(path.join('staging', item.producer, item.name), path.join('release-assets', item.name), fs.constants.COPYFILE_EXCL);
+          }
+          for (const name of ['LICENSE', 'BUILDING.md', 'COMMUNITY.md']) fs.copyFileSync(name, path.join('release-assets', name), fs.constants.COPYFILE_EXCL);
+          NODE
+          (
+            cd release-assets
+            sha256sum -- * > ../SHA256SUMS.txt
           )
+          mv SHA256SUMS.txt release-assets/SHA256SUMS.txt
 
-          for FILE in "${EXPECTED[@]}"; do
-            if [[ ! -s "verify-assets/$FILE" ]]; then
-              echo "Missing or empty release asset: $FILE"
-              exit 1
-            fi
-          done
+      - name: Upload verified release files
+        shell: bash
+        run: gh release upload "$TAG" release-assets/* --repo "$RELEASES_REPO" --clobber
 
+      - name: Verify uploaded bytes and inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --repo "$RELEASES_REPO" --dir verify-assets
+          node - <<'NODE'
+          const fs = require('fs');
+          const expected = fs.readdirSync('release-assets').sort();
+          const actual = fs.readdirSync('verify-assets').sort();
+          if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error('Unexpected public release inventory');
+          NODE
+          cmp release-assets/SHA256SUMS.txt verify-assets/SHA256SUMS.txt
           (
             cd verify-assets
-            sha256sum "${EXPECTED[@]}" > ../SHA256SUMS.txt
+            sha256sum --check ../release-assets/SHA256SUMS.txt
           )
-
-          test -s SHA256SUMS.txt
-
-      - name: Upload checksums
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          gh release upload "$TAG" SHA256SUMS.txt \
-            --repo "$RELEASES_REPO" \
-            --clobber
 
       - name: Publish verified release
         shell: bash

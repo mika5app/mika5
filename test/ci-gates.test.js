@@ -286,24 +286,27 @@ check(Boolean(workflow.on && workflow.on.pull_request),
 check(workflow.permissions && workflow.permissions.contents === 'read',
   'permisos mínimos: contents: read');
 
-const qg = workflow.jobs['quality-gates'];
+const canonicalWorkflow = yaml.load(fs.readFileSync(path.join(ROOT, '.github/workflows/_canonical.yml'), 'utf8'));
+check(workflow.jobs.canonical.uses === './.github/workflows/_canonical.yml',
+  'build.yml llama al workflow canónico del mismo commit');
+const qg = canonicalWorkflow.jobs['quality-gates'];
 check(Boolean(qg), 'existe el job quality-gates');
 const os = qg && qg.strategy && qg.strategy.matrix && qg.strategy.matrix.os;
 check(Array.isArray(os) && os.includes('ubuntu-latest') && os.includes('windows-latest'),
   'quality-gates cubre ubuntu-latest y windows-latest');
 
 const dependeDeGates = nombre => {
-  const necesita = workflow.jobs[nombre] && workflow.jobs[nombre].needs;
+  const necesita = canonicalWorkflow.jobs[nombre] && canonicalWorkflow.jobs[nombre].needs;
   const lista = Array.isArray(necesita) ? necesita : (necesita ? [necesita] : []);
   if (lista.includes('quality-gates')) return true;
   return lista.some(dependeDeGates);
 };
-for (const trabajo of ['build-windows', 'build-macos', 'build-linux']) {
+for (const trabajo of ['package', 'verify-artifacts']) {
   check(dependeDeGates(trabajo),
     `${trabajo} depende de quality-gates (directa o transitivamente)`);
 }
 
-const texto = JSON.stringify(workflow);
+const texto = JSON.stringify([workflow, canonicalWorkflow]);
 check(!texto.includes('continue-on-error'),
   'ningún job usa continue-on-error');
 
@@ -431,7 +434,7 @@ function violacionesEnvNode(wf) {
   return problemas;
 }
 
-const WORKFLOWS_CON_NODE = ['build.yml', 'security-validation.yml'];
+const WORKFLOWS_CON_NODE = ['build.yml', 'security-validation.yml', 'integration.yml', '_canonical.yml'];
 let setupNodeTotal = 0;
 
 for (const nombre of WORKFLOWS_CON_NODE) {
@@ -445,7 +448,8 @@ for (const nombre of WORKFLOWS_CON_NODE) {
   setupNodeTotal += pasos.length;
   // Sin contar cuántos son: la regla vale para los de hoy y para los que se
   // añadan mañana. Lo único que se exige es que haya alguno.
-  check(pasos.length > 0, `${nombre} configura Node en algún job (${pasos.length} pasos setup-node)`);
+  check(pasos.length > 0 || wf.jobs?.canonical?.uses === './.github/workflows/_canonical.yml',
+    `${nombre} configura Node o delega en el workflow canónico (${pasos.length} pasos setup-node)`);
 
   const malSetup = violacionesSetupNode(wf);
   check(malSetup.length === 0,
@@ -561,5 +565,6 @@ check(evaluarRango(NODE_CANONICO, '^1.2.3').soportado === false,
   'y declara no soportado un formato de rango que no sabe evaluar, en vez de aprobarlo');
 
 console.log(`\n${'='.repeat(40)}`);
+require('./canonical-workflow.test');
 console.log(`CI gates tests passed (${passed} comprobaciones)`);
 console.log(`${'='.repeat(40)}`);

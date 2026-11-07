@@ -1,0 +1,280 @@
+name: Canonical validation and packaging
+
+on:
+  workflow_call:
+    inputs:
+      force-package:
+        description: Build all nine artifacts even when packaging infrastructure did not change
+        type: boolean
+        default: false
+    outputs:
+      artifact-id:
+        description: Immutable Actions artifact containing the verified producer directories
+        value: ${{ jobs.verify-artifacts.outputs.artifact-id }}
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      package: ${{ steps.scope.outputs.package }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+      - name: Verify source and isolated cache
+        run: |
+          node scripts/ci/verify-source.js
+          node - <<'NODE'
+          const fs = require('fs'), path = require('path');
+          const cache = path.join(process.env.RUNNER_TEMP, 'electron-cache');
+          if (fs.existsSync(cache)) throw new Error('Electron cache is not empty');
+          fs.appendFileSync(process.env.GITHUB_ENV, `electron_config_cache=${cache}\n`);
+          NODE
+          node --version
+          npm --version
+      - name: Determine packaging scope
+        id: scope
+        env:
+          FORCE_PACKAGE: ${{ inputs.force-package }}
+          GITHUB_EVENT_BEFORE: ${{ github.event.before || github.event.pull_request.base.sha }}
+        run: |
+          if [[ "$FORCE_PACKAGE" == true || "$GITHUB_REF_TYPE" == tag ]]; then
+            REQUIRED=true
+          else
+            REQUIRED="$(node scripts/ci/changed-scope.js --scope=packaging)"
+          fi
+          case "$REQUIRED" in true|false) ;; *) exit 1 ;; esac
+          printf 'package=%s\n' "$REQUIRED" >> "$GITHUB_OUTPUT"
+      - run: npm ci
+      - name: Dependency audit (production and full)
+        run: node scripts/ci/audit.js
+
+  quality-gates:
+    needs: source
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+      - name: Verify source and isolated cache
+        run: |
+          node scripts/ci/verify-source.js
+          node - <<'NODE'
+          const fs = require('fs'), path = require('path');
+          const cache = path.join(process.env.RUNNER_TEMP, 'electron-cache');
+          if (fs.existsSync(cache)) throw new Error('Electron cache is not empty');
+          fs.appendFileSync(process.env.GITHUB_ENV, `electron_config_cache=${cache}\n`);
+          NODE
+      - run: npm ci
+      - name: Install virtual display
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends xvfb
+      - name: Linux GUI gate
+        if: runner.os == 'Linux'
+        env:
+          MIKA5_ELECTRON_ARGS: --no-sandbox
+        run: xvfb-run -a npm run test:gui
+      - name: Linux full gate battery
+        if: runner.os == 'Linux'
+        env:
+          MIKA5_ELECTRON_ARGS: --no-sandbox
+        run: xvfb-run -a npm run test:all
+      - name: Windows full gate battery
+        if: runner.os == 'Windows'
+        run: npm run test:all
+      - run: git diff --check
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: gate-logs-${{ matrix.os }}
+          path: .gate-logs/
+          include-hidden-files: true
+          retention-days: 7
+
+  package:
+    needs: [source, quality-gates]
+    if: needs.source.outputs.package == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - producer: windows-x64
+            os: windows-latest
+            platform: win32
+            arch: x64
+          - producer: macos-x64
+            os: macos-15-intel
+            platform: darwin
+            arch: x64
+          - producer: macos-arm64
+            os: macos-15
+            platform: darwin
+            arch: arm64
+          - producer: linux-x64
+            os: ubuntu-latest
+            platform: linux
+            arch: x64
+    env:
+      PRODUCER: ${{ matrix.producer }}
+      EXPECTED_PLATFORM: ${{ matrix.platform }}
+      EXPECTED_ARCH: ${{ matrix.arch }}
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+      - name: Verify source, native runner and isolated cache
+        run: |
+          node scripts/ci/verify-source.js
+          node - <<'NODE'
+          const fs = require('fs'), path = require('path');
+          if (process.platform !== process.env.EXPECTED_PLATFORM || process.arch !== process.env.EXPECTED_ARCH) throw new Error('Wrong native runner');
+          const cache = path.join(process.env.RUNNER_TEMP, 'electron-cache');
+          if (fs.existsSync(cache)) throw new Error('Electron cache is not empty');
+          fs.appendFileSync(process.env.GITHUB_ENV, `electron_config_cache=${cache}\n`);
+          NODE
+          node --version
+          npm --version
+      - name: Linux packaging tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends rpm fakeroot xvfb libfuse2t64 || \
+          sudo apt-get install -y --no-install-recommends rpm fakeroot xvfb libfuse2
+      - run: npm ci
+      - name: Corrupt cache rejected by official installer
+        if: runner.os == 'Windows'
+        run: node scripts/ci/check-electron-cache.js
+      - name: Generate and verify native macOS icon
+        if: runner.os == 'macOS'
+        run: |
+          rm -rf build/icon.icns build/icon.iconset
+          npm run icons:mac
+          bash scripts/ci/check-icon.sh
+      - name: Build once from clean output
+        run: |
+          rm -rf dist
+          case "$PRODUCER" in
+            windows-x64) npm run build:win -- --x64 --publish never ;;
+            macos-x64|macos-arm64) npm run build:mac -- "--$EXPECTED_ARCH" --publish never ;;
+            linux-x64) npm run build:linux -- --x64 --publish never ;;
+            *) exit 1 ;;
+          esac
+      - name: Verify packaged Windows executable
+        if: runner.os == 'Windows'
+        run: node scripts/verify-packaged-windows.js
+      - name: Verify native macOS package architecture
+        if: runner.os == 'macOS'
+        run: bash scripts/ci/verify-macos-package.sh "$EXPECTED_ARCH" > "$RUNNER_TEMP/detected-architecture.txt"
+      - name: Verify Linux desktop entry and AppImage startup
+        if: runner.os == 'Linux'
+        run: |
+          shopt -s nullglob dotglob
+          DEBS=(dist/*.deb)
+          APPS=(dist/*.AppImage)
+          [[ ${#DEBS[@]} == 1 && ${#APPS[@]} == 1 ]]
+          TEMP="$(mktemp -d "$RUNNER_TEMP/mika5-linux.XXXXXX")"
+          PID=''
+          cleanup() {
+            if [[ -n "$PID" ]]; then
+              kill -- "-$PID" 2>/dev/null || :
+              wait "$PID" 2>/dev/null || :
+            fi
+            rm -rf -- "$TEMP"
+          }
+          trap cleanup EXIT
+          dpkg-deb -x "${DEBS[0]}" "$TEMP/deb"
+          mapfile -d '' -t DESKTOPS < <(find "$TEMP/deb" -type f -name '*.desktop' -print0)
+          [[ ${#DESKTOPS[@]} == 1 ]]
+          grep -qx 'Name=MIKA5' "${DESKTOPS[0]}"
+          grep -q '^Categories=.*Office' "${DESKTOPS[0]}"
+          grep -qx 'StartupWMClass=mika5' "${DESKTOPS[0]}"
+          grep -q '^Keywords=.*Ollama' "${DESKTOPS[0]}"
+          chmod +x "${APPS[0]}"
+          setsid xvfb-run -a "${APPS[0]}" --appimage-extract-and-run --no-sandbox --user-data-dir="$TEMP/profile" &
+          PID=$!
+          for ((i=0; i<60; i++)); do
+            kill -0 "$PID"
+            [[ ! -f "$TEMP/profile/mika5.db" ]] || break
+            sleep 1
+          done
+          test -s "$TEMP/profile/mika5.db"
+          kill -0 "$PID"
+      - name: Stage exact inventory and hash producer artifacts
+        run: |
+          ARGS=("$PRODUCER" dist "$RUNNER_TEMP/staged" "$GITHUB_SHA")
+          if [[ "$EXPECTED_PLATFORM" == darwin ]]; then
+            ARGS+=("$RUNNER_TEMP/detected-architecture.txt")
+          fi
+          node scripts/ci/stage-artifacts.js "${ARGS[@]}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.producer }}
+          path: ${{ runner.temp }}/staged/
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
+  verify-artifacts:
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      artifact-id: ${{ steps.verified.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-x64
+          path: staging/windows-x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-x64
+          path: staging/macos-x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-arm64
+          path: staging/macos-arm64
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-x64
+          path: staging/linux-x64
+      - name: Verify all nine artifacts and architecture proofs
+        run: node scripts/ci/verify-artifacts.js --dir=staging --commit="$GITHUB_SHA"
+      - uses: actions/upload-artifact@v4
+        id: verified
+        with:
+          name: canonical-verified-${{ github.run_attempt }}
+          path: staging/
+          if-no-files-found: error
+          retention-days: 7
