@@ -6,9 +6,10 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const yaml = require('js-yaml');
+const { createPackage, uncache } = require('@electron/asar');
 const { stageArtifacts } = require('../scripts/ci/stage-artifacts');
 const { matchingZips } = require('../scripts/ci/check-electron-cache');
-const { requireIsolatedRunner } = require('../scripts/ci/verify-windows-installation');
+const { requireIsolatedRunner, installedVersion } = require('../scripts/ci/verify-windows-installation');
 const { construirManifiesto, PRODUCTORES } = require('../scripts/ci/artifact-manifest');
 const { verificarStaging } = require('../scripts/ci/verify-artifacts');
 
@@ -159,4 +160,25 @@ try {
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
-console.log('Canonical workflow and artifact fixtures PASS (no native macOS proof)');
+async function verifyReplacedArchive() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'mika5-asar-replacement-'));
+  const source = path.join(temp, 'source');
+  const installed = path.join(temp, 'installed');
+  const archive = path.join(installed, 'resources', 'app.asar');
+  fs.mkdirSync(source);
+  fs.mkdirSync(path.dirname(archive), { recursive: true });
+  try {
+    for (const [version, padding] of [['0.3.1', ''], ['0.3.0', 'baseline'], ['0.3.1', 'upgraded layout']]) {
+      fs.writeFileSync(path.join(source, 'package.json'), JSON.stringify({ version }));
+      if (padding) fs.writeFileSync(path.join(source, 'a-before-package.txt'), padding);
+      await createPackage(source, archive);
+      assert.strictEqual(installedVersion(installed), version, 'Read the replaced archive, not cached file offsets');
+    }
+  } finally {
+    uncache(archive);
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+verifyReplacedArchive().then(() => {
+  console.log('Canonical workflow and artifact fixtures PASS (no native macOS proof)');
+}).catch(error => { console.error(error); process.exitCode = 1; });

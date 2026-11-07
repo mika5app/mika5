@@ -9,7 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { spawn, execFileSync } = require('child_process');
-const { extractFile } = require('@electron/asar');
+const { extractFile, uncache } = require('@electron/asar');
 const Database = require('better-sqlite3');
 
 const ROOT = path.join(__dirname, '..', '..');
@@ -54,7 +54,11 @@ function install(installer, directory) {
 }
 
 function installedVersion(directory) {
-  return JSON.parse(extractFile(path.join(directory, 'resources', 'app.asar'), 'package.json').toString('utf8')).version;
+  const archive = path.join(directory, 'resources', 'app.asar');
+  // Each installer replaces this path. Cached ASAR offsets belong to the
+  // previous version and can read unrelated bytes from the replacement.
+  uncache(archive);
+  return JSON.parse(extractFile(archive, 'package.json').toString('utf8')).version;
 }
 
 function registration(seedDirectory) {
@@ -284,7 +288,7 @@ async function verify(baseline) {
   }
 }
 
-module.exports = { requireIsolatedRunner };
+module.exports = { requireIsolatedRunner, installedVersion };
 if (require.main === module) {
-  verify(process.argv[2]).catch(error => { console.error(error.message); process.exitCode = 1; });
+  verify(process.argv[2]).catch(error => { console.error(error.stack || error.message); process.exitCode = 1; });
 }
