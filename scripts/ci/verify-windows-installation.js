@@ -16,6 +16,7 @@ const ROOT = path.join(__dirname, '..', '..');
 const BASELINE_VERSION = '0.3.0';
 // Published release asset 500822411; also recorded in v0.3.0/SHA256SUMS.txt.
 const BASELINE_SHA256 = 'c4c34e957342c811cafdcf7f90c066848fe317cf94514bd34309cc6949480b7c';
+const EMPTY_REGISTRATION = { installKey: false, uninstallKey: false, location: null, version: null };
 const PROJECT = '10000000-0000-4000-8000-000000000001';
 const CHAT = '10000000-0000-4000-8000-000000000002';
 const MESSAGE = '10000000-0000-4000-8000-000000000003';
@@ -54,6 +55,44 @@ function install(installer, directory) {
 
 function installedVersion(directory) {
   return JSON.parse(extractFile(path.join(directory, 'resources', 'app.asar'), 'package.json').toString('utf8')).version;
+}
+
+function registration(seedDirectory) {
+  requireIsolatedRunner();
+  // UUID.v5(com.mika5.desktop, electron-builder namespace
+  // 50e065bc-3134-11e6-9bab-38c9862bdaf3), identical in 24.13.3 and 26.18.0.
+  // Read typed registry values as JSON, never localized reg.exe output.
+  const output = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', String.raw`
+    $ErrorActionPreference = 'Stop'
+    $root = [Microsoft.Win32.RegistryKey]::OpenBaseKey('CurrentUser', 'Registry64')
+    $key = 'Software\2bf15273-32aa-5d84-bb24-6d857313ecc7'
+    $install = $root.OpenSubKey($key)
+    $uninstall = $root.OpenSubKey('Software\Microsoft\Windows\CurrentVersion\Uninstall\2bf15273-32aa-5d84-bb24-6d857313ecc7')
+    try {
+      if ($env:MIKA5_QA_SEED_LOCATION) {
+        if ($install -or $uninstall) { throw 'Refusing to replace existing MIKA5 registration' }
+        $install = $root.CreateSubKey($key)
+        $install.SetValue('InstallLocation', $env:MIKA5_QA_SEED_LOCATION, [Microsoft.Win32.RegistryValueKind]::String)
+      }
+      $location = $null; $version = $null
+      if ($install) { $location = $install.GetValue('InstallLocation') }
+      if ($uninstall) { $version = $uninstall.GetValue('DisplayVersion') }
+      @{ installKey = ($null -ne $install); uninstallKey = ($null -ne $uninstall);
+         location = $location; version = $version } | ConvertTo-Json -Compress
+    } finally {
+      if ($install) { $install.Dispose() }
+      if ($uninstall) { $uninstall.Dispose() }
+      $root.Dispose()
+    }
+  `], { env: { ...process.env, MIKA5_QA_SEED_LOCATION: seedDirectory || '' }, encoding: 'utf8', timeout: 10000 });
+  return JSON.parse(output);
+}
+
+function assertRegisteredVersion(version, directory) {
+  const actual = registration();
+  assert(actual.installKey && actual.uninstallKey, 'Installer must create both registration keys');
+  assert.strictEqual(path.relative(actual.location, directory), '', 'Registered installation path differs');
+  assert.strictEqual(actual.version, version, 'Registered version differs');
 }
 
 async function stopApp(child) {
@@ -165,6 +204,7 @@ function snapshot(profile) {
 
 async function verify(baseline) {
   requireIsolatedRunner();
+  assert.deepStrictEqual(registration(), EMPTY_REGISTRATION, 'Pre-existing installation registration');
   const version = require(path.join(ROOT, 'package.json')).version;
   assert.strictEqual(hash(baseline), BASELINE_SHA256, 'Wrong v0.3.0 installer bytes');
   const current = path.join(ROOT, 'dist', `MIKA5-Setup-${version}-win-x64.exe`);
@@ -184,6 +224,7 @@ async function verify(baseline) {
   const check = label => { report.checks.push(label); console.log(`PASS: ${label}`); };
   const assertCurrentFiles = () => {
     assert.strictEqual(installedVersion(directory), version);
+    assertRegisteredVersion(version, directory);
     for (const file of ['MIKA5.exe', 'resources/app.asar', 'resources/app.asar.unpacked/node_modules/better-sqlite3/prebuilds/win32-x64.node']) {
       assert.strictEqual(hash(path.join(directory, file)), hash(path.join(ROOT, 'dist', 'win-unpacked', file)), `Installed bytes differ: ${file}`);
     }
@@ -194,11 +235,20 @@ async function verify(baseline) {
     await launchAndClose(directory, profile);
     check('clean installation, exact packaged bytes and visible window');
     await uninstall(directory);
+    assert.deepStrictEqual(registration(), EMPTY_REGISTRATION, 'Fresh uninstaller left registration');
     check('clean-install uninstaller');
     fs.rmSync(profile, { recursive: true, force: true });
 
+    // 0.3.0's builder 24.13.3 crashes in its default-folder lookup on modern
+    // Windows (electron-builder#8536, fixed upstream in #9564). Prepare only
+    // the owned path, not an uninstall entry or app files; the published old
+    // installer must still install/register itself and run before upgrading.
+    // The current release's clean installation above never uses this setup.
+    assert.deepStrictEqual(registration(directory), { ...EMPTY_REGISTRATION, installKey: true, location: directory });
+    report.baselinePreparation = 'owned InstallLocation only; electron-builder#8536';
     install(baseline, directory);
     assert.strictEqual(installedVersion(directory), BASELINE_VERSION);
+    assertRegisteredVersion(BASELINE_VERSION, directory);
     await launchAndClose(directory, profile);
     seedFixture(profile);
     await launchAndClose(directory, profile);
@@ -214,6 +264,7 @@ async function verify(baseline) {
     assert.deepStrictEqual(snapshot(profile), before);
     check('upgraded data survives another restart');
     await uninstall(directory);
+    assert.deepStrictEqual(registration(), EMPTY_REGISTRATION, 'Upgrade uninstaller left registration');
     assert.deepStrictEqual(snapshot(profile), before);
     check('uninstaller preserves synthetic data in the real AppData location');
     assert.strictEqual(hash(current), currentHash, 'Installer changed during QA');
