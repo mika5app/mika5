@@ -80,7 +80,7 @@ async function run() {
     'ai:get-current-provider': () => ({ id: 'openai', name: 'OpenAI', privacy: 'cloud' }),
     'ai:list-models': () => [{ name: 'gpt-4o', supportsVision: true }],
     'ai:get-capabilities': () => ({ provider: 'openai', chat: true, vision: true }),
-    'ai:resolve-privacy': (_event, params) => ({ privacy: ['local', 'llamacpp'].includes(params.providerId) ? 'private' : 'cloud' }),
+    'ai:resolve-privacy': (_event, params) => ({ privacy: ['local', 'llamacpp', 'bitnet'].includes(params.providerId) ? 'private' : 'cloud' }),
     'ai:resolve-vision': (_event, params = {}) => {
       state.resolveVisionCalls.push({ provider: params.provider, model: params.model });
       return {

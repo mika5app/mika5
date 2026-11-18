@@ -33,7 +33,7 @@ function createDb() {
 
 async function authorize({ providerId, projectId, scope, stored = null, choice = 'once' }) {
   const state = { modals: 0, providerCalls: 0, persisted: null, dbWrites: 0, cleared: false };
-  if (providerId === 'local' || providerId === 'llamacpp') {
+  if (providerId === 'local' || providerId === 'llamacpp' || providerId === 'bitnet') {
     state.providerCalls += 1;
     return state;
   }

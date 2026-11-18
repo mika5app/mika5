@@ -231,12 +231,12 @@ console.log('\n=== 9. Sin carga externa ===');
   check(true, 'el registro no carga módulos, no lee disco y no evalúa texto');
 }
 
-console.log('\n=== 10. Los siete incorporados están registrados ===');
+console.log('\n=== 10. Los ocho incorporados están registrados ===');
 {
-  const IDS = ['local', 'openai', 'anthropic', 'groq', 'moonshot', 'alibaba', 'llamacpp'];
+  const IDS = ['local', 'openai', 'anthropic', 'groq', 'moonshot', 'alibaba', 'llamacpp', 'bitnet'];
   check(JSON.stringify(registroDeProveedores.ids()) === JSON.stringify(IDS),
-    `el registro real trae los siete en orden (${registroDeProveedores.ids().join(', ')})`);
-  check(registroDeProveedores.size === 7, 'y ninguno más');
+    `el registro real trae los ocho en orden (${registroDeProveedores.ids().join(', ')})`);
+  check(registroDeProveedores.size === 8, 'y ninguno más');
 
   for (const id of IDS) {
     const entrada = registroDeProveedores.get(id);

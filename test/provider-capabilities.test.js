@@ -20,7 +20,7 @@ const {
 } = require('../src/main/provider-capabilities');
 const { PROVIDERS } = require('../src/main/ai-providers');
 
-const ALL_PROVIDERS = ['local', 'openai', 'anthropic', 'groq', 'moonshot', 'alibaba', 'llamacpp'];
+const ALL_PROVIDERS = ['local', 'openai', 'anthropic', 'groq', 'moonshot', 'alibaba', 'llamacpp', 'bitnet'];
 const PNG = { mediaType: 'image/png', base64: 'aGVsbG8=' };
 
 // --- 1. Forma del contrato --------------------------------------------------
@@ -119,8 +119,9 @@ for (const providerId of ['groq', 'moonshot']) {
     `${providerId} debe distinguirse de "no soportado": está pendiente de verificar`);
 }
 
-// none (llama.cpp): sin señal fiable del servidor.
+// none (llama.cpp, BitNet): sin señal fiable del servidor.
 assert.equal(resolveVisionSupport({ providerId: 'llamacpp', modelId: 'llava-v1.6' }).supported, false);
+assert.equal(resolveVisionSupport({ providerId: 'bitnet', modelId: 'BitNet-b1.58-2B-4T' }).supported, false);
 
 // Nombres que antes disparaban la heurística del renderer y ya no autorizan nada.
 for (const [providerId, modelId] of [
@@ -147,7 +148,7 @@ assert.deepEqual(
   { supported: true, reason: 'no-images' }
 );
 
-for (const providerId of ['groq', 'moonshot', 'llamacpp']) {
+for (const providerId of ['groq', 'moonshot', 'llamacpp', 'bitnet']) {
   assert.throws(
     () => assertVisionSupported({ providerId, modelId: 'cualquiera', imageCount: 1 }),
     error => {
@@ -214,6 +215,9 @@ async function expectSilentDropIsImpossible(providerId, chatParams) {
   });
   await expectSilentDropIsImpossible('llamacpp', {
     model: 'llava-v1.6', messages: baseMessages, images: [PNG]
+  });
+  await expectSilentDropIsImpossible('bitnet', {
+    model: 'BitNet-b1.58-2B-4T', messages: baseMessages, images: [PNG]
   });
 
   // --- 6. Visión REAL en OpenAI y Anthropic ---------------------------------
@@ -325,6 +329,8 @@ async function expectSilentDropIsImpossible(providerId, chatParams) {
       { choices: [{ message: { content: 'a medias' }, finish_reason: 'length' }] }],
     ['llamacpp', { model: 'local' },
       { choices: [{ message: { content: 'a medias' }, finish_reason: 'length' }] }],
+    ['bitnet', { model: 'local' },
+      { choices: [{ message: { content: 'a medias' }, finish_reason: 'length' }] }],
     ['anthropic', { model: 'claude-3-5-haiku-20241022', apiKey: 'sk-t' },
       { content: [{ type: 'text', text: 'a medias' }], stop_reason: 'max_tokens' }]
   ];
@@ -346,6 +352,64 @@ async function expectSilentDropIsImpossible(providerId, chatParams) {
     assert.equal(out.finishReason, 'length', "Ollama: done_reason 'length' normaliza a 'length'");
   } finally {
     ollamaApi.chat = previousChat;
+  }
+
+  // BitNet: mismo protocolo que llama.cpp, pero su propio puerto y su propia
+  // identidad. Si los dos apuntasen al mismo servidor, la sonda de uno daría
+  // por vivo al otro y una respuesta se atribuiría al proveedor equivocado.
+  {
+    const previousFetch = global.fetch;
+    const urls = [];
+    global.fetch = async (url) => {
+      urls.push(String(url));
+      if (String(url).endsWith('/models')) {
+        return { ok: true, status: 200, json: async () => ({ data: [{ id: 'ggml-model-i2_s.gguf' }] }) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ choices: [{ message: { content: 'hola' }, finish_reason: 'stop' }] })
+      };
+    };
+    const hola = [{ role: 'user', content: 'hola' }];
+    try {
+      const out = await PROVIDERS.bitnet.chat({ model: 'ggml-model-i2_s.gguf', messages: hola });
+      assert.equal(urls[0], 'http://127.0.0.1:8081/v1/chat/completions', 'BitNet habla con el 8081');
+      assert.equal(out.provider, 'bitnet', 'la respuesta se atribuye a BitNet, no a llama.cpp');
+      assert.equal(out.message.content, 'hola');
+      assert.equal(out.finishReason, 'stop');
+
+      const lista = await PROVIDERS.bitnet.listModels();
+      assert.equal(urls[1], 'http://127.0.0.1:8081/v1/models', 'el catálogo de BitNet sale del 8081');
+      assert.deepEqual(lista.models.map(m => m.description), ['BitNet — ggml-model-i2_s.gguf']);
+
+      const llama = await PROVIDERS.llamacpp.chat({ model: 'local', messages: hola });
+      assert.equal(urls[2], 'http://127.0.0.1:8080/v1/chat/completions', 'llama.cpp conserva el 8080');
+      assert.equal(llama.provider, 'llamacpp');
+    } finally {
+      global.fetch = previousFetch;
+    }
+
+    // Sin servidor, cada uno dice cómo arrancar el SUYO. El de llama.cpp no
+    // cambia ni una letra respecto a antes de compartir cliente con BitNet.
+    global.fetch = async () => {
+      throw Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
+    };
+    try {
+      await assert.rejects(PROVIDERS.bitnet.chat({ model: 'm', messages: hola }), error => {
+        assert.equal(error.message,
+          'BitNet no está corriendo. Inicia con: python run_inference_server.py '
+          + '-m models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf --port 8081');
+        return true;
+      });
+      await assert.rejects(PROVIDERS.llamacpp.chat({ model: 'm', messages: hola }), error => {
+        assert.equal(error.message,
+          'llama.cpp no está corriendo. Inicia con: ./server -m modelo.gguf --port 8080');
+        return true;
+      });
+    } finally {
+      global.fetch = previousFetch;
+    }
   }
 
   // Alibaba ya se cubre en alibaba-provider.test.js; aquí solo el mapa.

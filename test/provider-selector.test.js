@@ -418,14 +418,15 @@ async function ejecutar(win) {
       `${p.id} rotula bien su privacidad ("${p.etiqueta}")`);
   }
   const locales = pintados.filter(p => p.id && PROVIDERS[p.id].privacy === 'private').map(p => p.id);
-  check(locales.length === 2 && locales.includes('local') && locales.includes('llamacpp'),
-    `los dos proveedores locales están declarados como tales (${locales.join(',')})`);
+  check(locales.length === 3 && locales.includes('local') && locales.includes('llamacpp')
+    && locales.includes('bitnet'),
+    `los tres proveedores locales están declarados como tales (${locales.join(',')})`);
 
   // --- 4. Selección manual, modelo automático y no-desplazamiento -----------
 
   const traza = await ev(win, `
     const salida = [];
-    for (const objetivo of ['alibaba', 'groq', 'llamacpp', 'openai', 'local']) {
+    for (const objetivo of ['alibaba', 'groq', 'llamacpp', 'bitnet', 'openai', 'local']) {
       await switchProvider(objetivo);
       const actual = await window.mika5.ai.getCurrentProvider();
       salida.push({ pedido: objetivo, activo: actual.id, privacidad: actual.privacy });

@@ -145,7 +145,7 @@ function createDb() {
   });
   assert.equal(getDefaultImageModelForProvider('alibaba'), 'wan2.7-image');
   assert.equal(getDefaultVisionModelForProvider('alibaba'), 'qwen3.7-plus');
-  for (const providerId of ['local', 'openai', 'anthropic', 'groq', 'moonshot', 'llamacpp']) {
+  for (const providerId of ['local', 'openai', 'anthropic', 'groq', 'moonshot', 'llamacpp', 'bitnet']) {
     assert.equal(providerSupportsImageGeneration(providerId), false);
     assert.equal(providerSupportsImageEdit(providerId), false);
     assert.equal(providerSupportsImageVariation(providerId), false);

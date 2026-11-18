@@ -186,6 +186,25 @@ const PROVIDER_CAPABILITIES = {
       configurableModels: false
     },
     vision: { policy: 'none' }
+  },
+
+  bitnet: {
+    label: 'BitNet (Local)',
+    contract: {
+      chat: true,
+      // bitnet.cpp sirve modelos de texto con el mismo `llama-server` que
+      // llama.cpp, que no expone proyector multimodal. Sin señal, no hay visión.
+      vision: false,
+      imageGeneration: false,
+      imageEditing: false,
+      imageVariation: false,
+      toolUse: false,
+      streaming: false,
+      usage: true,
+      finishReason: true,
+      configurableModels: false
+    },
+    vision: { policy: 'none' }
   }
 };
 
@@ -311,7 +330,7 @@ function assertVisionSupported({ providerId, modelId, modelMeta = null, imageCou
 // --- Normalización transversal de la respuesta ------------------------------
 
 const FINISH_REASON_MAP = {
-  // OpenAI-compatible (OpenAI, Groq, Moonshot, llama.cpp)
+  // OpenAI-compatible (OpenAI, Groq, Moonshot, llama.cpp, BitNet)
   stop: 'stop',
   length: 'length',
   tool_calls: 'tool_use',
