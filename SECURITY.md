@@ -4,10 +4,10 @@
 
 | Version | Supported |
 |---------|-----------|
-| 0.3.1 (latest) | Yes |
+| 0.3.2 (latest) | Yes |
 | Earlier releases | No |
 
-Only the latest Community release receives security updates. Install 0.3.1 to use the current provider, IPC, download and packaged-runtime protections.
+Only the latest Community release receives security updates. Install 0.3.2 to use the current provider, IPC, download and packaged-runtime protections.
 
 ## Reporting a Vulnerability
 

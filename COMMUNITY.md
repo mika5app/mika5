@@ -44,15 +44,17 @@ through the public MIKA5 releases repository:
 
 https://github.com/mika5app/mika5-releases
 
-## Current release: 0.3.1
+## Current release: 0.3.2
 
 Download Windows, macOS Intel/Apple Silicon and Linux packages, corresponding
 source and checksums from:
 
-https://github.com/mika5app/mika5-releases/releases/tag/v0.3.1
+https://github.com/mika5app/mika5-releases/releases/tag/v0.3.2
 
-This release updates provider handling, cloud consent, document/image handling
-and native packaging validation. Ollama local and cloud models are supported;
+This release adds BitNet as a local runtime and fixes chat routing in
+conversations that contain images, on top of the provider handling, cloud
+consent, document/image handling and native packaging validation introduced in
+0.3.1. Ollama local and cloud models are supported;
 cloud use retains explicit privacy notices and consent. Pro and Cloud services
 remain future editions, separate from Community.
 

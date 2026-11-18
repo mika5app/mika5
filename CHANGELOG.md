@@ -5,10 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.2] - 2026-11-18
 
 ### Added
 - BitNet (bitnet.cpp) local provider. It talks to the `llama-server` started by `run_inference_server.py` on `127.0.0.1:8081/v1`, a different port from llama.cpp so both can run at once. Private, no API key, no vision.
+
+### Fixed
+- Ordinary messages are no longer blocked in a conversation that holds an image. On providers that cannot generate images, a message was refused with "El proveedor actual no soporta edición o variación de imágenes" for any model; it is now sent as normal chat, and an attached image still goes through the vision check. Common words such as "esta" or "queda" no longer count as image-edit commands.
+- llama.cpp and BitNet: a server that is still loading its model (HTTP 503) is no longer shown as offline, the "not running" hint with the start command now reaches the user, and HTTP errors keep their status code. The start hint names `llama-server`.
 
 ## [0.3.1] - 2026-11-07
 
