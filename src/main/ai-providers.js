@@ -171,8 +171,16 @@ function hasApproximateVisualEditVerb(normalizedText) {
     }
     return row[right.length];
   };
+  // La tolerancia existe para erratas («modfica», «cmabia»), no para palabras
+  // corrientes. Con distancia 2 sobre verbos de cinco letras, «esta» contaba
+  // como «edita» y «queda» como «quita»: cualquier frase normal en un chat con
+  // una imagen se leía como orden de edición. Los verbos cortos admiten una
+  // sola errata, y una palabra de menos de cinco letras nunca es una errata.
   return normalizedText.split(' ').some(token =>
-    token.length >= 4 && targets.some(target => Math.abs(token.length - target.length) <= 2 && distance(token, target) <= 2)
+    token.length >= 5 && targets.some(target => {
+      const tolerancia = target.length <= 5 ? 1 : 2;
+      return Math.abs(token.length - target.length) <= tolerancia && distance(token, target) <= tolerancia;
+    })
   );
 }
 
@@ -1184,6 +1192,20 @@ class AIProviderManager {
       && GENERATIVE_VISUAL_MODES.includes(effectiveIntent)) {
       effectiveIntent = visualContext.hasVisualContext ? 'vision-analysis' : 'normal-chat';
     }
+    // Un proveedor que no genera imágenes no puede editar ni variar ninguna, así
+    // que en él «editar», «variar» o «ambiguo» sólo admiten una lectura: chat.
+    // Antes se bloqueaba el mensaje con «el proveedor no soporta edición», y
+    // como la detección se dispara con cualquier imagen en el chat más una
+    // palabra corriente («esta», «la», «queda»), una conversación normal dejaba
+    // de enviarse en TODOS los proveedores salvo el que sí edita. La imagen
+    // adjunta en el turno sigue viajando por el camino de chat, donde la barrera
+    // de visión decide si el modelo la acepta. Pedir una imagen nueva desde
+    // cero («dibuja un gato») conserva su aviso: ahí la intención es inequívoca.
+    const capabilities = getProviderVisualCapabilities(providerId);
+    if (!capabilities.imageGeneration
+      && ['image-edit', 'image-variation', 'ambiguous-visual', 'image-ambiguous'].includes(effectiveIntent)) {
+      effectiveIntent = 'normal-chat';
+    }
     // El plan corresponde siempre al intent efectivo, nunca al detectado.
     const buildPlan = intent => buildPlanForIntent({
       intent,
@@ -1210,7 +1232,6 @@ class AIProviderManager {
         routed.message = 'No se pudo generar la nueva imagen: falta una imagen de referencia.';
       }
     }
-    const capabilities = getProviderVisualCapabilities(providerId);
     // Cuando análisis y generación coexisten, la petición generativa no se descarta:
     // se conserva como alternativa que solo puede ejecutarse con confirmación explícita
     // del usuario. Aplica tanto si el guard degradó la ruta como si el análisis ya
