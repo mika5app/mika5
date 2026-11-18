@@ -1064,6 +1064,101 @@ console.log('\n=== 16. status() conserva su comportamiento, no sólo su forma ==
     'que es exactamente la distinción que el modelo antiguo no podía expresar');
 }
 
+console.log('\n=== 17. llama-server de punta a punta contra HTTP real (llamacpp y bitnet) ===');
+{
+  // Un servidor HTTP de verdad que imita a `llama-server`: registra cada
+  // petición y responde según la ruta. Nada de stubs de fetch: lo que se
+  // comprueba es la petición que sale por el socket y lo que vuelve por él.
+  const peticiones = [];
+  let guionLlama = {};
+  const llama = http.createServer((req, res) => {
+    let cuerpo = '';
+    req.on('data', c => { cuerpo += c; });
+    req.on('end', () => {
+      peticiones.push({ metodo: req.method, ruta: req.url, cuerpo: cuerpo ? JSON.parse(cuerpo) : null });
+      const r = guionLlama[req.url] || { status: 404, cuerpo: {} };
+      res.writeHead(r.status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(r.cuerpo));
+    });
+  });
+  const puertoLlama = await new Promise(r => llama.listen(0, '127.0.0.1', () => r(llama.address().port)));
+  const BASE_LLAMA = `http://127.0.0.1:${puertoLlama}/v1`;
+
+  for (const id of ['llamacpp', 'bitnet']) {
+    // CONFIG: el adaptador usa su baseUrl, no una ruta fija en otro sitio.
+    // HEALTH + MODEL_SELECTION: forma nueva de /v1/models ({ models, data }).
+    peticiones.length = 0;
+    guionLlama = {
+      '/v1/models': { status: 200, cuerpo: { models: [{ name: 'm.gguf' }], data: [{ id: 'm.gguf' }] } },
+      '/v1/chat/completions': {
+        status: 200,
+        cuerpo: { model: 'm.gguf', choices: [{ message: { content: 'hola' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 } }
+      }
+    };
+    const m = gestor();
+    const d = await conAdaptador(id, { baseUrl: BASE_LLAMA }, () => m.getAvailability(id));
+    check(d.reachable === true && d.ready === true && d.uiState === UI_STATE.CONNECTED,
+      `${id}: servidor vivo con modelos → conectado y listo`);
+    check(d.modelsAvailable === 1, `${id}: lee los ids de data[] aunque el servidor mande también models[]`);
+
+    // REQUEST + RESPONSE: el system llega intacto y primero; el id del modelo
+    // viaja tal cual; la respuesta se normaliza y se atribuye al proveedor.
+    const mensajes = [
+      { role: 'system', content: 'INSTRUCCION-DETECTABLE' },
+      { role: 'user', content: 'hola' }
+    ];
+    const out = await conAdaptador(id, { baseUrl: BASE_LLAMA }, () =>
+      PROVIDERS[id].chat({ model: 'C:\\modelos\\m.gguf', messages: mensajes }));
+    const chat = peticiones.find(p => p.ruta === '/v1/chat/completions');
+    check(chat && chat.metodo === 'POST', `${id}: la petición llega a /v1/chat/completions por POST`);
+    check(chat.cuerpo.model === 'C:\\modelos\\m.gguf', `${id}: el id del modelo viaja sin reescribir`);
+    check(chat.cuerpo.stream === false, `${id}: sin streaming, como declara su contrato`);
+    check(JSON.stringify(chat.cuerpo.messages) === JSON.stringify(mensajes),
+      `${id}: los mensajes, system incluido, llegan intactos y en orden`);
+    check(out.message.content === 'hola' && out.provider === id && out.finishReason === 'stop'
+      && out.usage && out.usage.totalTokens === 4, `${id}: respuesta normalizada y atribuida a ${id}`);
+
+    // HEALTH con el servidor vivo pero cargando el modelo (503). Antes
+    // `status()` pasaba el objeto Response a errorDeRespuesta: «HTTP [object
+    // Response]», sin status, y la disponibilidad lo pintaba como SIN CONEXIÓN.
+    guionLlama = { '/v1/models': { status: 503, cuerpo: { error: { message: 'Loading model' } } } };
+    const st = await conAdaptador(id, { baseUrl: BASE_LLAMA }, () => PROVIDERS[id].status());
+    check(st.ok === false && st.error.status === 503, `${id}: status() conserva el 503 (${st.error.message})`);
+    check(!/\[object /.test(st.error.message), `${id}: el mensaje nombra el código, no un objeto`);
+    const cargando = await conAdaptador(id, { baseUrl: BASE_LLAMA }, () => gestor().getAvailability(id));
+    check(cargando.reachable === true && cargando.uiState !== UI_STATE.OFFLINE,
+      `${id}: un servidor que responde 503 está alcanzable, no «sin conexión» (${cargando.uiState})`);
+    check(cargando.errorCode === 'PROVIDER_HTTP_503', `${id}: ${cargando.errorCode}`);
+
+    // ERROR_HANDLING: un 500 del chat conserva su mensaje y además su código.
+    guionLlama = { '/v1/chat/completions': { status: 500, cuerpo: { error: { message: 'roles must alternate' } } } };
+    let fallo = null;
+    try {
+      await conAdaptador(id, { baseUrl: BASE_LLAMA }, () => PROVIDERS[id].chat({ model: 'm', messages: mensajes }));
+    } catch (error) { fallo = error; }
+    check(fallo && fallo.message === 'roles must alternate', `${id}: el 500 conserva el mensaje del servidor`);
+    check(describirError(fallo).errorCode === 'PROVIDER_HTTP_500',
+      `${id}: y se clasifica por su código (${describirError(fallo).errorCode})`);
+  }
+  await new Promise(r => llama.close(() => r()));
+
+  // ERROR_HANDLING sin servidor: puerto cerrado de verdad, fetch de verdad.
+  // undici deja ECONNREFUSED en `cause.code`; la pista tiene que llegar igual.
+  for (const [id, comando] of [['llamacpp', 'llama-server -m modelo.gguf --port 8080'],
+    ['bitnet', 'run_inference_server.py']]) {
+    let fallo = null;
+    try {
+      await conAdaptador(id, { baseUrl: BASE_CERRADA }, () =>
+        PROVIDERS[id].chat({ model: 'm', messages: [{ role: 'user', content: 'hola' }] }));
+    } catch (error) { fallo = error; }
+    check(fallo && /no está corriendo\. Inicia con: /.test(fallo.message) && fallo.message.includes(comando),
+      `${id}: sin servidor, el usuario recibe cómo arrancarlo («${fallo && fallo.message}»)`);
+    check(describirError(fallo).errorCode === 'PROVIDER_TRANSPORT_UNREACHABLE',
+      `${id}: y se clasifica como transporte inalcanzable`);
+  }
+}
+
 await srv.cerrar();
 console.warn = warnOriginal;
 console.log(`\nProvider availability tests passed (${comprobaciones} comprobaciones)`);
