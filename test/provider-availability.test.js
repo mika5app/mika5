@@ -33,6 +33,20 @@ const {
   KINDS, ProviderError, describirError, sanearMensaje, errorDeRespuesta
 } = require('../src/main/provider-errors');
 
+// Fuente que implementa un adaptador. llamacpp y bitnet son instancias de la
+// misma fábrica (`llama-server.js`): sus módulos sólo la configuran, así que
+// las comprobaciones de código miran la fábrica, y aquí se exige que el
+// módulo del adaptador de verdad la use para no comprobar un fichero ajeno.
+const FABRICA_DE = { llamacpp: 'llama-server', bitnet: 'llama-server' };
+function fuenteDelAdaptador(id) {
+  const dir = path.join(__dirname, '../src/main/providers');
+  const propio = fs.readFileSync(path.join(dir, `${id}.js`), 'utf8');
+  const fabrica = FABRICA_DE[id];
+  if (!fabrica) return propio;
+  assert(propio.includes(`require('./${fabrica}')`), `${id}.js debe construirse con ${fabrica}.js`);
+  return fs.readFileSync(path.join(dir, `${fabrica}.js`), 'utf8');
+}
+
 let comprobaciones = 0;
 function check(condicion, mensaje) {
   assert(condicion, mensaje);
@@ -197,7 +211,7 @@ console.log('\n=== 3. Timeout y abort contra el listModels real de llamacpp ==='
   // `local` está aquí desde que `ollamaApi` acepta señal: antes no podía
   // estarlo porque no hace fetch propio y la señal moría en la frontera del
   // módulo. Su cadena completa se ejercita en test/ollama-cancellation.test.js.
-  const CON_SENAL = ['openai', 'groq', 'llamacpp', 'local'];
+  const CON_SENAL = ['openai', 'groq', 'llamacpp', 'bitnet', 'local'];
   for (const id of CON_SENAL) {
     const firma = String(PROVIDERS[id].listModels);
     check(/options\s*=\s*\{\}/.test(firma.slice(0, firma.indexOf(')') + 1)),
@@ -258,7 +272,7 @@ console.log('\n=== 3. Timeout y abort contra el listModels real de llamacpp ==='
   srv.guionizar({ status: 200, cuerpo: MODELOS_HTTP });
   for (const id of CON_SENAL) {
     const r = await conAdaptador(id, { baseUrl: BASE_SINTETICA }, () =>
-      PROVIDERS[id].listModels(id === 'llamacpp' ? undefined : 'clave'));
+      PROVIDERS[id].listModels(PROVIDERS[id].requiresKey ? 'clave' : undefined));
     check(r && Array.isArray(r.models) && r.probe,
       `${id}: la llamada sin tercer argumento sigue devolviendo { models, probe }`);
   }
@@ -266,7 +280,7 @@ console.log('\n=== 3. Timeout y abort contra el listModels real de llamacpp ==='
   // Sin AbortSignal.any en ninguno: el combinador es `createAbortContext()`,
   // que ya existía y está probado.
   for (const id of CON_SENAL) {
-    const modulo = fs.readFileSync(path.join(__dirname, `../src/main/providers/${id}.js`), 'utf8');
+    const modulo = fuenteDelAdaptador(id);
     // Sólo líneas de código: los comentarios pueden nombrar lo que se evitó.
     const codigo = modulo.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
     assert(!/AbortSignal\.any/.test(codigo),
@@ -735,20 +749,20 @@ console.log('\n=== 12. Alibaba: ready, uiState y estado del punto ===');
 
 console.log('\n=== 12b. La extracción a módulos no cambió el conjunto ===');
 {
-  // Los siete adaptadores viven ahora en src/main/providers/<id>.js y
+  // Los ocho adaptadores viven ahora en src/main/providers/<id>.js y
   // ai-providers.js los compone. Esto fija el resultado observable de esa
   // extracción: los mismos identificadores, en el mismo orden, con la misma
   // forma. Un módulo que se olvide de registrarse, o que se registre con otro
   // nombre o en otra posición, cae aquí.
-  const IDS_ESPERADOS = ['local', 'openai', 'anthropic', 'groq', 'moonshot', 'alibaba', 'llamacpp'];
+  const IDS_ESPERADOS = ['local', 'openai', 'anthropic', 'groq', 'moonshot', 'alibaba', 'llamacpp', 'bitnet'];
   check(JSON.stringify(Object.keys(PROVIDERS)) === JSON.stringify(IDS_ESPERADOS),
-    `el registro expone los siete adaptadores en su orden observable (${Object.keys(PROVIDERS).join(', ')})`);
+    `el registro expone los ocho adaptadores en su orden observable (${Object.keys(PROVIDERS).join(', ')})`);
 
   const dir = path.join(__dirname, '../src/main/providers');
   // Módulos del directorio que NO son adaptadores. La lista es explícita: un
   // fichero nuevo sin declarar aquí hace fallar la comprobación, que es lo que
   // impide que se cuele un adaptador sin registrar.
-  const NO_ADAPTADORES = ['alibaba-config'];
+  const NO_ADAPTADORES = ['alibaba-config', 'llama-server'];
   const modulos = fs.readdirSync(dir).filter(f => f.endsWith('.js')).map(f => f.replace(/\.js$/, '')).sort();
   const adaptadores = modulos.filter(m => !NO_ADAPTADORES.includes(m));
   check(JSON.stringify(adaptadores) === JSON.stringify([...IDS_ESPERADOS].sort()),
@@ -788,7 +802,8 @@ console.log('\n=== 12b. La extracción a módulos no cambió el conjunto ===');
     groq: { requiresKey: true, privacy: 'cloud', metodos: ['chat', 'listModels'] },
     moonshot: { requiresKey: true, privacy: 'cloud', metodos: ['chat', 'listModels'] },
     alibaba: { requiresKey: true, privacy: 'cloud', metodos: ['chat', 'listModels', 'validateConfig', 'generateImage'] },
-    llamacpp: { requiresKey: false, privacy: 'private', metodos: ['chat', 'listModels', 'status'] }
+    llamacpp: { requiresKey: false, privacy: 'private', metodos: ['chat', 'listModels', 'status'] },
+    bitnet: { requiresKey: false, privacy: 'private', metodos: ['chat', 'listModels', 'status'] }
   };
   for (const [id, esperado] of Object.entries(FORMA)) {
     const c = PROVIDERS[id];
@@ -977,13 +992,13 @@ console.log('\n=== 15. Un 2xx ilegible conserva la evidencia del 2xx ===');
 
   // El contrato se aplica a los tres adaptadores que analizan JSON de red.
   // Cada adaptador vive en su propio módulo desde la extracción.
-  const conParseo = ['openai', 'groq', 'llamacpp'];
+  const conParseo = ['openai', 'groq', 'llamacpp', 'bitnet'];
   for (const id of conParseo) {
-    const modulo = fs.readFileSync(path.join(__dirname, `../src/main/providers/${id}.js`), 'utf8');
+    const modulo = fuenteDelAdaptador(id);
     assert(modulo.includes('probeDeRespuestaInvalida'),
       `${id} analiza JSON de red y debe declarar la sonda de respuesta inválida`);
   }
-  check(true, `los tres adaptadores que analizan JSON de red aplican el mismo contrato (${conParseo.join(', ')})`);
+  check(true, `los adaptadores que analizan JSON de red aplican el mismo contrato (${conParseo.join(', ')})`);
 
   const i18n = fs.readFileSync(path.join(__dirname, '../src/renderer/i18n.js'), 'utf8');
   const bloques = i18n.split(/^  (?:es|en): \{$/m);
@@ -1002,7 +1017,8 @@ console.log('\n=== 16. status() conserva su comportamiento, no sólo su forma ==
   // reflejando la presencia de credencial cuando no la tiene.
 
   // Runtime local: delega en la sonda del adaptador, en los dos sentidos.
-  for (const [id, ok] of [['local', true], ['local', false], ['llamacpp', true], ['llamacpp', false]]) {
+  for (const [id, ok] of [['local', true], ['local', false], ['llamacpp', true], ['llamacpp', false],
+    ['bitnet', true], ['bitnet', false]]) {
     const m = gestor();
     m.currentProvider = id;
     let invocada = false;

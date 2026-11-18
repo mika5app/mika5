@@ -101,7 +101,9 @@ Vision resolution is driven by a per-provider policy (`none`, `probe`, `catalog`
 uses the `catalog` policy: the model catalogue decides, so a newly released model works
 without editing a closed allowlist. `llamacpp` declares `vision: false` on purpose — the
 server does not expose whether a multimodal projector is loaded, and without a reliable
-signal the capability is not claimed.
+signal the capability is not claimed. `bitnet` shares that client (`providers/llama-server.js`)
+and that policy; it listens on `127.0.0.1:8081/v1`, not BitNet's default 8080, so llama.cpp
+and BitNet never answer each other's probes.
 
 `assertVisionSupported()` fails closed and returns a specific reason, so the UI can say
 why an image was refused instead of failing generically.

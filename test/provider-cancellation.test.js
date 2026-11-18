@@ -97,6 +97,7 @@ async function run() {
     providerConfig: ALIBABA_DEFAULT_CONFIG
   });
   await assertAdapterCancellation('llamacpp', { model: 'local-test', messages });
+  await assertAdapterCancellation('bitnet', { model: 'local-test', messages });
   await assertOllamaCancellation();
 
   const imageState = { calls: 0, signal: null };

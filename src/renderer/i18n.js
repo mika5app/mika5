@@ -190,6 +190,7 @@ const MIKA5_TRANSLATIONS = {
     'provider.moonshotDesc': 'Contexto 256k tokens.',
     'provider.alibaba': 'Alibaba Cloud Model Studio',
     'provider.llamacpp': 'llama.cpp (Local)',
+    'provider.bitnet': 'BitNet (Local)',
     'provider.cloudWarning': '⚠️ Cloud activo: Mensajes a servidores externos.',
     'provider.moreInfo': 'Más info',
 
@@ -414,6 +415,7 @@ const MIKA5_TRANSLATIONS = {
     'provider.moonshotDesc': '256k token context.',
     'provider.alibaba': 'Alibaba Cloud Model Studio',
     'provider.llamacpp': 'llama.cpp (Local)',
+    'provider.bitnet': 'BitNet (Local)',
     'provider.cloudWarning': '⚠️ Cloud active: Messages sent to external servers.',
     'provider.moreInfo': 'More info',
 

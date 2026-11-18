@@ -21,7 +21,8 @@ src/main/
   provider-errors.js         taxonomía de fallos y sondas
   provider-capabilities.js   contrato de visión y normalización de respuesta
   providers/
-    local.js  openai.js  anthropic.js  groq.js  moonshot.js  llamacpp.js
+    local.js  openai.js  anthropic.js  groq.js  moonshot.js  llamacpp.js  bitnet.js
+    llama-server.js      cliente llama-server compartido por llamacpp y bitnet
     alibaba.js           adaptador (factoría: recibe su configuración)
     alibaba-config.js    preajustes, catálogo y normalización de Alibaba
 ```

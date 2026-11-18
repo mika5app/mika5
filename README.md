@@ -41,6 +41,7 @@ Provider capabilities are declared by each adapter. Model availability depends o
 |---|---|---|
 | Ollama | Local models or Ollama cloud models | Local Ollama runtime; cloud access depends on its configuration |
 | llama.cpp | Local | OpenAI-compatible local server, default `127.0.0.1:8080/v1` |
+| BitNet ([bitnet.cpp](https://github.com/microsoft/BitNet)) | Local | Its `llama-server`, started with `python run_inference_server.py -m <model>.gguf --port 8081`; MIKA5 expects `127.0.0.1:8081/v1` |
 | OpenAI, Anthropic, Groq, Moonshot | Optional cloud | Provider API key |
 | Alibaba Cloud Model Studio | Optional cloud | Key, region, endpoint and model catalogue configuration |
 

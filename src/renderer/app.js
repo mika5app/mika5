@@ -2461,7 +2461,7 @@ async function loadRuntime() {
         const opt = document.createElement("option");
         opt.value = m.name;
         opt.textContent = m.name;
-        opt.dataset.source = (currentProvider === 'llamacpp' || (currentProvider === 'local' && m.privacy !== 'cloud') ? 'local' : 'cloud');
+        opt.dataset.source = (currentProvider === 'llamacpp' || currentProvider === 'bitnet' || (currentProvider === 'local' && m.privacy !== 'cloud') ? 'local' : 'cloud');
         if (m.size) opt.dataset.size = String(m.size);
         if (m.sizeFormatted) opt.dataset.sizeFormatted = m.sizeFormatted;
         if (m.capabilities && Array.isArray(m.capabilities)) opt.dataset.caps = m.capabilities.join(' • ');

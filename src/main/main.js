@@ -45,7 +45,7 @@ if (process.platform === 'win32') {
 //           con `box-sizing: border-box` entran dentro del `max-height`, así
 //           que restan área visible
 //  + 82 px  fila más alta medida: la de llama.cpp, cuya descripción ocupa dos
-//           líneas (81,59 px; las otras seis miden 64,80 px)
+//           líneas (81,59 px; las de una línea miden 64,80 px)
 //  + 39 px  diferencia medida entre el tamaño exterior de `BrowserWindow` y
 //           `window.innerHeight` en Windows (constante entre 60 y 820 px)
 //  = 205 px

@@ -10,7 +10,7 @@ The renderer in `src/renderer/` manages conversations, projects, attachments, tr
 
 ## Providers and request privacy
 
-`src/main/ai-providers.js` manages providers through `src/main/provider-registry.js`. Seven adapters live in `src/main/providers/`: Ollama, llama.cpp, OpenAI, Anthropic, Groq, Moonshot and Alibaba Cloud Model Studio. Credentials, runtime behavior and errors are separated into the corresponding `provider-credentials.js`, `provider-runtime.js` and `provider-errors.js` modules.
+`src/main/ai-providers.js` manages providers through `src/main/provider-registry.js`. Eight adapters live in `src/main/providers/`: Ollama, llama.cpp, BitNet, OpenAI, Anthropic, Groq, Moonshot and Alibaba Cloud Model Studio. llama.cpp and BitNet are two configurations of the same `llama-server` client in `providers/llama-server.js`. Credentials, runtime behavior and errors are separated into the corresponding `provider-credentials.js`, `provider-runtime.js` and `provider-errors.js` modules.
 
 Ollama can provide local or cloud inference. `src/main/request-privacy.js` resolves the selected model's privacy and validates cloud consent. The renderer captures request identity and approval before dispatch; changing the visible provider while approval is pending must not reroute that request. Cloud consent is tied to the provider, model, request and data scope. Automatic PII rewriting is disabled, so consent must not be interpreted as anonymization.
 

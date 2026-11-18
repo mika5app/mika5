@@ -26,6 +26,7 @@ const { adaptadorGroq } = require('./providers/groq');
 const { adaptadorMoonshot } = require('./providers/moonshot');
 const { crearAdaptadorAlibaba } = require('./providers/alibaba');
 const { adaptadorLlamacpp } = require('./providers/llamacpp');
+const { adaptadorBitnet } = require('./providers/bitnet');
 const { getEncryptionKey, encrypt, decryptRecord, canPersistCredentials } = require('./provider-credentials');
 const {
   fetchWithProviderRetry,
@@ -837,11 +838,12 @@ const PROVIDERS = {
     normalizeAlibabaConfig,
     normalizeAlibabaInputImage
   }),
-  llamacpp: adaptadorLlamacpp
+  llamacpp: adaptadorLlamacpp,
+  bitnet: adaptadorBitnet
 };
 
 // Registro interno versionado, construido a partir del conjunto anterior.
-// Los siete se registran explícitamente y desde código de confianza: no hay
+// Los ocho se registran explícitamente y desde código de confianza: no hay
 // carga desde disco, ni descubrimiento de plugins, ni require dinámico.
 // La validación es fail-closed y ocurre aquí, al arrancar el módulo, no en el
 // primer uso: un adaptador mal formado se rechaza cuando aún se sabe quién lo
@@ -1295,8 +1297,8 @@ class AIProviderManager {
     if (this.currentProvider === 'local') {
       return PROVIDERS.local.status();
     }
-    if (this.currentProvider === 'llamacpp') {
-      return PROVIDERS.llamacpp.status();
+    if (this.currentProvider === 'llamacpp' || this.currentProvider === 'bitnet') {
+      return registroDeProveedores.getAdapter(this.currentProvider).status();
     }
     return {
       ok: !!this.apiKeys[this.currentProvider],

@@ -10,8 +10,12 @@ function ollamaModelPrivacy(info, model) {
     ? 'cloud' : 'private';
 }
 
+// Servidores locales sin modelos remotos: siempre privados. Cualquier otro id
+// que no sea Ollama se trata como cloud, que es el lado seguro del error.
+const PROVEEDORES_SIEMPRE_LOCALES = new Set(['llamacpp', 'bitnet']);
+
 async function resolveRequestPrivacy(providerId, model, options = {}) {
-  if (providerId !== 'local') return { privacy: providerId === 'llamacpp' ? 'private' : 'cloud' };
+  if (providerId !== 'local') return { privacy: PROVEEDORES_SIEMPRE_LOCALES.has(providerId) ? 'private' : 'cloud' };
   const info = await (options.show || ollamaApi.show)(model, { signal: options.signal });
   if (!info || typeof info !== 'object' || Array.isArray(info) || info.error) {
     throw new Error('No se pudo verificar el destino del modelo Ollama. Vuelve a intentarlo.');
