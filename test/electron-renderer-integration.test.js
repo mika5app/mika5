@@ -1380,6 +1380,103 @@ async function run() {
   })()`, true);
   assert(conFragmento >= 1, 'appendMsg sigue funcionando sobre un DocumentFragment');
 
+  // --- Instrucciones del sistema: mismo modelo, cambio de modelo, cambio de proveedor ---
+  // Informe de campo: «los agentes pierden las instrucciones al cambiar de modelo
+  // o proveedor en la misma conversación». Se ejercita el send() real y el
+  // switchProvider() real, y se valida el payload que el renderer entrega a
+  // ai:chat antes de salir del proceso, no la respuesta del modelo. Los canales
+  // que sólo necesita esta prueba se registran aquí para no alterar las
+  // anteriores, que dependen de que getAvailability no exista.
+  const INSTRUCCION = 'INSTRUCCION-DETECTABLE-9c1e';
+  const MODELOS_POR_PROVEEDOR = {
+    openai: ['gpt-4o', 'gpt-4o-mini'],
+    anthropic: ['claude-3-5-sonnet-20241022']
+  };
+  const proveedoresPedidos = [];
+  ipcMain.removeHandler('db:getProjectContext');
+  ipcMain.handle('db:getProjectContext', () => INSTRUCCION);
+  ipcMain.handle('ai:set-provider', (_event, id) => {
+    proveedoresPedidos.push(id);
+    return { provider: id, privacy: 'cloud' };
+  });
+  ipcMain.handle('ai:get-availability', (_event, id) => ({
+    configured: true, reachable: true, authenticated: true,
+    models: (MODELOS_POR_PROVEEDOR[id || proveedoresPedidos.at(-1) || 'openai'] || []).map(name => ({ name })),
+    modelsAvailable: 1, canAttempt: true, ready: true, uiState: 'connected',
+    errorCode: null, httpStatus: null
+  }));
+  state.ragEnabled = false;
+  state.routeMode = 'chat';
+
+  // Envía con el estado visible y acepta el consentimiento cloud si aparece.
+  const enviarYConsentir = async texto => {
+    const antes = state.chatCalls.length;
+    await win.webContents.executeJavaScript(`(() => {
+      document.getElementById('input').value = ${JSON.stringify(texto)};
+      chatAttachments = [];
+      window.__instrDone = false;
+      send().finally(() => { window.__instrDone = true; });
+    })()`, true);
+    await waitFor(win, `window.__instrDone || document.getElementById('cloudConsentModal')`);
+    const hayModal = await win.webContents.executeJavaScript(
+      `Boolean(document.getElementById('cloudConsentModal'))`, true);
+    if (hayModal) {
+      await win.webContents.executeJavaScript(
+        `document.querySelectorAll('#cloudConsentModal button')[0].click()`, true);
+    }
+    await waitFor(win, `window.__instrDone`);
+    assert.strictEqual(state.chatCalls.length, antes + 1, `«${texto}» llega a ai:chat una sola vez`);
+    return state.chatCalls.at(-1);
+  };
+  const instruccionesDe = llamada => {
+    const conInstruccion = llamada.messages.filter(m =>
+      typeof m.content === 'string' && m.content.includes(INSTRUCCION));
+    return {
+      primeraEsSystem: llamada.messages[0]?.role === 'system'
+        && llamada.messages[0].content.includes(INSTRUCCION),
+      veces: conInstruccion.length,
+      soloSystem: conInstruccion.every(m => m.role === 'system')
+    };
+  };
+
+  await win.webContents.executeJavaScript(`(() => {
+    activeProjectId = 'project-instr';
+    activeChatId = 'chat-instr';
+    currentProvider = 'openai';
+    providerPrivacy = 'cloud';
+    const select = document.getElementById('modelSelect');
+    select.innerHTML = '<option value="gpt-4o">gpt-4o</option><option value="gpt-4o-mini">gpt-4o-mini</option>';
+    select.value = 'gpt-4o';
+  })()`, true);
+
+  const llamadas = [];
+  // 1-2. Mismo modelo, dos turnos.
+  llamadas.push(['openai/gpt-4o turno 1', await enviarYConsentir('turno uno')]);
+  llamadas.push(['openai/gpt-4o turno 2', await enviarYConsentir('turno dos')]);
+  // 3. Cambio de modelo dentro del mismo proveedor, por el camino de la UI.
+  await win.webContents.executeJavaScript(`(() => {
+    const select = document.getElementById('modelSelect');
+    select.value = 'gpt-4o-mini';
+    onSelectedModelChanged();
+  })()`, true);
+  llamadas.push(['openai/gpt-4o-mini', await enviarYConsentir('turno tres')]);
+  // 4. Cambio de proveedor con el switchProvider() real.
+  await win.webContents.executeJavaScript(`switchProvider('anthropic')`, true);
+  await waitFor(win, `currentProvider === 'anthropic'
+    && document.getElementById('modelSelect').value === 'claude-3-5-sonnet-20241022'`);
+  llamadas.push(['anthropic/claude', await enviarYConsentir('turno cuatro')]);
+
+  assert.deepStrictEqual(proveedoresPedidos, ['anthropic'], 'el cambio de proveedor pasa por ai:set-provider');
+  assert.deepStrictEqual(llamadas.map(([, l]) => `${l.providerId}/${l.model}`), [
+    'openai/gpt-4o', 'openai/gpt-4o', 'openai/gpt-4o-mini', 'anthropic/claude-3-5-sonnet-20241022'
+  ], 'cada turno sale con el proveedor y el modelo seleccionados en ese momento');
+  for (const [etiqueta, llamada] of llamadas) {
+    const r = instruccionesDe(llamada);
+    assert(r.primeraEsSystem, `${etiqueta}: el primer mensaje es system y lleva las instrucciones`);
+    assert.strictEqual(r.veces, 1, `${etiqueta}: las instrucciones van exactamente una vez`);
+    assert(r.soloSystem, `${etiqueta}: nunca viajan como turno de usuario o asistente`);
+  }
+
   win.destroy();
 
   console.log('Electron renderer integration tests passed');
