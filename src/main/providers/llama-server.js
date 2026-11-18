@@ -53,7 +53,12 @@ function crearAdaptadorServidorLlama({ providerId, name, etiqueta, baseUrl, como
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
-          throw new Error(err.error?.message || `${etiqueta} Error: ${res.status}`);
+          // El mensaje no cambia; el código HTTP viaja con el error para que
+          // `clasificarError()` distinga un 503 «cargando modelo» o un 401 de
+          // un fallo desconocido. Antes se perdía y todo era UNKNOWN.
+          const httpError = new Error(err.error?.message || `${etiqueta} Error: ${res.status}`);
+          httpError.status = res.status;
+          throw httpError;
         }
         const data = await res.json();
         const choice = data.choices?.[0];
@@ -69,7 +74,14 @@ function crearAdaptadorServidorLlama({ providerId, name, etiqueta, baseUrl, como
         if (normalized.code === 'PROVIDER_TIMEOUT') {
           normalized.message += '. Prueba un modelo más pequeño.';
         }
-        if (error.code === 'ECONNREFUSED') throw new Error(`${etiqueta} no está corriendo. Inicia con: ${comoIniciar}`);
+        // `fetch` (undici) no pone el código en el error: lo envuelve en
+        // `TypeError: fetch failed` y lo deja en `cause.code`. Mirando sólo
+        // `error.code` esta pista era inalcanzable y el usuario veía un genérico.
+        if ((error.code ?? error.cause?.code) === 'ECONNREFUSED') {
+          const notRunning = new Error(`${etiqueta} no está corriendo. Inicia con: ${comoIniciar}`);
+          notRunning.code = 'ECONNREFUSED';
+          throw notRunning;
+        }
         throw normalized;
       } finally {
         abortContext.cleanup();
@@ -131,7 +143,10 @@ function crearAdaptadorServidorLlama({ providerId, name, etiqueta, baseUrl, como
       try {
         const res = await fetch(`${this.baseUrl}/models`, { signal: AbortSignal.timeout(3000) });
         if (res.ok) return { ok: true, probe: probeDeExito({ authenticated: null }) };
-        const error = errorDeRespuesta(res, etiqueta);
+        // `errorDeRespuesta` espera el código, no la respuesta. Con el objeto
+        // entero un 503 «Loading model» salía como «HTTP [object Response]»,
+        // sin status, y la disponibilidad lo pintaba como servidor caído.
+        const error = errorDeRespuesta(res.status, etiqueta);
         return { ok: false, error, probe: probeDeError(error) };
       } catch (error) {
         // ECONNREFUSED, timeout o fallo de transporte: el error se pasa tal cual

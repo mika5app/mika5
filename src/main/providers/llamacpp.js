@@ -15,7 +15,7 @@ const adaptadorLlamacpp = crearAdaptadorServidorLlama({
   name: 'llama.cpp (Local)',
   etiqueta: 'llama.cpp',
   baseUrl: 'http://127.0.0.1:8080/v1',
-  comoIniciar: './server -m modelo.gguf --port 8080'
+  comoIniciar: 'llama-server -m modelo.gguf --port 8080'
 });
 
 module.exports = { adaptadorLlamacpp };

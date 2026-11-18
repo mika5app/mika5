@@ -390,10 +390,14 @@ async function expectSilentDropIsImpossible(providerId, chatParams) {
       global.fetch = previousFetch;
     }
 
-    // Sin servidor, cada uno dice cómo arrancar el SUYO. El de llama.cpp no
-    // cambia ni una letra respecto a antes de compartir cliente con BitNet.
+    // Sin servidor, cada uno dice cómo arrancar el SUYO. El fallo tiene la
+    // forma REAL de `fetch` (undici): `TypeError: fetch failed` con el código
+    // en `cause.code`. Un stub con `code` en el propio error pasaba aunque en
+    // producción la pista fuese inalcanzable.
     global.fetch = async () => {
-      throw Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
+      throw Object.assign(new TypeError('fetch failed'), {
+        cause: Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:8080'), { code: 'ECONNREFUSED' })
+      });
     };
     try {
       await assert.rejects(PROVIDERS.bitnet.chat({ model: 'm', messages: hola }), error => {
@@ -404,11 +408,93 @@ async function expectSilentDropIsImpossible(providerId, chatParams) {
       });
       await assert.rejects(PROVIDERS.llamacpp.chat({ model: 'm', messages: hola }), error => {
         assert.equal(error.message,
-          'llama.cpp no está corriendo. Inicia con: ./server -m modelo.gguf --port 8080');
+          'llama.cpp no está corriendo. Inicia con: llama-server -m modelo.gguf --port 8080');
         return true;
       });
     } finally {
       global.fetch = previousFetch;
+    }
+  }
+
+  // --- Instrucciones del sistema a través de cambios de modelo y proveedor ---
+  // Una conversación con instrucciones detectables pasa por TODOS los
+  // proveedores, cambiando de modelo dentro del mismo proveedor y luego de
+  // proveedor, como haría la usuaria en un mismo chat. Se valida el cuerpo que
+  // sale hacia el proveedor, no la respuesta del modelo: las instrucciones (y
+  // el RAG que comparte su mensaje system) tienen que estar en CADA llamada,
+  // exactamente una vez y sin convertirse en un turno de usuario.
+  {
+    const { ALIBABA_DEFAULT_CONFIG } = require('../src/main/ai-providers');
+    const { ollamaApi } = require('../src/main/ollama');
+    const INSTRUCCION = 'INSTRUCCION-AGENTE-7f3a';
+    const sistema = { role: 'system', content: `${INSTRUCCION}\n\nContexto RAG de prueba` };
+    const capturas = [];
+    const previousFetch = global.fetch;
+    const previousOllamaChat = ollamaApi.chat;
+    const previousOllamaShow = ollamaApi.show;
+    global.fetch = async (url, options) => {
+      const body = JSON.parse(options.body);
+      capturas.push(body);
+      if (/\/v1\/messages$/.test(String(url))) {
+        return { ok: true, status: 200, json: async () => ({ content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }] }) };
+    };
+    ollamaApi.show = async () => ({ capabilities: ['completion'] });
+    ollamaApi.chat = async params => {
+      capturas.push(params);
+      return { message: { content: 'ok' }, done_reason: 'stop' };
+    };
+    const MODELOS = {
+      local: ['llama3', 'qwen2.5'],
+      openai: ['gpt-4o-mini', 'gpt-4o'],
+      anthropic: ['claude-3-5-haiku-20241022', 'claude-3-5-sonnet-20241022'],
+      groq: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'],
+      moonshot: ['kimi-k2', 'moonshot-v1-8k'],
+      alibaba: [ALIBABA_DEFAULT_CONFIG.models[0].id, ALIBABA_DEFAULT_CONFIG.models[1].id],
+      llamacpp: ['a.gguf', 'b.gguf'],
+      bitnet: ['a.gguf', 'b.gguf']
+    };
+    const instruccionesEnviadas = body => {
+      const systemTop = typeof body.system === 'string' ? [body.system]
+        : Array.isArray(body.system) ? body.system.map(b => b.text) : [];
+      const systemMsgs = (body.messages || []).filter(m => m.role === 'system').map(m => m.content);
+      const noSystem = (body.messages || []).filter(m => m.role !== 'system')
+        .map(m => typeof m.content === 'string' ? m.content : JSON.stringify(m.content));
+      return { system: [...systemTop, ...systemMsgs], noSystem };
+    };
+    try {
+      const historia = [];
+      const orden = Object.keys(MODELOS);
+      assert(JSON.stringify([...orden].sort()) === JSON.stringify(Object.keys(PROVIDERS).sort()),
+        'la prueba recorre todos los proveedores registrados');
+      for (const providerId of orden) {
+        for (const model of MODELOS[providerId]) {
+          historia.push({ role: 'user', content: `pregunta ${historia.length}` });
+          const mensajes = [sistema, ...historia];
+          const copia = JSON.parse(JSON.stringify(mensajes));
+          capturas.length = 0;
+          await PROVIDERS[providerId].chat({
+            model, messages: mensajes, apiKey: 'clave-test', sanitize: false,
+            providerConfig: ALIBABA_DEFAULT_CONFIG
+          });
+          const cuerpo = capturas.at(-1);
+          const { system, noSystem } = instruccionesEnviadas(cuerpo);
+          const juntas = system.join('\n');
+          assert(juntas.includes(INSTRUCCION),
+            `${providerId}/${model}: las instrucciones viajan como system`);
+          assert(juntas.split(INSTRUCCION).length === 2 && !noSystem.some(c => c.includes(INSTRUCCION)),
+            `${providerId}/${model}: exactamente una vez y nunca como turno de usuario/asistente`);
+          assert(juntas.includes('Contexto RAG de prueba'), `${providerId}/${model}: el RAG no las desplaza`);
+          assert(JSON.stringify(mensajes) === JSON.stringify(copia),
+            `${providerId}/${model}: el adaptador no muta los mensajes del llamante`);
+          historia.push({ role: 'assistant', content: `respuesta de ${providerId}/${model}` });
+        }
+      }
+    } finally {
+      global.fetch = previousFetch;
+      ollamaApi.chat = previousOllamaChat;
+      ollamaApi.show = previousOllamaShow;
     }
   }
 

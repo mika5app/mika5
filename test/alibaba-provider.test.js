@@ -828,6 +828,64 @@ function createDb() {
     () => manager.generateImage({ model: 'unsupported', prompt: 'no ejecutar' }),
     /proveedor actual no soporta generación de imágenes/
   );
+  // --- Un chat con imágenes no bloquea la conversación normal ----------------
+  // Informe de campo: en Ollama, «quiero subir esta variante a ollama» devolvía
+  // «El proveedor actual no soporta edición o variación de imágenes» y no se
+  // enviaba, con cualquier modelo. Dos causas: «esta» contaba como errata de
+  // «edita», y un proveedor que no edita imágenes bloqueaba en vez de chatear.
+  {
+    const previa = {
+      chatId: 'chat-campo',
+      lastUserImage: { name: 'x.png', base64: 'aa', mediaType: 'image/png', chatId: 'chat-campo', updatedAt: 1 }
+    };
+    const adjunta = { attachments: [{ type: 'image', name: 'x.png', base64: 'aa', mediaType: 'image/png' }] };
+    const frasesNormales = [
+      'quiero subir esta variante a ollama',
+      'quiero subir esa variante a ollama',
+      'como queda la configuracion del servidor',
+      'esta bien, continua con el plan',
+      'cambia el fondo a azul',
+      'gracias'
+    ];
+    const sinImagen = Object.keys(PROVIDERS).filter(id => !providerSupportsImageGeneration(id));
+    assert.deepEqual(sinImagen.sort(), ['anthropic', 'bitnet', 'groq', 'llamacpp', 'local', 'moonshot', 'openai'],
+      'todos los proveedores salvo Alibaba carecen de generación de imágenes');
+    for (const providerId of sinImagen) {
+      for (const [nombre, contexto] of [['imagen previa', previa], ['imagen adjunta', adjunta]]) {
+        for (const text of frasesNormales) {
+          const route = manager.routeIntent({ text, providerId, currentModel: 'modelo-x', ...contexto });
+          assert.equal(route.action, 'chat', `${providerId}/${nombre}: «${text}» se envía como chat`);
+          assert.equal(route.intent, 'normal-chat', `${providerId}/${nombre}: «${text}» es chat normal`);
+          assert.equal(route.model, 'modelo-x', `${providerId}/${nombre}: conserva el modelo elegido`);
+          assert.equal(route.modelPrompt, text, `${providerId}/${nombre}: el texto no se reescribe`);
+          assert.equal(route.plan, null, `${providerId}/${nombre}: sin plan visual`);
+        }
+        // Analizar sigue siendo análisis, y pedir una imagen nueva conserva su
+        // aviso: son las dos intenciones que no admiten otra lectura.
+        assert.equal(manager.routeIntent({ text: 'analiza esta imagen', providerId, currentModel: 'modelo-x', ...contexto }).intent,
+          'vision-analysis', `${providerId}/${nombre}: analizar sigue siendo análisis`);
+      }
+      const generar = manager.routeIntent({ text: 'dibuja un gato', providerId, currentModel: 'modelo-x' });
+      assert.equal(generar.action, 'unsupported', `${providerId}: generar una imagen sigue sin soportarse`);
+      assert.match(generar.message, /no soporta generación de imágenes/);
+    }
+
+    // Alibaba sí edita: una orden real (también con errata) sigue generando,
+    // pero una frase corriente ya no se toma por orden de edición.
+    for (const [nombre, contexto] of [['imagen previa', previa], ['imagen adjunta', adjunta]]) {
+      for (const text of ['cambia el fondo a azul', 'modfica el fondo']) {
+        const route = manager.routeIntent({ text, providerId: 'alibaba', currentModel: '', ...contexto });
+        assert.equal(route.intent, 'image-edit', `alibaba/${nombre}: «${text}» sigue siendo edición`);
+        assert.equal(route.action, 'generate-image');
+      }
+      for (const text of ['quiero subir esta variante a ollama', 'como queda la configuracion del servidor']) {
+        const route = manager.routeIntent({ text, providerId: 'alibaba', currentModel: '', ...contexto });
+        assert.notEqual(route.action, 'generate-image',
+          `alibaba/${nombre}: «${text}» no dispara una edición de imagen`);
+      }
+    }
+  }
+
   manager.setProvider('alibaba');
   manager.apiKeys.alibaba = 'test-key';
   const routedCritical = manager.routeIntent({
