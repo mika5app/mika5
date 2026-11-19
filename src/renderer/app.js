@@ -2828,7 +2828,7 @@ async function loadRuntime() {
     pullLocal.disabled = (currentProvider !== 'local');
     pullLocal.style.display = currentProvider === 'alibaba' ? 'none' : '';
   }
-  if (pullLibrary) pullLibrary.style.display = currentProvider === 'alibaba' ? 'none' : '';
+  if (pullLibrary) pullLibrary.style.display = currentProvider === 'local' ? '' : 'none';
   syncModelDropdown();
 }
 
@@ -3140,6 +3140,12 @@ function updatePrivacyUI() {
   const providerLabel = currentProvider === 'local' && providerPrivacy === 'cloud'
     ? 'Ollama Cloud' : providerDisplayName(currentProvider);
 
+  // La biblioteca de modelos abre el catálogo de Ollama. Depende de qué
+  // proveedor está elegido, no de si responde, así que se decide aquí y no al
+  // final de `loadRuntime()`, que no llega cuando el proveedor no está listo.
+  const ollamaLibrary = el('btnPull');
+  if (ollamaLibrary) ollamaLibrary.style.display = currentProvider === 'local' ? '' : 'none';
+
   if (providerPrivacy === 'private') {
     if (indicator) {
       indicator.className = 'privacy-indicator private';
@@ -3147,7 +3153,10 @@ function updatePrivacyUI() {
     }
     renderPrivacyBadge(badge, 'private', t('privacy.private'));
     if (apiKeyBtn) apiKeyBtn.style.display = 'none';
-    if (providerName) providerName.textContent = t('provider.local');
+    // El rótulo es el del proveedor ELEGIDO, no «Ollama» para todo lo que sea
+    // privado: llama.cpp y BitNet también lo son, y enseñar «Ollama (Local)»
+    // con uno de ellos seleccionado decía que la petición iba a otro sitio.
+    if (providerName) providerName.textContent = providerLabel;
     if (inputBanner) inputBanner.classList.remove('visible');
     if (footerEl) footerEl.textContent = t('footer.tagline');
     if (revokeButton) revokeButton.style.display = 'none';

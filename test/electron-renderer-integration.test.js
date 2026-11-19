@@ -1584,6 +1584,90 @@ async function run() {
   assert(avisoClave.existe && avisoClave.abiertosAntes.length === 0, 'el aviso de la clave aparece sin abrir nada solo');
   await waitFor(win, `document.getElementById('apiKeyModal').style.display === 'flex'`);
   await win.webContents.executeJavaScript(`closeApiKeyModal()`, true);
+  // --- Rótulo del proveedor: muestra el ELEGIDO, esté o no disponible ---
+  // Informe de campo: al elegir llama.cpp o BitNet la cabecera seguía diciendo
+  // «Ollama (Local)». Se ejercita el switchProvider() real en las cinco
+  // transiciones y se comparan por separado tres cosas que no son la misma: el
+  // proveedor elegido, el que se enseña y el que recibe la petición.
+  const DISPONIBLES = { local: ['llama3.2:3b'], openai: ['gpt-4o'] };
+  const PRIVADOS = new Set(['local', 'llamacpp', 'bitnet']);
+  let ultimoElegido = 'anthropic';
+  // Esta sección mide el rótulo con la disponibilidad sola: se retira el canal
+  // de preparación guionizado por la sección anterior.
+  ipcMain.removeHandler('ai:get-readiness');
+  ipcMain.removeHandler('ai:set-provider');
+  ipcMain.handle('ai:set-provider', (_event, id) => {
+    ultimoElegido = id;
+    return { provider: id, privacy: PRIVADOS.has(id) ? 'private' : 'cloud' };
+  });
+  ipcMain.removeHandler('ai:get-availability');
+  // llama.cpp y BitNet contestan «sin conexión»: el motor no está instalado.
+  // Es justo el caso en que el rótulo no puede caer a otro proveedor.
+  ipcMain.handle('ai:get-availability', (_event, id) => {
+    const modelos = DISPONIBLES[id || ultimoElegido] || [];
+    return modelos.length ? {
+      configured: true, reachable: true, authenticated: null, models: modelos.map(name => ({ name })),
+      modelsAvailable: modelos.length, canAttempt: true, ready: true, uiState: 'connected',
+      errorCode: null, httpStatus: null
+    } : {
+      configured: true, reachable: false, authenticated: null, models: [], modelsAvailable: 0,
+      canAttempt: false, ready: false, uiState: 'offline',
+      errorCode: 'PROVIDER_TRANSPORT_UNREACHABLE', httpStatus: null
+    };
+  });
+  const elegir = async id => {
+    await win.webContents.executeJavaScript(`switchProvider(${JSON.stringify(id)})`, true);
+    return win.webContents.executeJavaScript(`(() => ({
+      elegido: currentProvider,
+      rotulo: document.getElementById('currentProviderName').textContent,
+      biblioteca: document.getElementById('btnPull').style.display !== 'none',
+      modelo: document.getElementById('modelSelect').value,
+      selectorDeshabilitado: document.getElementById('modelSelect').disabled
+    }))()`, true);
+  };
+  const ROTULOS = {
+    local: 'Ollama (Local)', llamacpp: 'llama.cpp (Local)', bitnet: 'BitNet (Local)', openai: 'OpenAI'
+  };
+  // Ollama → llama.cpp → BitNet → Ollama → cloud → local.
+  const recorrido = [];
+  for (const id of ['local', 'llamacpp', 'bitnet', 'local', 'openai', 'local']) {
+    const antes = recorrido.at(-1)?.elegido || 'anthropic';
+    const visto = await elegir(id);
+    recorrido.push(visto);
+    assert.strictEqual(visto.elegido, id, `${antes} → ${id}: el proveedor elegido es ${id}`);
+    assert.strictEqual(visto.rotulo, ROTULOS[id], `${antes} → ${id}: la cabecera muestra «${ROTULOS[id]}»`);
+    assert.strictEqual(visto.biblioteca, id === 'local',
+      `${antes} → ${id}: la biblioteca de Ollama ${id === 'local' ? 'se ofrece' : 'no se ofrece'}`);
+    if (DISPONIBLES[id]) {
+      assert.strictEqual(visto.modelo, DISPONIBLES[id][0], `${antes} → ${id}: el modelo es el de ${id}`);
+    } else {
+      assert(visto.selectorDeshabilitado && visto.modelo === '',
+        `${antes} → ${id}: sin motor no hay modelo, y tampoco se hereda el del proveedor anterior`);
+    }
+  }
+  assert(!recorrido.some(v => v.rotulo.includes('Ollama') && v.elegido !== 'local'),
+    'ningún proveedor distinto de Ollama se presenta como Ollama');
+
+  // Con el motor sin instalar no sale ninguna petición, y menos hacia Ollama.
+  await elegir('bitnet');
+  const antesSinMotor = state.chatCalls.length;
+  await win.webContents.executeJavaScript(`(() => {
+    document.getElementById('input').value = 'turno sin motor';
+    chatAttachments = [];
+    window.__sinMotorDone = false;
+    Promise.resolve(send()).catch(() => {}).finally(() => { window.__sinMotorDone = true; });
+  })()`, true);
+  await waitFor(win, `window.__sinMotorDone`);
+  assert(state.chatCalls.slice(antesSinMotor).every(llamada => llamada.providerId === 'bitnet'),
+    'con BitNet elegido y sin motor, ninguna petición se desvía a otro proveedor');
+
+  // De vuelta a Ollama: la petición va a Ollama, con su modelo y las instrucciones.
+  await elegir('local');
+  const turnoLocal = await enviarYConsentir('turno con ollama');
+  assert.strictEqual(`${turnoLocal.providerId}/${turnoLocal.model}`, 'local/llama3.2:3b',
+    'tras volver a Ollama la petición sale por Ollama con su modelo');
+  assert(instruccionesDe(turnoLocal).primeraEsSystem && instruccionesDe(turnoLocal).veces === 1,
+    'las instrucciones del sistema siguen yendo una vez, como system, tras los cambios de proveedor');
 
   win.destroy();
 
