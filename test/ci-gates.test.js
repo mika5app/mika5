@@ -142,7 +142,8 @@ const EN_NPM_TEST = [
   'test:visual-ui-conversation',
   'test:electron-test-isolation',
   'test:visual-ui-polish',
-  'test:ipc-contracts'
+  'test:ipc-contracts',
+  'test:public-readiness'
 ];
 for (const suite of EN_NPM_TEST) {
   check(pkg.scripts.test.includes(suite),
