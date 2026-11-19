@@ -33,14 +33,18 @@ for (const resto of ['CONTEXT_MANAGEMENT', 'SOFT_LIMIT', 'HARD_LIMIT', 'AUTO_SAV
 }
 check(!/liberar espacio/i.test(renderer.text), 'ningún texto pide guardar «para liberar espacio»');
 
-const presupuesto = Number(/const MAX_CONTEXT_CHARS = (\d+);/.exec(renderer.text)?.[1]);
+const presupuesto = Number(/const MAX_CONTEXT_CHARS_GENERAL = (\d+);/.exec(renderer.text)?.[1]);
 const paresMinimos = Number(/const MIN_RECENT_PAIRS = (\d+);/.exec(renderer.text)?.[1]);
 check(presupuesto > 0 && paresMinimos > 0, `el techo es un presupuesto de contexto (${presupuesto} caracteres)`);
 
-const trimContextToBudget = new Function('MAX_CONTEXT_CHARS', 'MIN_RECENT_PAIRS', `
+// La función real, con el contrato del proveedor que se le indique: es de
+// donde sale el presupuesto propio de un motor con la ventana pequeña.
+const conContrato = (providerCapabilities) => new Function('MAX_CONTEXT_CHARS_GENERAL', 'MIN_RECENT_PAIRS', 'providerCapabilities', `
+  ${renderer.slice('presupuestoDeContexto')}
   ${renderer.slice('trimContextToBudget')}
-  return trimContextToBudget;
-`)(presupuesto, paresMinimos);
+  return { trimContextToBudget, presupuestoDeContexto };
+`)(presupuesto, paresMinimos, providerCapabilities);
+const { trimContextToBudget } = conContrato(null);
 
 const conversacion = (n, largo) => Array.from({ length: n }, (_, i) => ({
   role: i % 2 === 0 ? 'user' : 'assistant',
@@ -90,5 +94,34 @@ const minimos = trimContextToBudget(gigantes);
 // modelo nunca reciba sólo el último mensaje sin nada de lo anterior.
 check(minimos.length - 1 === paresMinimos * 2 - 1 && minimos.at(-1) === gigantes.at(-1),
   `aunque los mensajes sean enormes se conservan los ${paresMinimos * 2 - 1} más recientes`);
+
+console.log('\n=== 4. Un motor con la ventana pequeña envía menos ===');
+{
+  const { PROVIDERS, AIProviderManager } = require('../src/main/ai-providers');
+  const sinBd = { prepare: () => ({ all: () => [], get: () => undefined, run: () => {} }) };
+  const gestor = new AIProviderManager(sinBd, { motores: new (require('../src/main/local-engines').GestorDeMotores)() });
+  const propio = gestor.getCapabilities('bitnet').contextBudget;
+  const ventana = PROVIDERS.bitnet.engine.contexto;
+  check(propio && propio.historyChars === ventana.historyChars && propio.knowledgeChars === ventana.knowledgeChars
+    && propio.historyChars + propio.knowledgeChars < ventana.tokens * 2.5,
+    `BitNet declara su presupuesto (${propio.knowledgeChars} de documentos, ${propio.historyChars} de historial) y cabe en ${ventana.tokens} tokens aun con texto denso`);
+  for (const id of ['local', 'llamacpp', 'openai', 'anthropic', 'alibaba']) {
+    check(gestor.getCapabilities(id).contextBudget === null, `${id} no declara un presupuesto propio: usa el general`);
+  }
+  const reducido = conContrato({ contextBudget: propio });
+  check(reducido.presupuestoDeContexto('knowledgeChars', 12000) === propio.knowledgeChars
+    && reducido.presupuestoDeContexto('historyChars', presupuesto) === propio.historyChars,
+    'con BitNet se eligen menos fragmentos y menos historial');
+  check(conContrato({ contextBudget: { historyChars: presupuesto * 10 } }).presupuestoDeContexto('historyChars', presupuesto) === presupuesto
+    && conContrato({ contextBudget: null }).presupuestoDeContexto('historyChars', presupuesto) === presupuesto
+    && conContrato({ contextBudget: { historyChars: -1 } }).presupuestoDeContexto('historyChars', presupuesto) === presupuesto,
+    'un contrato nunca amplía el presupuesto general, y uno ausente o inválido no lo cambia');
+  const larga = conversacion(60, 400);
+  const enviada = reducido.trimContextToBudget(larga);
+  check(enviada.at(-1) === larga.at(-1) && caracteres(enviada.slice(1)) <= propio.historyChars,
+    `una conversación larga con BitNet viaja dentro de su presupuesto (${caracteres(enviada.slice(1))} ≤ ${propio.historyChars})`);
+  check(/presupuestoDeContexto\('knowledgeChars'/.test(renderer.text),
+    'la selección de fragmentos de documentos usa ese mismo presupuesto');
+}
 
 console.log(`\nconversation-context: ${comprobaciones} comprobaciones OK`);

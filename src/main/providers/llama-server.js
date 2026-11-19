@@ -23,8 +23,47 @@ const { createAbortContext } = require('../provider-runtime');
 // en silencio la primera vez que se corrigiera uno solo.
 function crearAdaptadorServidorLlama({
   providerId, name, etiqueta, baseUrl, comoIniciar, paquete, descargaHf, guia, compatibilidad, aceptaEjecutable, catalogo,
-  instalacion, libraryUrl, requisitos, argumentos, variantes, runtimes, experimental
+  instalacion, libraryUrl, requisitos, argumentos, variantes, runtimes, experimental, contexto
 }) {
+  // Tokens que se reservan para la respuesta cuando el motor declara una
+  // ventana pequeña. Con menos sitio que esto no se envía la petición.
+  const RESERVA_DE_RESPUESTA = 512;
+
+  /**
+   * Cuántos tokens ocupa la entrada y de cuántos dispone el servidor. Se le
+   * pregunta al propio servidor: es su tokenizador y su ventana real —la de la
+   * variante con la que arrancó—. Si no contesta, se estima por lo alto.
+   */
+  async function medirEntrada(raiz, messages, signal) {
+    const texto = messages.map(m => `${m.role}: ${typeof m.content === 'string' ? m.content : ''}`).join('\n');
+    const pedir = async (ruta, opciones) => {
+      try {
+        const res = await fetch(`${raiz}${ruta}`, { ...opciones, signal });
+        return res.ok ? await res.json() : null;
+      } catch (error) {
+        // Cancelar o vencer el plazo no es «el servidor no sabe contar»: se
+        // propaga, y la conversación no llega a enviarse.
+        if (signal && signal.aborted) throw error;
+        return null;
+      }
+    };
+    const [tokenizado, propiedades] = await Promise.all([
+      pedir('/tokenize', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: texto })
+      }),
+      pedir('/props')
+    ]);
+    const contados = tokenizado && Array.isArray(tokenizado.tokens) ? tokenizado.tokens.length : null;
+    const ventana = Number(propiedades && propiedades.default_generation_settings
+      && propiedades.default_generation_settings.n_ctx);
+    return {
+      // Unos tokens por mensaje para los marcadores de la plantilla de chat.
+      entrada: (contados === null ? Math.ceil(texto.length / 2.5) : contados) + 8 * messages.length + 8,
+      ventana: Number.isInteger(ventana) && ventana > 0 ? Math.min(ventana, contexto.tokens) : contexto.tokens
+    };
+  }
+
   const adaptador = {
     name,
     // Dónde explorar modelos para este motor. No es el de otro proveedor.
@@ -47,6 +86,8 @@ function crearAdaptadorServidorLlama({
       runtimes: Array.isArray(runtimes) ? runtimes : [],
       // Experimental: todavía no hay un motor preparado para todos los sistemas.
       experimental: experimental === true,
+      // Ventana pequeña que obliga a enviar menos texto, o null si no hay tal.
+      contexto: contexto || null,
       // Nombre del motor tal y como se le enseña al usuario junto al modelo.
       etiqueta,
       ejecutable: 'llama-server',
@@ -100,6 +141,24 @@ function crearAdaptadorServidorLlama({
       });
       const abortContext = createAbortContext(signal, this.timeout, etiqueta);
       try {
+        // Mismo criterio que la ruta de Ollama (`num_predict: 4096`,
+        // `think: false`). Sin tope, un modelo pequeño de razonamiento
+        // genera hasta llenar el contexto: medido con el servidor real,
+        // la petición no terminaba y vencía el plazo de cinco minutos.
+        let maxTokens = 4096;
+        if (contexto) {
+          const medida = await medirEntrada(this.baseUrl.replace(/\/v1\/?$/, ''), messages, abortContext.signal);
+          const libres = medida.ventana - medida.entrada;
+          if (libres < RESERVA_DE_RESPUESTA) {
+            const noCabe = new Error(`${etiqueta}: el texto enviado no cabe en la ventana de este modelo `
+              + `(${medida.entrada} tokens de ${medida.ventana}). Envía un documento más corto, `
+              + 'súbelo a la base de conocimiento del proyecto para consultar sus partes, o usa otro proveedor.');
+            noCabe.code = 'PROVIDER_CONTEXT_EXCEEDED';
+            throw noCabe;
+          }
+          // La respuesta no puede pasar de lo que queda de ventana.
+          maxTokens = Math.min(maxTokens, libres);
+        }
         const res = await fetch(`${this.baseUrl}/chat/completions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -108,11 +167,7 @@ function crearAdaptadorServidorLlama({
             messages,
             temperature: 0.7,
             stream: false,
-            // Mismo criterio que la ruta de Ollama (`num_predict: 4096`,
-            // `think: false`). Sin tope, un modelo pequeño de razonamiento
-            // genera hasta llenar el contexto: medido con el servidor real,
-            // la petición no terminaba y vencía el plazo de cinco minutos.
-            max_tokens: 4096,
+            max_tokens: maxTokens,
             chat_template_kwargs: { enable_thinking: false }
           }),
           signal: abortContext.signal
@@ -136,7 +191,17 @@ function crearAdaptadorServidorLlama({
           rawFinishReason: choice?.finish_reason
         });
       } catch (error) {
+        if (error.code === 'PROVIDER_CONTEXT_EXCEEDED') throw error;
         const normalized = abortContext.normalize(error);
+        // El servidor aceptó la conexión y la cortó sin responder: el proceso
+        // del motor se cerró a mitad de la petición. Sin esto el usuario veía
+        // un «no se pudo completar la solicitud» que no decía nada.
+        const causa = error.cause && error.cause.code;
+        if (causa === 'ECONNRESET' || causa === 'UND_ERR_SOCKET' || causa === 'EPIPE') {
+          const cerrado = new Error(`${etiqueta}: el motor local se cerró mientras respondía. Vuelve a elegir el modelo para iniciarlo de nuevo.`);
+          cerrado.code = 'ENGINE_CLOSED_DURING_REQUEST';
+          throw cerrado;
+        }
         if (normalized.code === 'PROVIDER_TIMEOUT') {
           normalized.message += '. Prueba un modelo más pequeño.';
         }

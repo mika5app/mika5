@@ -1300,9 +1300,15 @@ class AIProviderManager {
   getCapabilities(providerId = this.currentProvider) {
     const contract = getProviderContract(providerId);
     const visual = getProviderVisualCapabilities(providerId);
+    // Un motor con la ventana pequeña declara cuánto texto admite. La interfaz
+    // lo usa para elegir menos fragmentos y menos historial; null = sin límite propio.
+    const ventana = this._engineSpec(providerId)?.contexto || null;
     return {
       provider: providerId,
       ...contract,
+      contextBudget: ventana
+        ? { knowledgeChars: ventana.knowledgeChars, historyChars: ventana.historyChars }
+        : null,
       defaultVisionModel: visual.defaultVisionModel,
       defaultImageModel: visual.defaultImageModel
     };

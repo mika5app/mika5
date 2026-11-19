@@ -228,7 +228,9 @@ id and region that MIKA5 does not have. When a catalogue cannot be read the prov
 its error; there is no fallback list and no fallback to another provider.
 
 BitNet is experimental. `engine.runtimes` lists prebuilt engines MIKA5 may install
-(exact URL under the public releases, size, SHA-256); it is empty until one is published.
+(exact URL under the public releases, size, SHA-256). One is published: Windows x64, a
+static AVX2 build of bitnet.cpp's `llama-server`, unsigned, so Smart App Control may block
+it and MIKA5 does not work around that. Linux and macOS have none.
 `prepareEngine()` is "Install and start": one native confirmation, then engine and model
 are downloaded through `model-download.js`, verified, approved with the verified hash and
 started. Without a runtime for the system the dialog says so and offers nothing. A local
@@ -236,6 +238,16 @@ bitnet.cpp build is still discovered. Measured with the real engine: it needs it
 launch arguments, an ASCII-only `--alias` (a non-ASCII one makes `/v1/models` answer 500),
 and it lists the model before it finishes loading, so the readiness probe treats a 503 as
 "still loading". `BUILDING.md` records the build that works on Windows and why.
+
+BitNet's window is 4,096 tokens and its engine has two failure modes MIKA5 has to avoid,
+both measured. With the default batch size it overflows the stack and exits (`0xC00000FD`)
+once the input passes a few hundred tokens, so it is launched with `-b 32`. And what does
+not fit in the window it cuts from the middle without saying so. So the adapter declares
+`engine.contexto`; `getCapabilities()` exposes it as `contextBudget`, the renderer picks
+fewer document fragments and less history for that provider (it can only lower the general
+budget), and before sending, the adapter asks the engine itself (`/tokenize`, `/props`) and
+refuses with `PROVIDER_CONTEXT_EXCEEDED` what still does not fit. The answer is capped to
+what is left of the window. A provider without `contexto` is untouched.
 
 BitNet has no installer and no prebuilt binaries. `comprobarRequisitos()` reports which
 build tools are present (Git, Python, CMake, Clang, including the ones Visual Studio

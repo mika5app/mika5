@@ -2257,10 +2257,18 @@ async function completarPorSignificado(chunks, { projectId, chatId, includeProje
 // real —cuarenta mensajes cortos caben de sobra— e interrumpía conversaciones
 // normales pidiendo guardarlas, cuando guardar no cambiaba nada: el historial
 // se relee de la base de datos en cada envío.
-const MAX_CONTEXT_CHARS = 32000;
+const MAX_CONTEXT_CHARS_GENERAL = 32000;
 const MIN_RECENT_PAIRS = 2;
 
+// Un motor local con la ventana pequeña declara un presupuesto menor en su
+// contrato (`contextBudget`). Nunca lo amplía: sólo puede bajar el general.
+function presupuestoDeContexto(clave, general) {
+  const propio = Number(providerCapabilities?.contextBudget?.[clave]);
+  return Number.isFinite(propio) && propio > 0 ? Math.min(general, propio) : general;
+}
+
 function trimContextToBudget(messages) {
+  const MAX_CONTEXT_CHARS = presupuestoDeContexto('historyChars', MAX_CONTEXT_CHARS_GENERAL);
   const totalChars = messages.reduce((sum, m) => sum + (m.content || '').length, 0);
   if (totalChars <= MAX_CONTEXT_CHARS) return messages;
 
@@ -6169,7 +6177,8 @@ async function send() {
       const kChatId = requestContext.chatId || null;
       if (kProjId) {
         // Use cached provider privacy (set by loadProvider) — no IPC needed
-        const maxRagChars = (typeof providerPrivacy !== 'undefined' && providerPrivacy === 'private') ? 12000 : 24000;
+        const maxRagChars = presupuestoDeContexto('knowledgeChars',
+          (typeof providerPrivacy !== 'undefined' && providerPrivacy === 'private') ? 12000 : 24000);
 
         // Server-side truncation: only returns chunks up to maxRagChars
         // Use complete mode for project-level context to avoid round-robin bias

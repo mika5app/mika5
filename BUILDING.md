@@ -191,6 +191,23 @@ Why each deviation from the official `setup_env.py`:
   `src/ggml-bitnet-mad.cpp:811`, and `#include <chrono>` in
   `3rdparty/llama.cpp/common/common.cpp` and `common/log.cpp`.
 
-MIKA5 finds the result at `<home>\BitNet\build\bin\Release\llama-server.exe` and the
+The engine MIKA5 offers to install (`bitnet-runtime-1` in the public releases repository)
+is this same build with two more flags, so it needs no Visual C++ or OpenMP runtime, and
+compiled from a neutral path so no local user name ends up inside the binary:
+
+```bat
+-DGGML_OPENMP=OFF -DCMAKE_POLICY_DEFAULT_CMP0091=NEW -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+```
+
+Publishing a new one means: build, check `dumpbin /dependents` lists only system DLLs,
+upload it with `gh release create <tag> --latest=false` (the update notice reads
+`releases/latest`, which has to stay an application version), and put the exact URL, size
+and SHA-256 in `runtimes` in `src/main/providers/bitnet.js`.
+
+This engine must be started with a small batch (`-b 32`, which MIKA5 passes). With the
+default it overflows the stack and exits with `0xC00000FD` on inputs longer than a few
+hundred tokens.
+
+MIKA5 finds a local build at `<home>\BitNet\build\bin\Release\llama-server.exe` and the
 model under `<home>\BitNet\models`. The executable is unsigned, so Windows Smart App
 Control may block it.

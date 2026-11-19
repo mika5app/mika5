@@ -374,17 +374,25 @@ async function expectSilentDropIsImpossible(providerId, chatParams) {
     const hola = [{ role: 'user', content: 'hola' }];
     try {
       const out = await PROVIDERS.bitnet.chat({ model: 'ggml-model-i2_s.gguf', messages: hola });
-      assert.equal(urls[0], 'http://127.0.0.1:8081/v1/chat/completions', 'BitNet habla con el 8081');
+      // Antes de conversar, BitNet le pregunta a su propio servidor cuánto
+      // ocupa la entrada y cuánta ventana tiene. Todo va al 8081, nada más.
+      assert.deepEqual([...urls].sort(), [
+        'http://127.0.0.1:8081/props', 'http://127.0.0.1:8081/tokenize', 'http://127.0.0.1:8081/v1/chat/completions'
+      ], 'BitNet habla con el 8081, y sólo con el 8081');
+      assert.equal(urls.at(-1), 'http://127.0.0.1:8081/v1/chat/completions', 'la conversación es la última petición');
+      urls.length = 0;
       assert.equal(out.provider, 'bitnet', 'la respuesta se atribuye a BitNet, no a llama.cpp');
       assert.equal(out.message.content, 'hola');
       assert.equal(out.finishReason, 'stop');
 
       const lista = await PROVIDERS.bitnet.listModels();
-      assert.equal(urls[1], 'http://127.0.0.1:8081/v1/models', 'el catálogo de BitNet sale del 8081');
+      assert.deepEqual(urls, ['http://127.0.0.1:8081/v1/models'], 'el catálogo de BitNet sale del 8081');
+      urls.length = 0;
       assert.deepEqual(lista.models.map(m => m.description), ['BitNet — ggml-model-i2_s.gguf']);
 
       const llama = await PROVIDERS.llamacpp.chat({ model: 'local', messages: hola });
-      assert.equal(urls[2], 'http://127.0.0.1:8080/v1/chat/completions', 'llama.cpp conserva el 8080');
+      assert.deepEqual(urls, ['http://127.0.0.1:8080/v1/chat/completions'],
+        'llama.cpp conserva el 8080 y no hace peticiones de más');
       assert.equal(llama.provider, 'llamacpp');
     } finally {
       global.fetch = previousFetch;

@@ -205,6 +205,17 @@ const esperar = (ms) => new Promise(resolve => setTimeout(resolve, ms));
       const puertoLibre = () => new Promise((resolve) => {
         const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); });
       });
+      // Lo que el adaptador publica de verdad: cada motor fija sistema, URL
+      // exacta bajo las versiones de MIKA5, tamaño y huella, y se instala con
+      // un nombre de la lista cerrada de ejecutables.
+      check(spec.runtimes.length > 0 && spec.runtimes.every(r => entradaValida(r)
+        && ['win32', 'linux', 'darwin'].includes(r.platform) && ['x64', 'arm64'].includes(r.arch)
+        && r.file === (r.platform === 'win32' ? 'llama-server.exe' : 'llama-server')),
+        'los motores de BitNet publicados fijan sistema, URL de MIKA5, tamaño y SHA-256');
+      check(new Set(spec.runtimes.map(r => `${r.platform}/${r.arch}`)).size === spec.runtimes.length,
+        'y no hay dos motores para el mismo sistema');
+      // Las pruebas siguientes parten de «nada publicado» y publican uno falso.
+      const runtimesReales = spec.runtimes.splice(0, spec.runtimes.length);
       const catalogoReal = spec.catalogo.splice(0, spec.catalogo.length, modeloBitnet);
       const baseOriginal = PROVIDERS.bitnet.baseUrl;
       const montar = (dirPerfil, lanzados) => {
@@ -307,7 +318,7 @@ const esperar = (ms) => new Promise(resolve => setTimeout(resolve, ms));
             'un motor alterado en la descarga se descarta: ni se instala ni se ejecuta');
         }
       } finally {
-        spec.runtimes.length = 0;
+        spec.runtimes.splice(0, spec.runtimes.length, ...runtimesReales);
         spec.catalogo.splice(0, spec.catalogo.length, ...catalogoReal);
         PROVIDERS.bitnet.baseUrl = baseOriginal;
       }

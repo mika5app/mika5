@@ -525,7 +525,7 @@ async function main() {
         // Cada motor con sus argumentos: BitNet usa los de su lanzador oficial
         // (sólo CPU, batching continuo); llama.cpp, contexto acotado y una ranura.
         && lanzados[0].args.join(' ') === (id === 'bitnet'
-          ? `-m ${modelo} --alias ${aliasDe(nombreEn(id, 'prueba'))} -c 4096 -ngl 0 -cb --host 127.0.0.1 --port ${puerto}`
+          ? `-m ${modelo} --alias ${aliasDe(nombreEn(id, 'prueba'))} -c 4096 -b 32 -ngl 0 -cb --host 127.0.0.1 --port ${puerto}`
           : `-m ${modelo} --alias ${aliasDe(nombreEn(id, 'prueba'))} -c 16384 -np 1 --host 127.0.0.1 --port ${puerto}`),
         `${id}: se lanza el ejecutable elegido, sin shell, en bucle local y en el puerto del adaptador`);
 
@@ -1169,6 +1169,76 @@ async function main() {
   for (const estado of [READINESS.STARTING, READINESS.LOADING_MODEL]) {
     check(bloqueEs.includes(`'provider.readiness.${estado}'`) && bloqueEn.includes(`'provider.readiness.${estado}'`),
       `el estado ${estado} tiene etiqueta en los dos idiomas`);
+  }
+
+  console.log('\n=== Ventana pequeña: lo que no cabe no se envía, y el motor caído se dice ===');
+  {
+    const http = require('http');
+    const vistos = [];
+    let ventanaDelServidor = 4096;
+    let cortar = false;
+    // Servidor mínimo con las tres rutas que usa el adaptador. Cuenta un token
+    // por cada cuatro caracteres, como referencia fija para las cuentas.
+    const servidor = http.createServer((req, res) => {
+      let cuerpo = '';
+      req.on('data', (parte) => { cuerpo += parte; });
+      req.on('end', () => {
+        const json = (estado, dato) => { res.writeHead(estado, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(dato)); };
+        if (req.url === '/tokenize') return json(200, { tokens: Array.from({ length: Math.ceil(JSON.parse(cuerpo).content.length / 4) }, (_, i) => i) });
+        if (req.url === '/props') return json(200, { default_generation_settings: { n_ctx: ventanaDelServidor } });
+        if (req.url === '/v1/chat/completions') {
+          vistos.push(JSON.parse(cuerpo));
+          if (cortar) return req.socket.destroy();
+          return json(200, { model: 'm', choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }], usage: {} });
+        }
+        return json(404, {});
+      });
+    });
+    await new Promise(resolve => servidor.listen(0, '127.0.0.1', resolve));
+    const raiz = `http://127.0.0.1:${servidor.address().port}`;
+    const bitnet = PROVIDERS.bitnet;
+    const llamacpp = PROVIDERS.llamacpp;
+    const [baseBitnet, baseLlama] = [bitnet.baseUrl, llamacpp.baseUrl];
+    bitnet.baseUrl = `${raiz}/v1`;
+    llamacpp.baseUrl = `${raiz}/v1`;
+    const charla = (caracteres) => [{ role: 'user', content: 'x'.repeat(caracteres) }];
+    try {
+      check(bitnet.engine.contexto && bitnet.engine.contexto.tokens === 4096 && llamacpp.engine.contexto === null,
+        'BitNet declara su ventana de 4 096 tokens; llama.cpp no declara ninguna');
+
+      await bitnet.chat({ model: 'm', messages: charla(4000) });
+      // 4000 caracteres + «user: » = 1002 tokens, más 16 de plantilla.
+      check(vistos.length === 1 && vistos[0].max_tokens === 4096 - 1018,
+        `BitNet: la respuesta se limita a lo que queda de ventana (${vistos[0] && vistos[0].max_tokens} tokens)`);
+
+      let error = null;
+      try { await bitnet.chat({ model: 'm', messages: charla(15000) }); } catch (e) { error = e; }
+      check(error && error.code === 'PROVIDER_CONTEXT_EXCEEDED' && vistos.length === 1
+        && /no cabe en la ventana/.test(error.message) && /base de conocimiento/.test(error.message),
+        'BitNet: un texto que no cabe se rechaza con un mensaje que dice qué hacer, y no llega al motor');
+
+      // El motor arrancó con la variante de menos contexto: manda su ventana real.
+      ventanaDelServidor = 2048;
+      error = null;
+      try { await bitnet.chat({ model: 'm', messages: charla(7000) }); } catch (e) { error = e; }
+      check(error && error.code === 'PROVIDER_CONTEXT_EXCEEDED' && vistos.length === 1,
+        'BitNet: la ventana que cuenta es la del servidor en marcha, no sólo la declarada');
+      ventanaDelServidor = 4096;
+
+      await llamacpp.chat({ model: 'm', messages: charla(15000) });
+      check(vistos.length === 2 && vistos[1].max_tokens === 4096,
+        'llama.cpp: sin ventana declarada nada cambia; mismo tope de respuesta de siempre');
+
+      cortar = true;
+      error = null;
+      try { await bitnet.chat({ model: 'm', messages: charla(100) }); } catch (e) { error = e; }
+      check(error && error.code === 'ENGINE_CLOSED_DURING_REQUEST' && /se cerró mientras respondía/.test(error.message),
+        'si el motor corta la conexión a mitad de la respuesta, el error lo dice');
+    } finally {
+      bitnet.baseUrl = baseBitnet;
+      llamacpp.baseUrl = baseLlama;
+      await new Promise(resolve => servidor.close(resolve));
+    }
   }
 
   console.log(`\nprovider-readiness: ${comprobaciones} comprobaciones OK`);
