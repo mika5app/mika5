@@ -91,7 +91,13 @@ function crearAdaptadorServidorLlama({
             model: selectedModel,
             messages,
             temperature: 0.7,
-            stream: false
+            stream: false,
+            // Mismo criterio que la ruta de Ollama (`num_predict: 4096`,
+            // `think: false`). Sin tope, un modelo pequeño de razonamiento
+            // genera hasta llenar el contexto: medido con el servidor real,
+            // la petición no terminaba y vencía el plazo de cinco minutos.
+            max_tokens: 4096,
+            chat_template_kwargs: { enable_thinking: false }
           }),
           signal: abortContext.signal
         });
