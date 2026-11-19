@@ -23,10 +23,12 @@ const { createAbortContext } = require('../provider-runtime');
 // en silencio la primera vez que se corrigiera uno solo.
 function crearAdaptadorServidorLlama({
   providerId, name, etiqueta, baseUrl, comoIniciar, paquete, descargaHf, guia, compatibilidad, aceptaEjecutable, catalogo,
-  instalacion
+  instalacion, libraryUrl, requisitos
 }) {
   const adaptador = {
     name,
+    // Dónde explorar modelos para este motor. No es el de otro proveedor.
+    libraryUrl: libraryUrl || null,
     privacy: 'private',
     requiresKey: false,
     baseUrl,
@@ -49,6 +51,8 @@ function crearAdaptadorServidorLlama({
       guia: guia || null,
       // `source`: no hay instalador, se compila en el equipo.
       instalacion: instalacion || (paquete ? 'package' : null),
+      // Herramientas que hacen falta para compilarlo, si no hay instalador.
+      requisitos: Array.isArray(requisitos) ? requisitos : [],
       // Qué puede decirse de un GGUF sin cargarlo, a partir de lo que declara.
       compatibilidad: compatibilidad || (() => 'unverified'),
       // `-hf` hace que el propio servidor descargue un GGUF de Hugging Face a

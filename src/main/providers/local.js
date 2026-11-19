@@ -17,6 +17,9 @@ const adaptadorLocal = {
   name: 'Ollama (Local)',
   privacy: 'private',
   requiresKey: false,
+  // Catálogo oficial de este proveedor, para que el usuario explore modelos.
+  // Cada proveedor tiene el suyo: ninguno hereda el de otro.
+  libraryUrl: 'https://ollama.com/library',
   visualCapabilities: {
     vision: true
   },

@@ -18,6 +18,9 @@ const adaptadorLlamacpp = crearAdaptadorServidorLlama({
   comoIniciar: 'llama-server -m modelo.gguf --port 8080',
   paquete: { winget: 'ggml.llamacpp', brew: 'llama.cpp' },
   guia: 'https://github.com/ggml-org/llama.cpp/blob/master/docs/install.md',
+  // Catálogo general de GGUF. Que un modelo esté ahí no garantiza que este
+  // motor lo cargue: la compatibilidad se comprueba al cargarlo.
+  libraryUrl: 'https://huggingface.co/models?library=gguf',
   descargaHf: true,
   // llama.cpp carga muchas arquitecturas, pero no todas ni en todas sus
   // versiones: de un fichero ajeno no se afirma nada. Lo único con evidencia es

@@ -26,6 +26,8 @@ function crearAdaptadorAlibaba({
 }) {
   return {
     name: 'Alibaba Cloud Model Studio',
+    // Catálogo oficial de este proveedor, para que el usuario explore modelos.
+    libraryUrl: 'https://www.alibabacloud.com/help/en/model-studio/models',
     privacy: 'cloud',
     requiresKey: true,
 

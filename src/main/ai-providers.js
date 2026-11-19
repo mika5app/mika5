@@ -55,7 +55,7 @@ const {
 } = require('./providers/alibaba-config');
 const { PROVIDER_API_VERSION, ProviderRegistry } = require('./provider-registry');
 const { ESTADO_MOTOR, GestorDeMotores, validarRutaDeMotor } = require('./local-engines');
-const { descubrirModelos } = require('./engine-discovery');
+const { descubrirModelos, comprobarRequisitos } = require('./engine-discovery');
 const { GestorDeDescargas } = require('./model-download');
 
 
@@ -1142,7 +1142,11 @@ class AIProviderManager {
     const stmt = this.db.prepare('INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)');
     stmt.run('ai_provider', providerId);
 
-    return { provider: providerId, privacy: descriptor.traits.privacy };
+    return {
+      provider: providerId,
+      privacy: descriptor.traits.privacy,
+      libraryUrl: descriptor.adapter.libraryUrl || null
+    };
   }
 
   getProvider() {
@@ -1156,6 +1160,7 @@ class AIProviderManager {
       name: descriptor.displayName,
       privacy,
       requiresKey: descriptor.traits.requiresKey,
+      libraryUrl: descriptor.adapter.libraryUrl || null,
       privacyLabel: privacy === 'private' ? 'Privado' : 'Cloud',
       credentialStorage: canPersistCredentials() ? 'protected' : 'session',
       credentialSessionOnly: Object.values(this.apiKeys).some(Boolean) && !canPersistCredentials(),
@@ -1832,6 +1837,10 @@ class AIProviderManager {
       // Dónde escucha el motor: sólo se enseña en la configuración avanzada.
       endpoint: (() => { try { return new URL(spec.baseUrl()).host; } catch (_) { return null; } })(),
       installKind: spec.instalacion || null,
+      // Para un motor que se compila: qué herramientas hay y cuáles faltan.
+      requirements: comprobarRequisitos(spec.requisitos, {
+        fs: this.motores._fs, env: this.motores._env, platform: this.motores._platform
+      }),
       // Al renderer sólo va el nombre y el origen: la ruta se queda aquí.
       models: modelos.map(m => ({ id: m.id, label: m.label, source: m.source, size: m.size, compatibility: m.compatibility })),
       // Sistema detectado: decide qué instalador se ofrece.
@@ -2230,6 +2239,7 @@ class AIProviderManager {
       name: config.name,
       privacy: config.privacy,
       requiresKey: config.requiresKey,
+      libraryUrl: config.libraryUrl || null,
       current: id === this.currentProvider,
       capabilities: this.getCapabilities(id)
     }));

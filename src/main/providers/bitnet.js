@@ -20,9 +20,14 @@ const adaptadorBitnet = crearAdaptadorServidorLlama({
   baseUrl: 'http://127.0.0.1:8081/v1',
   comoIniciar: 'python run_inference_server.py -m models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf --port 8081',
   // bitnet.cpp no tiene paquete: se compila desde su repositorio.
+  // Lista oficial de modelos que bitnet.cpp soporta.
+  libraryUrl: 'https://github.com/microsoft/BitNet#supported-models',
   guia: 'https://github.com/microsoft/BitNet#installation',
   // bitnet.cpp no se instala con un paquete: se compila en el equipo.
   instalacion: 'source',
+  // Lo que pide su README para compilar: Python, CMake y Clang, además de Git
+  // para obtener el código.
+  requisitos: ['git', 'python', 'cmake', 'clang'],
   // bitnet.cpp sólo carga modelos de 1,58 bits. Un GGUF que declara otra
   // arquitectura —los de Ollama, los de llama.cpp— no es de BitNet; uno que no
   // declara ninguna no se da por bueno ni por malo.

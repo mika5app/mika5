@@ -212,6 +212,25 @@ llama-server requests carry `max_tokens: 4096` and `enable_thinking: false`, the
 limits as the Ollama path. Measured without them: a small reasoning model generated until
 the five-minute timeout.
 
+## Model libraries and catalogues
+
+Each adapter declares `libraryUrl`, the provider's own official page for browsing models.
+The renderer holds no library URL: it opens the one the main process returned for the
+selected provider, so no provider can inherit another's. A test asserts that only Ollama
+links to ollama.com and that the renderer contains no such URL.
+
+Catalogues are asked from the provider, never hardcoded: Ollama `/api/tags`, OpenAI, Groq,
+Moonshot `GET /models`, Anthropic `GET /v1/models` (paginated with `after_id`), llama.cpp
+and BitNet `/v1/models` plus the GGUF files found on disk. Listing is not an inference.
+Moonshot is queried at the same base URL the chat uses; a key is never sent to another
+host. Alibaba keeps its user-configured catalogue: its list-models API needs a workspace
+id and region that MIKA5 does not have. When a catalogue cannot be read the provider shows
+its error; there is no fallback list and no fallback to another provider.
+
+BitNet has no installer and no prebuilt binaries. `comprobarRequisitos()` reports which
+build tools are present (Git, Python, CMake, Clang, including the ones Visual Studio
+installs) without running any of them, and the dialog shows what is missing.
+
 ## Update notice
 
 `src/main/update-check.js` only informs. It asks the public releases repository for the

@@ -167,6 +167,63 @@ function descubrirEjecutables(nombre, contexto) {
   return encontrados;
 }
 
+/**
+ * Herramientas que hacen falta para compilar un motor que no tiene instalador.
+ * Sólo se mira si están: no se ejecuta ninguna, ni siquiera para preguntarle
+ * la versión. Cada una se busca en el PATH y en las ubicaciones donde la deja
+ * su instalador oficial.
+ */
+const HERRAMIENTAS = Object.freeze({
+  git: { nombres: ['git'], vs: [], extra: () => [] },
+  python: { nombres: ['python', 'python3', 'py'], vs: [], extra: () => [] },
+  cmake: {
+    nombres: ['cmake'],
+    vs: [['Common7', 'IDE', 'CommonExtensions', 'Microsoft', 'CMake', 'CMake', 'bin']],
+    extra: ({ env, rutas }) => (env.ProgramFiles ? [rutas.join(env.ProgramFiles, 'CMake', 'bin')] : [])
+  },
+  clang: {
+    nombres: ['clang'],
+    // El compilador Clang que instala Visual Studio, que es el que usa
+    // bitnet.cpp en Windows.
+    vs: [['VC', 'Tools', 'Llvm', 'x64', 'bin'], ['VC', 'Tools', 'Llvm', 'bin']],
+    extra: ({ env, rutas }) => (env.ProgramFiles ? [rutas.join(env.ProgramFiles, 'LLVM', 'bin')] : [])
+  }
+});
+
+/** Carpetas de instalación de Visual Studio 2022, cualquiera de sus ediciones. */
+function instalacionesDeVisualStudio({ fs, env, platform }) {
+  if (platform !== 'win32') return [];
+  const rutas = rutasDe(platform);
+  const raices = [env['ProgramFiles(x86)'], env.ProgramFiles].filter(Boolean)
+    .map(base => rutas.join(base, 'Microsoft Visual Studio', '2022'));
+  const instalaciones = [];
+  for (const raiz of raices) {
+    for (const edicion of listar(fs, raiz)) {
+      if (edicion.isDirectory()) instalaciones.push(rutas.join(raiz, edicion.name));
+    }
+  }
+  return instalaciones;
+}
+
+/** Para cada herramienta pedida, si está en el equipo. */
+function comprobarRequisitos(ids, contexto) {
+  const { fs, env, platform } = contexto;
+  const rutas = rutasDe(platform);
+  const delPath = String(env.PATH || env.Path || '').split(rutas.delimiter).filter(dir => dir && rutas.isAbsolute(dir));
+  const deVs = instalacionesDeVisualStudio(contexto);
+  return (ids || []).filter(id => HERRAMIENTAS[id]).map((id) => {
+    const herramienta = HERRAMIENTAS[id];
+    const dirs = [
+      ...delPath,
+      ...deVs.flatMap(vs => herramienta.vs.map(partes => rutas.join(vs, ...partes))),
+      ...(platform === 'win32' ? herramienta.extra({ env, rutas }) : [])
+    ];
+    const found = dirs.some(dir => herramienta.nombres.some(nombre =>
+      esFichero(fs, rutas.join(dir, platform === 'win32' ? `${nombre}.exe` : nombre))));
+    return { id, found };
+  });
+}
+
 /** Carpetas donde las herramientas habituales guardan GGUF. */
 function carpetasDeModelos({ env, platform, carpetasPropias = [] }) {
   const rutas = rutasDe(platform);
@@ -293,4 +350,4 @@ function descubrirModelos(contexto) {
   return modelos.sort((a, b) => a.id.localeCompare(b.id));
 }
 
-module.exports = { LIMITES, esGguf, arquitecturaGguf, descubrirEjecutables, descubrirModelos };
+module.exports = { LIMITES, esGguf, arquitecturaGguf, descubrirEjecutables, descubrirModelos, comprobarRequisitos };

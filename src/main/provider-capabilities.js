@@ -57,7 +57,13 @@ const ANTHROPIC_VISION_MODELS = [
   'claude-sonnet-4*',
   'claude-haiku-4*',
   'claude-opus-5*',
-  'claude-sonnet-5*'
+  'claude-sonnet-5*',
+  // Todos los modelos actuales aceptan imágenes, según la página oficial de
+  // modelos. Sin estas familias, el catálogo dinámico las ofrecía y adjuntar
+  // una imagen se rechazaba.
+  'claude-haiku-5*',
+  'claude-fable-*',
+  'claude-mythos-*'
 ];
 
 const PROVIDER_CAPABILITIES = {

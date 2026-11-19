@@ -800,6 +800,41 @@ async function main() {
       check((await conLlama.getReadiness('llamacpp')).engine.status === ENGINE_STATUS.NEEDS_APPROVAL,
         'ese mismo ejecutable sí es el motor de llama.cpp');
 
+      // BitNet se compila: se dice qué herramientas hay y cuáles faltan.
+      {
+        const { comprobarRequisitos } = require('../src/main/engine-discovery');
+        const vs = 'C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools';
+        const cmakeVs = `${vs}\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe`;
+        const clangVs = `${vs}\\VC\\Tools\\Llvm\\x64\\bin\\clang.exe`;
+        const entorno = { Path: 'C:\\Git\\cmd;C:\\Py', 'ProgramFiles(x86)': 'C:\\Program Files (x86)', ProgramFiles: 'C:\\Program Files' };
+        const disco = (ficheros) => ({
+          ...fsFalso(ficheros),
+          readdirSync: (dir) => (dir === 'C:\\Program Files (x86)\\Microsoft Visual Studio\\2022'
+            ? [{ name: 'BuildTools', isDirectory: () => true }] : [])
+        });
+        const sinClang = comprobarRequisitos(['git', 'python', 'cmake', 'clang'], {
+          fs: disco(['C:\\Git\\cmd\\git.exe', 'C:\\Py\\python.exe', cmakeVs]), env: entorno, platform: 'win32'
+        });
+        check(sinClang.map(r => `${r.id}:${r.found}`).join() === 'git:true,python:true,cmake:true,clang:false',
+          'con Visual Studio sin el componente Clang: se detecta CMake de Visual Studio y se dice que falta Clang');
+        const completo = comprobarRequisitos(['git', 'python', 'cmake', 'clang'], {
+          fs: disco(['C:\\Git\\cmd\\git.exe', 'C:\\Py\\python.exe', cmakeVs, clangVs]), env: entorno, platform: 'win32'
+        });
+        check(completo.every(r => r.found), 'con el componente Clang de Visual Studio instalado, no falta nada');
+        const linux = comprobarRequisitos(['git', 'python', 'cmake', 'clang'], {
+          fs: fsFalso(['/usr/bin/git', '/usr/bin/python3', '/usr/bin/clang']), env: { PATH: '/usr/bin' }, platform: 'linux'
+        });
+        check(linux.map(r => `${r.id}:${r.found}`).join() === 'git:true,python:true,cmake:false,clang:true',
+          'en Linux se buscan en el PATH, y python3 cuenta como Python');
+        check(JSON.stringify(PROVIDERS.bitnet.engine.requisitos) === JSON.stringify(['git', 'python', 'cmake', 'clang'])
+          && PROVIDERS.llamacpp.engine.requisitos.length === 0,
+          'BitNet declara lo que pide su README; llama.cpp, que tiene instalador, no pide nada');
+        check(descrito.requirements.length === 4 && descrito.requirements.every(r => typeof r.found === 'boolean'),
+          'la configuración de BitNet recibe la lista de requisitos con su estado');
+        const fuente = leer('src/main/engine-discovery.js').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+        check(!/spawn|exec\(|execFile/.test(fuente), 'comprobar requisitos no ejecuta ninguna herramienta');
+      }
+
       // Veredictos guardados con el criterio anterior.
       const rutaA = '/m/a.gguf';
       const rutaB = '/m/b.gguf';

@@ -706,6 +706,8 @@ async function safeViewChange(operation) {
 
 // AI provider state
 let currentProvider = 'local';
+// Catálogo oficial del proveedor elegido. Lo da el proceso principal.
+let providerLibraryUrl = null;
 let providerPrivacy = 'private'; // 'private' | 'cloud'
 
 function formatBytesRenderer(bytes) {
@@ -2396,7 +2398,10 @@ function renderProviderAction(disp) {
   const accion = disp && disp.action;
   const clave = `provider.action.${accion}`;
   const etiqueta = accion ? t(clave) : clave;
-  if (!accion || etiqueta === clave) {
+  // Configurar la clave ya tiene su entrada propia en este menú para los
+  // proveedores cloud: repetirla aquí sólo alargaba el menú.
+  const repetida = accion === 'configure-key' || accion === 'configure-provider';
+  if (!accion || etiqueta === clave || repetida) {
     boton.style.display = 'none';
     delete boton.dataset.action;
     return;
@@ -2604,6 +2609,16 @@ function renderEngineModal(engine) {
     else if (!engine.executableApproved) paso = 'engine.step.approve';
     else if (engine.requiresModel && !(engine.models || []).length) paso = 'engine.step.model';
     resumen.textContent = t(paso).replace('{p}', providerDisplayName(currentProvider).replace(/\s*\(Local\)$/, ''));
+  }
+  // Motor que se compila: se dice qué herramientas hay y cuáles faltan, en vez
+  // de un botón de instalar que no existe.
+  const requisitos = el('engineRequirements');
+  if (requisitos) {
+    const lista = (!engine?.executable && engine?.requirements) || [];
+    requisitos.textContent = lista.length
+      ? `${t('engine.requirements')} ${lista.map(r => `${r.found ? '✓' : '✗'} ${t(`engine.tool.${r.id}`)}`).join(' · ')}`
+      : '';
+    requisitos.style.display = lista.length ? '' : 'none';
   }
   const direccion = el('engineEndpoint');
   if (direccion) {
@@ -3041,7 +3056,7 @@ async function loadRuntime() {
     pullLocal.disabled = (currentProvider !== 'local');
     pullLocal.style.display = currentProvider === 'alibaba' ? 'none' : '';
   }
-  if (pullLibrary) pullLibrary.style.display = currentProvider === 'local' ? '' : 'none';
+  if (pullLibrary) pullLibrary.style.display = providerLibraryUrl ? '' : 'none';
   syncModelDropdown();
 }
 
@@ -3051,6 +3066,7 @@ async function loadProvider() {
     const provider = await window.mika5.ai.getCurrentProvider();
     if (provider && provider.id) {
       currentProvider = provider.id;
+      providerLibraryUrl = provider.libraryUrl || null;
       if (provider.credentialSessionOnly) showToast('Las claves de proveedores funcionan sólo durante esta sesión: el almacén seguro del sistema no está disponible.', 'warning');
       providerPrivacy = provider.privacy || (provider.privacy === 'private' ? 'private' : 'cloud');
       // El contrato viaja con el proveedor: sin ida y vuelta extra por IPC.
@@ -3353,11 +3369,20 @@ function updatePrivacyUI() {
   const providerLabel = currentProvider === 'local' && providerPrivacy === 'cloud'
     ? 'Ollama Cloud' : providerDisplayName(currentProvider);
 
-  // La biblioteca de modelos abre el catálogo de Ollama. Depende de qué
-  // proveedor está elegido, no de si responde, así que se decide aquí y no al
-  // final de `loadRuntime()`, que no llega cuando el proveedor no está listo.
-  const ollamaLibrary = el('btnPull');
-  if (ollamaLibrary) ollamaLibrary.style.display = currentProvider === 'local' ? '' : 'none';
+  // La biblioteca de modelos es la del proveedor elegido. Depende de cuál
+  // está elegido, no de si responde, así que se decide aquí y no al final de
+  // `loadRuntime()`, que no llega cuando el proveedor no está listo.
+  const biblioteca = el('btnPull');
+  if (biblioteca) {
+    biblioteca.style.display = providerLibraryUrl ? '' : 'none';
+    const rotuloBiblioteca = `${t('library.open')} — ${providerLabel}`;
+    biblioteca.title = rotuloBiblioteca;
+    biblioteca.setAttribute('aria-label', rotuloBiblioteca);
+  }
+  // «Pull» descarga un modelo con Ollama: fuera de Ollama no hace nada, así
+  // que su fila no se enseña.
+  const filaPull = el('btnPullLocal')?.closest?.('.more-actions-row');
+  if (filaPull) filaPull.style.display = currentProvider === 'local' ? '' : 'none';
 
   if (providerPrivacy === 'private') {
     if (indicator) {
@@ -3482,6 +3507,7 @@ async function switchProvider(providerId) {
   try {
     const result = await window.mika5.ai.setProvider(providerId);
     currentProvider = providerId;
+    providerLibraryUrl = result.libraryUrl || null;
     // El contrato del proveedor anterior no vale para el nuevo.
     await refreshProviderCapabilities();
     // El plan visual pendiente pertenece al proveedor anterior: no se arrastra.
@@ -7151,7 +7177,10 @@ function wire() {
   const replyCloseBtn = el("replyPreviewClose");
   if (replyCloseBtn) replyCloseBtn.addEventListener("click", clearReplyTo);
   const btnPull = el("btnPull");
-  if (btnPull) btnPull.onclick = () => window.mika5.openExternal("https://ollama.com/library");
+  // La biblioteca que se abre es la del proveedor ELEGIDO. La dirección la
+  // declara cada adaptador en el proceso principal; aquí no hay ninguna
+  // escrita, y por tanto ninguna puede quedarse apuntando a otro proveedor.
+  if (btnPull) btnPull.onclick = () => { if (providerLibraryUrl) window.mika5.openExternal(providerLibraryUrl); };
   const btnPullLocal = el("btnPullLocal");
   if (btnPullLocal) btnPullLocal.onclick = pullModel;
   

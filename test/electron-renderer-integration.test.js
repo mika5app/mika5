@@ -1579,7 +1579,10 @@ async function run() {
     uiState: 'configuration-required', errorCode: 'PROVIDER_CREDENTIAL_REQUIRED', engine: null });
   await win.webContents.executeJavaScript(`switchProvider('openai')`, true);
   const sinClave = await estadoPildora();
-  assert.strictEqual(sinClave.accion, 'configure-key', 'el menú ofrece configurar la clave');
+  assert.strictEqual(sinClave.accion, null, 'la acción de clave no se repite: el menú ya tiene la suya');
+  assert(await win.webContents.executeJavaScript(
+    `document.getElementById('btnConfigApiKey').style.display !== 'none'`, true),
+    'el menú ofrece configurar la clave en su entrada de siempre');
   const avisoClave = await pulsarAviso('configure-key');
   assert(avisoClave.existe && avisoClave.abiertosAntes.length === 0, 'el aviso de la clave aparece sin abrir nada solo');
   await waitFor(win, `document.getElementById('apiKeyModal').style.display === 'flex'`);
@@ -1596,9 +1599,14 @@ async function run() {
   // de preparación guionizado por la sección anterior.
   ipcMain.removeHandler('ai:get-readiness');
   ipcMain.removeHandler('ai:set-provider');
+  // Cada proveedor trae su propia biblioteca, como hace el proceso principal.
+  const BIBLIOTECA_DE = {
+    local: 'https://ollama.com/library', llamacpp: 'https://huggingface.co/models?library=gguf',
+    bitnet: 'https://github.com/microsoft/BitNet#supported-models', openai: 'https://developers.openai.com/api/docs/models'
+  };
   ipcMain.handle('ai:set-provider', (_event, id) => {
     ultimoElegido = id;
-    return { provider: id, privacy: PRIVADOS.has(id) ? 'private' : 'cloud' };
+    return { provider: id, privacy: PRIVADOS.has(id) ? 'private' : 'cloud', libraryUrl: BIBLIOTECA_DE[id] || null };
   });
   ipcMain.removeHandler('ai:get-availability');
   // llama.cpp y BitNet contestan «sin conexión»: el motor no está instalado.
@@ -1617,14 +1625,21 @@ async function run() {
   });
   const elegir = async id => {
     await win.webContents.executeJavaScript(`switchProvider(${JSON.stringify(id)})`, true);
-    return win.webContents.executeJavaScript(`(() => ({
+    const abiertasAntes = state.externalUrls.length;
+    // Se pulsa la biblioteca de verdad: lo que cuenta es qué dirección se abre.
+    await win.webContents.executeJavaScript(`document.getElementById('btnPull').click()`, true);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const abierta = state.externalUrls.slice(abiertasAntes);
+    const visto = await leerProveedor();
+    return { ...visto, abierta };
+  };
+  const leerProveedor = () => win.webContents.executeJavaScript(`(() => ({
       elegido: currentProvider,
       rotulo: document.getElementById('currentProviderName').textContent,
       biblioteca: document.getElementById('btnPull').style.display !== 'none',
       modelo: document.getElementById('modelSelect').value,
       selectorDeshabilitado: document.getElementById('modelSelect').disabled
     }))()`, true);
-  };
   const ROTULOS = {
     local: 'Ollama (Local)', llamacpp: 'llama.cpp (Local)', bitnet: 'BitNet (Local)', openai: 'OpenAI'
   };
@@ -1636,8 +1651,12 @@ async function run() {
     recorrido.push(visto);
     assert.strictEqual(visto.elegido, id, `${antes} → ${id}: el proveedor elegido es ${id}`);
     assert.strictEqual(visto.rotulo, ROTULOS[id], `${antes} → ${id}: la cabecera muestra «${ROTULOS[id]}»`);
-    assert.strictEqual(visto.biblioteca, id === 'local',
-      `${antes} → ${id}: la biblioteca de Ollama ${id === 'local' ? 'se ofrece' : 'no se ofrece'}`);
+    assert.strictEqual(visto.biblioteca, true, `${antes} → ${id}: se ofrece una biblioteca de modelos`);
+    assert.deepStrictEqual(visto.abierta, [BIBLIOTECA_DE[id]],
+      `${antes} → ${id}: la biblioteca que se abre es la de ${id}, una sola vez`);
+    if (id !== 'local') {
+      assert(!/ollama\.com/.test(visto.abierta.join()), `${antes} → ${id}: no se abre la biblioteca de Ollama`);
+    }
     if (DISPONIBLES[id]) {
       assert.strictEqual(visto.modelo, DISPONIBLES[id][0], `${antes} → ${id}: el modelo es el de ${id}`);
     } else {
