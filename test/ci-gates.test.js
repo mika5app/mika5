@@ -142,8 +142,7 @@ const EN_NPM_TEST = [
   'test:visual-ui-conversation',
   'test:electron-test-isolation',
   'test:visual-ui-polish',
-  'test:ipc-contracts',
-  'test:public-readiness'
+  'test:ipc-contracts'
 ];
 for (const suite of EN_NPM_TEST) {
   check(pkg.scripts.test.includes(suite),
@@ -569,3 +568,9 @@ console.log(`\n${'='.repeat(40)}`);
 require('./canonical-workflow.test');
 console.log(`CI gates tests passed (${passed} comprobaciones)`);
 console.log(`${'='.repeat(40)}`);
+
+// Lo que el repositorio promete en publico (licencia, privacidad, politica de
+// firma, secretos fuera del alcance de los pull requests) se comprueba desde
+// aqui y no con un script propio: tocar package.json dispara el empaquetado de
+// los cuatro productores, y esto no cambia ningun binario.
+require('./public-readiness.test.js');
