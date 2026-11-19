@@ -262,10 +262,13 @@ function descubrirModelos(contexto) {
   const rutas = rutasDe(platform);
   const crudos = [];
   const presupuesto = { entradas: LIMITES.entradas };
+  // En Windows `BitNet` y `bitnet` son la misma carpeta: sin igualar
+  // mayúsculas el mismo modelo salía dos veces.
+  const clave = (ruta) => (platform === 'win32' ? ruta.toLowerCase() : ruta);
   const vistas = new Set();
   for (const { origen, dir } of carpetasDeModelos(contexto)) {
-    if (vistas.has(dir) || !rutas.isAbsolute(dir)) continue;
-    vistas.add(dir);
+    if (vistas.has(clave(dir)) || !rutas.isAbsolute(dir)) continue;
+    vistas.add(clave(dir));
     buscarGguf(fs, rutas, dir, origen, presupuesto, crudos);
   }
   modelosDeOllama(contexto, crudos);
@@ -274,8 +277,8 @@ function descubrirModelos(contexto) {
   const ids = new Set();
   const rutasVistas = new Set();
   for (const crudo of crudos) {
-    if (rutasVistas.has(crudo.path)) continue;
-    rutasVistas.add(crudo.path);
+    if (rutasVistas.has(clave(crudo.path))) continue;
+    rutasVistas.add(clave(crudo.path));
     let id = crudo.origen === 'Ollama' ? `ollama/${crudo.nombre}` : crudo.nombre;
     for (let n = 2; ids.has(id); n += 1) id = `${crudo.nombre} (${n})`;
     ids.add(id);
