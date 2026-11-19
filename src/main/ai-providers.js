@@ -1359,6 +1359,13 @@ class AIProviderManager {
     // adjunta en el turno sigue viajando por el camino de chat, donde la barrera
     // de visión decide si el modelo la acepta. Pedir una imagen nueva desde
     // cero («dibuja un gato») conserva su aviso: ahí la intención es inequívoca.
+    // «Analiza el documento» no es analizar una imagen. El verbo dispara la
+    // intención visual, pero sin ninguna imagen —ni adjunta ni en el contexto
+    // del chat— no hay nada visual que analizar: es una conversación normal,
+    // y el usuario puede estar hablando de un documento que acaba de adjuntar.
+    if (effectiveIntent === 'vision-analysis' && !visualContext.hasVisualContext) {
+      effectiveIntent = 'normal-chat';
+    }
     const capabilities = getProviderVisualCapabilities(providerId);
     if (!capabilities.imageGeneration
       && ['image-edit', 'image-variation', 'ambiguous-visual', 'image-ambiguous'].includes(effectiveIntent)) {

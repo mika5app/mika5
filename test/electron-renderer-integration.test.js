@@ -1782,6 +1782,44 @@ async function run() {
   assert(guardados.length >= 1 && guardados.every(g => g.model === MOTOR),
     'los mensajes nuevos se guardan atribuidos a «llama.cpp · modelo», no a un nombre que parezca de Ollama');
 
+
+  // --- Documento adjunto: su texto llega al modelo, pase lo que pase con el routing ---
+  // Informe de campo: «analiza el documento» con un .docx adjunto, y el modelo
+  // contestó «copia y pega el documento aquí». El routing lo tomó por análisis
+  // de imagen y el renderer sustituyó el mensaje por el texto escrito, sin el
+  // documento. Se prueba el peor caso: el routing insiste en que es visual.
+  const MARCA_DOC = 'CLAUSULA-UNICA-7731 las partes acuerdan la entrega en Gijón';
+  const enviarConDocumento = async (texto) => {
+    const antes = state.chatCalls.length;
+    await win.webContents.executeJavaScript(`(() => {
+      document.getElementById('input').value = ${JSON.stringify(texto)};
+      chatAttachments = [{ type: 'text', name: 'Documento.docx', text: ${JSON.stringify(MARCA_DOC + ' '.repeat(10) + 'x'.repeat(2000))} }];
+      window.__docDone = false;
+      send().finally(() => { window.__docDone = true; });
+    })()`, true);
+    await waitFor(win, `window.__docDone || document.getElementById('cloudConsentModal')`);
+    if (await win.webContents.executeJavaScript(`Boolean(document.getElementById('cloudConsentModal'))`, true)) {
+      await win.webContents.executeJavaScript(`document.querySelectorAll('#cloudConsentModal button')[0].click()`, true);
+    }
+    await waitFor(win, `window.__docDone`);
+    assert.strictEqual(state.chatCalls.length, antes + 1, `«${texto}» con documento adjunto llega al proveedor una vez`);
+    return state.chatCalls.at(-1);
+  };
+  const ultimoDeUsuario = llamada => String(llamada.messages.filter(m => m.role === 'user').at(-1).content);
+  for (const intencion of ['normal-chat', 'vision-analysis']) {
+    ipcMain.removeHandler('ai:route-intent');
+    ipcMain.handle('ai:route-intent', (_event, params = {}) => ({
+      action: 'chat', intent: intencion, model: params.currentModel, modelPrompt: params.text,
+      detailed: { intentConflicts: {} }, visualContext: { hasVisualContext: intencion === 'vision-analysis', imageRef: null }
+    }));
+    const llamada = await enviarConDocumento('analiza el documento');
+    const contenido = ultimoDeUsuario(llamada);
+    assert(contenido.includes(MARCA_DOC) && contenido.includes('Documento.docx'),
+      `routing ${intencion}: el texto del documento adjunto llega al modelo`);
+    assert(contenido.includes('analiza el documento'), `routing ${intencion}: y también lo que escribió el usuario`);
+    assert.strictEqual(llamada.providerId, 'llamacpp', `routing ${intencion}: por el proveedor elegido`);
+  }
+
   win.destroy();
 
   console.log('Electron renderer integration tests passed');

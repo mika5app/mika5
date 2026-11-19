@@ -5797,9 +5797,6 @@ async function send() {
   let resolvedVisualContext = null;
   let activeVisualRoute = null;
   const routingInstruction = extractRoutingInstruction(text);
-  // extractRoutingInstruction devuelve el texto recortado: comparar contra el
-  // texto crudo daría falsos negativos por espacios al inicio o al final.
-  const routingUsesFullText = routingInstruction === text.trim();
   {
     try {
       const route = await window.mika5.ai.routeIntent({
@@ -5966,12 +5963,12 @@ async function send() {
         if (!routedImages.length && route.visualContext?.imageRef) {
           routedImages = [route.visualContext.imageRef];
         }
-        // El prompt del plan se deriva de la instrucción de routing: solo puede
-        // reemplazar el contenido cuando no se truncó nada, para que el modelo
-        // siga recibiendo el código o reporte completo.
-        if (routingUsesFullText) {
-          contentToSend = route.modelPrompt || contentToSend;
-        }
+        // El contenido NO se sustituye por el prompt del routing. `contentToSend`
+        // lleva lo que escribió el usuario MÁS el texto de los documentos que
+        // adjuntó; el prompt del routing sólo lleva lo escrito. Sustituirlo
+        // descartaba el documento adjunto antes de enviarlo: con «analiza el
+        // documento» el modelo recibía esas tres palabras y pedía que le
+        // pegasen el documento.
         if (originProviderId === 'alibaba') {
           showToast('Usando qwen3.7-plus para analizar imágenes.', 'info');
         }

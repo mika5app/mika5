@@ -1935,9 +1935,12 @@ function createDb() {
   // El contenido íntegro nunca se recorta para el modelo ni para la DB.
   assert(rendererSource.includes('const routingInstruction = extractRoutingInstruction(text)'));
   assert(rendererSource.includes('text: routingInstruction,'));
-  // Comparación robusta frente a espacios al inicio/final del mensaje.
-  assert(rendererSource.includes("const routingUsesFullText = routingInstruction === text.trim()"));
-  assert(rendererSource.includes('if (routingUsesFullText) {'));
+  // El contenido que se envía ya no se sustituye por el prompt del routing en
+  // ningún caso —antes sólo cuando la instrucción no estaba recortada—. La
+  // garantía es más fuerte que la anterior: ni un recorte ni la pérdida de un
+  // documento adjunto pueden entrar por ese camino.
+  assert(!/contentToSend\s*=\s*route\.modelPrompt/.test(rendererSource),
+    'el renderer no reemplaza el contenido del usuario por el prompt del routing');
   assert(!rendererSource.includes('if (routingInstruction === text) {'));
   const paddedShortText = '  analiza esto  ';
   assert.equal(extractRoutingInstruction(paddedShortText), paddedShortText.trim());

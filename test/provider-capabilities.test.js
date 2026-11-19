@@ -602,6 +602,23 @@ assert.equal(attached[2].content[0].text, 'segundo');
       rutasComprobadas += 1;
     }
   }
+  // Sin ninguna imagen, «analiza el documento» es una conversación normal.
+  // Se clasificaba como análisis de imagen por el verbo, y en esa ruta el
+  // documento adjunto se perdía antes de llegar al modelo.
+  for (const providerId of registroDeProveedores.ids()) {
+    for (const text of ['analiza el documento', 'analiza el archivo adjunto', 'analiza este contrato', 'revisa el documento y dime los riesgos']) {
+      const ruta = gestorDeRutas.routeIntent({ text, providerId, chatId: 'c', attachments: [], currentModel: 'm' });
+      assert.equal(ruta.intent, 'normal-chat', `${providerId} / «${text}» sin imagen: es chat normal, no análisis de imagen`);
+      assert.equal(ruta.action, 'chat');
+      assert.equal(ruta.modelPrompt, text, `${providerId} / «${text}»: el texto del usuario no se reescribe`);
+      rutasComprobadas += 1;
+    }
+    // Con una imagen adjunta, analizar sigue siendo análisis de imagen.
+    const conImagen = gestorDeRutas.routeIntent({ text: 'analiza esta imagen', providerId, chatId: 'c', attachments: adjunto, currentModel: 'm' });
+    assert.equal(conImagen.intent, 'vision-analysis', `${providerId}: con imagen adjunta sí es análisis de imagen`);
+    rutasComprobadas += 1;
+  }
+
   // Alibaba sí edita: su camino no cambia.
   const edicion = gestorDeRutas.routeIntent({
     text: 'moderniza este logotipo', providerId: 'alibaba', chatId: 'c', attachments: adjunto, currentModel: 'm'
