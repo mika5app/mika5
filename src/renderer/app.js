@@ -2602,9 +2602,12 @@ function renderEngineModal(engine) {
   if (resumen) {
     let paso = 'engine.step.ready';
     if (!engine?.executable) {
-      // Sin instalador no se finge uno: si hay que compilarlo, se dice.
-      paso = engine?.canInstall ? 'engine.step.install'
-        : (engine?.installKind === 'source' ? 'engine.step.source' : 'engine.step.missing');
+      // Lo primero es lo que el usuario puede hacer con un clic. Si MIKA5 no
+      // tiene todavía un motor preparado para este sistema, se dice sin
+      // rodeos; cómo compilarlo queda en la configuración avanzada.
+      if (engine?.setup?.engineAvailable) paso = 'engine.step.oneclick';
+      else if (engine?.canInstall) paso = 'engine.step.install';
+      else paso = engine?.experimental ? 'engine.step.experimental' : 'engine.step.missing';
     }
     else if (!engine.executableApproved) paso = 'engine.step.approve';
     else if (engine.requiresModel && !(engine.models || []).length) paso = 'engine.step.model';
@@ -2624,6 +2627,15 @@ function renderEngineModal(engine) {
   if (direccion) {
     direccion.textContent = engine?.endpoint ? `${t('engine.endpoint')} ${engine.endpoint}` : '';
   }
+  // «Instalar y comenzar»: un botón para todo lo que falta.
+  const preparar = el('enginePrepareButton');
+  const preparando = engine?.setupStatus?.state === 'running';
+  if (preparar) {
+    const listo = engine?.state === 'running' && engine?.ready;
+    preparar.style.display = engine?.setup?.possible && !listo && !preparando ? '' : 'none';
+    preparar.textContent = t(engine?.setup?.steps?.length ? 'engine.prepare' : 'engine.prepare.start');
+  }
+  renderEngineSetup(engine?.setupStatus);
   renderEngineCatalog(engine);
   // Con varios motores instalados se elige entre los encontrados.
   if (lista) {
@@ -2655,6 +2667,66 @@ function renderEngineModal(engine) {
     const clave = `provider.error.${engine?.errorCode}`;
     const texto = engine?.errorCode ? t(clave) : '';
     estado.textContent = texto && texto !== clave ? texto : (engine?.canStart ? t('engine.ready') : '');
+  }
+}
+
+// Avance de «Instalar y comenzar», en una frase.
+function renderEngineSetup(estado) {
+  const linea = el('engineSetupProgress');
+  if (!linea) return;
+  const enCurso = estado && estado.state === 'running';
+  linea.style.display = enCurso ? '' : 'none';
+  if (!enCurso) return;
+  const avance = estado.total
+    ? ` ${formatBytesRenderer(estado.received)} / ${formatBytesRenderer(estado.total)} (${Math.floor((estado.received / estado.total) * 100)} %)`
+    : '';
+  linea.textContent = t(`engine.setup.${estado.step || 'start'}`) + avance;
+}
+
+let engineSetupTimer = null;
+
+// Sigue la preparación hasta que termina; al acabar, el motor ya está
+// arrancando y el selector de modelos lo refleja.
+function seguirPreparacionDeMotor() {
+  clearTimeout(engineSetupTimer);
+  const proveedor = currentProvider;
+  engineSetupTimer = setTimeout(async () => {
+    let estado;
+    try {
+      estado = await window.mika5.ai.engineSetupStatus(proveedor);
+    } catch (_) {
+      return;
+    }
+    if (estado.state === 'running') {
+      renderEngineSetup(estado);
+      seguirPreparacionDeMotor();
+      return;
+    }
+    if (estado.state === 'failed') showToast(t(`provider.error.${estado.errorCode}`), 'error');
+    if (estado.state === 'done') {
+      showToast(t('engine.setup.done'), 'success');
+      closeEngineModal();
+    } else if (currentProvider === proveedor) {
+      try { renderEngineModal(await window.mika5.ai.describeEngine(proveedor)); } catch (_) {}
+    }
+    if (currentProvider === proveedor) await loadRuntime();
+  }, 1000);
+}
+
+// La autorización se pide en un diálogo nativo del proceso principal, con la
+// lista de lo que se va a descargar y cuánto ocupa.
+async function prepareEngineFromModal() {
+  try {
+    const resultado = await window.mika5.ai.prepareEngine(currentProvider);
+    if (resultado?.canceled) return;
+    if (!resultado?.ok) {
+      showToast(t(`provider.error.${resultado?.errorCode || 'ENGINE_SETUP_UNAVAILABLE'}`), 'error');
+      return;
+    }
+    renderEngineModal(await window.mika5.ai.describeEngine(currentProvider));
+    seguirPreparacionDeMotor();
+  } catch (e) {
+    showToast(t('provider.error.ENGINE_SETUP_UNAVAILABLE'), 'error');
   }
 }
 
@@ -2801,7 +2873,8 @@ async function showEngineModal() {
   try {
     const engine = await window.mika5.ai.describeEngine(currentProvider);
     renderEngineModal(engine);
-    if (engine?.download?.state === 'downloading') seguirDescargaDeModelo();
+    if (engine?.setupStatus?.state === 'running') seguirPreparacionDeMotor();
+    else if (engine?.download?.state === 'downloading') seguirDescargaDeModelo();
   } catch (e) {
     renderEngineModal(null);
   }

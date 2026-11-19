@@ -132,7 +132,10 @@ app.whenReady().then(() => {
   // Inicializar el gestor de proveedores AI usando la instancia de DB
   // Los modelos que MIKA5 descarga viven en el perfil del usuario, junto a
   // sus datos: no en la carpeta de instalación, que una actualización reemplaza.
-  aiManager = new AIProviderManager(getDb(), { modelsDir: path.join(app.getPath('userData'), 'models') });
+  aiManager = new AIProviderManager(getDb(), {
+    modelsDir: path.join(app.getPath('userData'), 'models'),
+    enginesDir: path.join(app.getPath('userData'), 'engines')
+  });
   createWindow();
 
   // --- Startup sweep: reindex docs pendientes (Fase 1 prod-safe) ---
@@ -656,6 +659,25 @@ ipcMain.handle('ai:download-catalog-model', async (_e, providerId, catalogId) =>
   return aiManager.downloadCatalogModel(providerId, entrada.id);
 });
 ipcMain.handle('ai:model-download-status', () => aiManager.descargas.estado());
+// «Instalar y comenzar»: un solo permiso para todo lo que falta. El diálogo
+// dice qué se va a descargar y cuánto ocupa; el origen y las huellas salen del
+// adaptador, nunca del renderer.
+ipcMain.handle('ai:prepare-engine', async (_e, providerId) => {
+  const plan = aiManager.engineSetupPlan(providerId);
+  if (!plan || !plan.possible) return { ok: false, errorCode: 'ENGINE_SETUP_UNAVAILABLE' };
+  if (plan.steps.length) {
+    const megas = (bytes) => `${Math.round(bytes / (1024 * 1024))} MB`;
+    const lista = plan.steps.map(p => `• ${p.kind === 'engine' ? 'Motor' : 'Modelo'}: ${p.label} (${megas(p.size)})`).join('\n');
+    const autorizado = await autorizar(
+      'Instalar y comenzar',
+      `MIKA5 descargará e instalará en este equipo:\n\n${lista}\n\nTotal: ${megas(plan.totalSize)}. `
+      + 'Cada archivo se comprueba contra su huella publicada antes de usarse. Puedes cancelar en cualquier momento.'
+    );
+    if (!autorizado) return { ok: false, canceled: true };
+  }
+  return aiManager.prepareEngine(providerId);
+});
+ipcMain.handle('ai:engine-setup-status', (_e, providerId) => aiManager.engineSetupStatus(providerId));
 ipcMain.handle('ai:cancel-model-download', () => aiManager.descargas.cancelar());
 ipcMain.handle('ai:download-engine-model', async (_e, providerId, repo) => {
   const nombre = String(repo || '').trim();

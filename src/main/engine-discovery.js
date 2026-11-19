@@ -100,10 +100,11 @@ function arquitecturaGguf(fs, ruta) {
  * preferencia: el PATH, las ubicaciones de los instaladores oficiales y las
  * carpetas de compilación habituales bajo la carpeta personal.
  */
-function directoriosDeEjecutable(nombre, { fs, env, platform }) {
+function directoriosDeEjecutable(nombre, { fs, env, platform, carpetasPropias = [] }) {
   const rutas = rutasDe(platform);
   const home = carpetaPersonal(env, platform);
-  const dirs = String(env.PATH || env.Path || '').split(rutas.delimiter);
+  // Primero el motor que MIKA5 instaló: es el que el usuario eligió preparar.
+  const dirs = [...carpetasPropias.filter(Boolean), ...String(env.PATH || env.Path || '').split(rutas.delimiter)];
 
   if (nombre === 'ollama') {
     if (platform === 'win32') {

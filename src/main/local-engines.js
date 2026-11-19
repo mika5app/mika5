@@ -155,6 +155,8 @@ class GestorDeMotores {
     this._motores = new Map();
     this._identidades = new Map();
     this._descubiertos = new Map();
+    // Carpetas donde MIKA5 instala motores ya compilados, por proveedor.
+    this.carpetasDeMotor = {};
     this._plazoDeCargaMs = plazoDeCargaMs;
   }
 
@@ -185,13 +187,22 @@ class GestorDeMotores {
     if (config.executable) {
       try {
         const elegida = validarRutaDeMotor('executable', config.executable, spec, contexto);
-        if (typeof spec.aceptaEjecutable === 'function' && !spec.aceptaEjecutable(elegida, contexto)) return null;
+        if (typeof spec.aceptaEjecutable === 'function' && !spec.aceptaEjecutable(elegida, this._contextoDe(spec))) return null;
         return elegida;
       } catch (_) {
         return null;
       }
     }
     return this.descubrir(spec)[0] || null;
+  }
+
+  /** Lo que un adaptador necesita para reconocer su ejecutable. */
+  _contextoDe(spec) {
+    return {
+      fs: this._fs, platform: this._platform,
+      // Carpeta donde MIKA5 instala el motor de ESTE proveedor, si lo hace.
+      carpetaPropia: (this.carpetasDeMotor || {})[spec.id] || null
+    };
   }
 
   /** Identidad del ejecutable (ruta real y SHA-256), o null. */
@@ -225,14 +236,17 @@ class GestorDeMotores {
     if (fresca || !encontrados || ahora - encontrados.cuando > 15000) {
       encontrados = {
         cuando: ahora,
-        rutas: descubrirEjecutables(spec.ejecutable, { fs: this._fs, env: this._env, platform: this._platform })
+        rutas: descubrirEjecutables(spec.ejecutable, {
+          fs: this._fs, env: this._env, platform: this._platform,
+          carpetasPropias: Object.values(this.carpetasDeMotor || {})
+        })
       };
       this._descubiertos.set(spec.ejecutable, encontrados);
     }
     // Llamarse `llama-server` no hace de un programa el motor de un proveedor:
     // el adaptador puede exigir algo más para reconocerlo como suyo.
     return typeof spec.aceptaEjecutable === 'function'
-      ? encontrados.rutas.filter(ruta => spec.aceptaEjecutable(ruta, { fs: this._fs, platform: this._platform }))
+      ? encontrados.rutas.filter(ruta => spec.aceptaEjecutable(ruta, this._contextoDe(spec)))
       : encontrados.rutas;
   }
 

@@ -65,6 +65,8 @@ contextBridge.exposeInMainWorld("mika5", {
     downloadEngineModel: (providerId, repo) => ipcRenderer.invoke('ai:download-engine-model', providerId, repo),
     downloadCatalogModel: (providerId, catalogId) => ipcRenderer.invoke('ai:download-catalog-model', providerId, catalogId),
     modelDownloadStatus: () => ipcRenderer.invoke('ai:model-download-status'),
+    prepareEngine: (providerId) => ipcRenderer.invoke('ai:prepare-engine', providerId),
+    engineSetupStatus: (providerId) => ipcRenderer.invoke('ai:engine-setup-status', providerId),
     cancelModelDownload: () => ipcRenderer.invoke('ai:cancel-model-download'),
     abort: (requestId) => ipcRenderer.invoke('ai:abort', requestId),
     getCapabilities: (providerId) => ipcRenderer.invoke('ai:get-capabilities', providerId),

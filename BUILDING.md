@@ -155,3 +155,42 @@ modern Windows, CI seeds only its owned `InstallLocation`; this avoids the
 legacy electron-builder folder-lookup issue documented in upstream #8536.
 The old installer must still install, register and run its original bytes.
 The new release's clean installation is tested before that preparation.
+
+## BitNet engine (bitnet.cpp) on Windows
+
+MIKA5 uses the `llama-server` that bitnet.cpp builds. Microsoft publishes no binaries, so
+it has to be built. This is what was measured to work on Windows x64 with the official
+model `microsoft/bitnet-b1.58-2B-4T-gguf` (`ggml-model-i2_s.gguf`); it is a recipe for
+developers, not something a user of MIKA5 is asked to do.
+
+Requirements: Visual Studio 2022 Build Tools with "C++ Clang Compiler for Windows",
+"MSBuild support for LLVM (clang-cl) toolset" and "C++ CMake tools", plus Git and Python.
+
+```bat
+git clone --recursive https://github.com/microsoft/BitNet.git
+cd BitNet
+git checkout 01eb415
+git submodule sync && git submodule update --init --recursive
+python utils\codegen_tl2.py --model bitnet_b1_58-3B --BM 160,320,320 --BK 96,96,96 --bm 32,32,32
+cmake -B build -DBITNET_X86_TL2=OFF -T ClangCL -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ ^
+  -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF -DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON
+cmake --build build --config Release --target llama-server
+```
+
+Why each deviation from the official `setup_env.py`:
+
+- **Commit `01eb415`.** The repository changed the I2_S format and engine in July 2026. With
+  the current head the published model loads but answers are degraded and never stop.
+- **`-DBUILD_SHARED_LIBS=OFF`.** With shared libraries the current head fails to link on
+  Windows (`undefined symbol: quantize_i2_s`); static linking is also what a redistributable
+  engine needs.
+- **Explicit AVX2 flags.** The configure-time CPU checks can report "Failed" on Windows, and
+  the engine is then built without AVX2: it runs at about 1 token per second and outputs
+  garbage. With AVX2 it reaches about 30 tokens per second.
+- **Two source fixes** for current compilers: `const int8_t * y_col` at
+  `src/ggml-bitnet-mad.cpp:811`, and `#include <chrono>` in
+  `3rdparty/llama.cpp/common/common.cpp` and `common/log.cpp`.
+
+MIKA5 finds the result at `<home>\BitNet\build\bin\Release\llama-server.exe` and the
+model under `<home>\BitNet\models`. The executable is unsigned, so Windows Smart App
+Control may block it.

@@ -15,14 +15,27 @@ const nodeCrypto = require('crypto');
 const nodePath = require('path');
 
 const ORIGEN = 'https://huggingface.co';
+// Un motor ya compilado sólo se descarga de las versiones públicas de MIKA5.
+const ORIGEN_DE_MOTORES = 'https://github.com/mika5app/mika5-releases/releases/download/';
 
 function urlDe(entrada) {
+  if (entrada.url) return entrada.url;
   const segmento = (texto) => String(texto).split('/').map(encodeURIComponent).join('/');
   return `${ORIGEN}/${segmento(entrada.repo)}/resolve/${encodeURIComponent(entrada.revision)}/${segmento(entrada.file)}`;
 }
 
 /** Una entrada de catálogo es válida sólo si fija todo lo que se va a comprobar. */
 function entradaValida(entrada) {
+  const huella = Boolean(entrada
+    && /^[0-9a-f]{64}$/.test(String(entrada.sha256))
+    && Number.isInteger(entrada.size) && entrada.size > 0);
+  // Motor ya compilado: URL exacta dentro de las versiones de MIKA5.
+  if (entrada && entrada.url !== undefined) {
+    return huella
+      && typeof entrada.url === 'string' && entrada.url.startsWith(ORIGEN_DE_MOTORES)
+      && !/[\s?#]|\.\./.test(entrada.url.slice(ORIGEN_DE_MOTORES.length))
+      && /^[\w.-]+$/.test(String(entrada.file)) && !/\.gguf$/i.test(String(entrada.file));
+  }
   return Boolean(entrada
     && /^[A-Za-z0-9][\w.-]*\/[\w.-]+$/.test(String(entrada.repo))
     && /^[0-9a-f]{40}$/.test(String(entrada.revision))
@@ -154,6 +167,8 @@ class GestorDeDescargas {
         return 'MODEL_DOWNLOAD_CHECKSUM';
       }
       this._fs.renameSync(parcial, final);
+      // Un motor tiene que poder ejecutarse; en Windows no hace falta marcarlo.
+      if (entrada.url && process.platform !== 'win32') this._fs.chmodSync(final, 0o755);
       return null;
     } catch (error) {
       await descartar();
@@ -164,4 +179,4 @@ class GestorDeDescargas {
   }
 }
 
-module.exports = { ORIGEN, GestorDeDescargas, urlDe, entradaValida };
+module.exports = { ORIGEN, ORIGEN_DE_MOTORES, GestorDeDescargas, urlDe, entradaValida };

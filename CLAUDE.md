@@ -227,6 +227,16 @@ host. Alibaba keeps its user-configured catalogue: its list-models API needs a w
 id and region that MIKA5 does not have. When a catalogue cannot be read the provider shows
 its error; there is no fallback list and no fallback to another provider.
 
+BitNet is experimental. `engine.runtimes` lists prebuilt engines MIKA5 may install
+(exact URL under the public releases, size, SHA-256); it is empty until one is published.
+`prepareEngine()` is "Install and start": one native confirmation, then engine and model
+are downloaded through `model-download.js`, verified, approved with the verified hash and
+started. Without a runtime for the system the dialog says so and offers nothing. A local
+bitnet.cpp build is still discovered. Measured with the real engine: it needs its own
+launch arguments, an ASCII-only `--alias` (a non-ASCII one makes `/v1/models` answer 500),
+and it lists the model before it finishes loading, so the readiness probe treats a 503 as
+"still loading". `BUILDING.md` records the build that works on Windows and why.
+
 BitNet has no installer and no prebuilt binaries. `comprobarRequisitos()` reports which
 build tools are present (Git, Python, CMake, Clang, including the ones Visual Studio
 installs) without running any of them, and the dialog shows what is missing.

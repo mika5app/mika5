@@ -14,7 +14,7 @@ const fs = require('fs');
 const http = require('http');
 const os = require('os');
 const path = require('path');
-const { ORIGEN, GestorDeDescargas, urlDe, entradaValida } = require('../src/main/model-download');
+const { ORIGEN, ORIGEN_DE_MOTORES, GestorDeDescargas, urlDe, entradaValida } = require('../src/main/model-download');
 
 let comprobaciones = 0;
 function check(condicion, mensaje) {
@@ -56,7 +56,7 @@ const esperar = (ms) => new Promise(resolve => setTimeout(resolve, ms));
   });
   await new Promise(resolve => servidor.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${servidor.address().port}`;
-  const fetchLocal = (url, opciones) => fetch(String(url).replace(ORIGEN, base), opciones);
+  const fetchLocal = (url, opciones) => fetch(String(url).replace(ORIGEN_DE_MOTORES, `${base}/motores/`).replace(ORIGEN, base), opciones);
   const terminar = (gestor, datos) => new Promise((resolve) => {
     const r = gestor.iniciar({ ...datos, alTerminar: resolve });
     if (!r.ok || r.already) resolve(r);
@@ -166,6 +166,150 @@ const esperar = (ms) => new Promise(resolve => setTimeout(resolve, ms));
           'y el modelo aparece entre los descubiertos, sin esperar a la caché');
       } finally {
         catalogoReal.pop();
+      }
+    }
+
+    console.log('\n=== 6. «Instalar y comenzar»: motor y modelo con un solo permiso ===');
+    {
+      const net = require('net');
+      const childProcess = require('child_process');
+      const { AIProviderManager, PROVIDERS, READINESS } = require('../src/main/ai-providers');
+      const { GestorDeMotores } = require('../src/main/local-engines');
+      const DOBLE = path.join(__dirname, 'helpers', 'fake-llama-server.js');
+      const spec = PROVIDERS.bitnet.engine;
+      const nombreExe = process.platform === 'win32' ? 'llama-server.exe' : 'llama-server';
+      const binario = crypto.randomBytes(50000);
+      const motor = {
+        platform: process.platform, arch: process.arch, file: nombreExe, size: binario.length,
+        url: `${ORIGEN_DE_MOTORES}bitnet-runtime-test/${nombreExe}`,
+        sha256: crypto.createHash('sha256').update(binario).digest('hex')
+      };
+      check(entradaValida(motor), 'un motor con URL de las versiones de MIKA5, tamaño y SHA-256 es descargable');
+      for (const [nombre, malo] of [
+        ['alojado en otro sitio', { ...motor, url: `https://ejemplo.test/${nombreExe}` }],
+        ['con una URL que sale de su carpeta', { ...motor, url: `${ORIGEN_DE_MOTORES}../../otro/${nombreExe}` }],
+        ['con parámetros en la URL', { ...motor, url: `${motor.url}?x=1` }],
+        ['sin huella', { ...motor, sha256: '' }]
+      ]) {
+        check(!entradaValida(malo), `un motor ${nombre} se rechaza`);
+      }
+      // GGUF con arquitectura BitNet, como modelo del catálogo.
+      const valorBitnet = Buffer.from('bitnet-b1.58', 'utf8');
+      const ggufBitnet = Buffer.concat([Buffer.from('GGUF', 'latin1'), u32(3), u64(0), u64(1),
+        u64(clave.length), clave, u32(8), u64(valorBitnet.length), valorBitnet, crypto.randomBytes(20000)]);
+      const modeloBitnet = {
+        id: 'bitnet-de-prueba', label: 'BitNet de prueba', architecture: 'bitnet-b1.58', repo: 'org/bitnet-GGUF',
+        revision: 'b'.repeat(40), file: 'bitnet-de-prueba.gguf', size: ggufBitnet.length, license: 'MIT',
+        sha256: crypto.createHash('sha256').update(ggufBitnet).digest('hex')
+      };
+      const puertoLibre = () => new Promise((resolve) => {
+        const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); });
+      });
+      const catalogoReal = spec.catalogo.splice(0, spec.catalogo.length, modeloBitnet);
+      const baseOriginal = PROVIDERS.bitnet.baseUrl;
+      const montar = (dirPerfil, lanzados) => {
+        const motores = new GestorDeMotores({
+          env: { HOME: dirPerfil, USERPROFILE: dirPerfil, PATH: '', SystemRoot: process.env.SystemRoot }, platform: process.platform,
+          spawn: (cmd, args, opciones) => {
+            if (/taskkill\.exe$/i.test(cmd)) return childProcess.spawn(cmd, args, opciones);
+            lanzados.push({ cmd, args });
+            return childProcess.spawn(process.execPath, [DOBLE, ...args], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+          }
+        });
+        const almacen = new Map();
+        const db = { prepare: (sql) => (/^SELECT key, value/i.test(sql)
+          ? { all: (...k) => k.filter(x => almacen.has(x)).map(x => ({ key: x, value: almacen.get(x) })) }
+          : (/^INSERT OR REPLACE/i.test(sql) ? { run: (k, v) => almacen.set(k, v) } : { all: () => [], get: () => undefined, run: () => {} })) };
+        const m = new AIProviderManager(db, {
+          motores, descargas: new GestorDeDescargas({ fetchFn: fetchLocal }),
+          modelsDir: path.join(dirPerfil, 'models'), enginesDir: path.join(dirPerfil, 'engines')
+        });
+        return { m, motores, almacen };
+      };
+      const hastaTerminar = async (m) => {
+        for (let i = 0; i < 300 && m.engineSetupStatus('bitnet').state === 'running'; i += 1) await esperar(50);
+        return m.engineSetupStatus('bitnet');
+      };
+      try {
+        // Sin motor publicado para este sistema: experimental, y no se finge nada.
+        {
+          const lanzados = [];
+          const { m } = montar(path.join(tmp, 'perfil-sin-motor'), lanzados);
+          const plan = m.engineSetupPlan('bitnet');
+          const descrito = m.describeEngine('bitnet');
+          check(plan.possible === false && plan.engineMissing && !plan.engineAvailable && descrito.experimental === true,
+            'sin un motor publicado para este sistema, BitNet se declara experimental y no ofrece instalarse');
+          check(m.prepareEngine('bitnet').errorCode === 'ENGINE_SETUP_UNAVAILABLE' && lanzados.length === 0,
+            'y «Instalar y comenzar» no hace nada: ni descarga ni ejecuta');
+        }
+
+        // Con motor publicado: un permiso, dos descargas verificadas, motor en marcha.
+        spec.runtimes.push(motor);
+        {
+          const lanzados = [];
+          const perfil = path.join(tmp, 'perfil-ok');
+          const { m, motores, almacen } = montar(perfil, lanzados);
+          PROVIDERS.bitnet.baseUrl = `http://127.0.0.1:${await puertoLibre()}/v1`;
+          guion = { cuerpo: null, lento: false };
+          const porRuta = { [`/motores/bitnet-runtime-test/${nombreExe}`]: binario };
+          const servir = (req) => porRuta[req] || ggufBitnet;
+          // El servidor sintético responde según la ruta pedida.
+          servidor.removeAllListeners('request');
+          servidor.on('request', (req, res) => { peticiones.push(req.url); res.writeHead(200); res.end(servir(req.url)); });
+          const plan = m.engineSetupPlan('bitnet');
+          check(plan.possible && plan.steps.map(p => p.kind).join() === 'engine,model'
+            && plan.totalSize === binario.length + ggufBitnet.length,
+            'el plan dice qué se va a instalar y cuánto ocupa: motor y modelo');
+          check(!JSON.stringify(plan).includes('http') && !JSON.stringify(plan).includes(perfil),
+            'el plan que ve la interfaz no lleva URL ni rutas');
+          const antes = peticiones.length;
+          check(m.prepareEngine('bitnet').ok === true, 'la preparación autorizada arranca');
+          check(m.prepareEngine('bitnet').already === true, 'pedirla dos veces no la duplica');
+          const fin = await hastaTerminar(m);
+          check(fin.state === 'done', `la preparación termina bien (${fin.state} ${fin.errorCode || ''})`);
+          const exe = path.join(perfil, 'engines', 'bitnet', nombreExe);
+          check(fs.readFileSync(exe).equals(binario) && fs.existsSync(path.join(perfil, 'models', modeloBitnet.file)),
+            'el motor queda en la carpeta de motores de MIKA5 y el modelo en la de modelos');
+          check(peticiones.slice(antes).join() === `/motores/bitnet-runtime-test/${nombreExe},/org/bitnet-GGUF/resolve/${'b'.repeat(40)}/bitnet-de-prueba.gguf`,
+            'se descargó exactamente el motor y el modelo del catálogo, una vez cada uno');
+          const guardado = JSON.parse(almacen.get('engine_bitnet'));
+          check(guardado.approval.sha256 === motor.sha256 && m.engineIdentity('bitnet').approved,
+            'el motor instalado queda autorizado con la huella que se comprobó');
+          check(lanzados.length === 1 && fs.realpathSync(lanzados[0].cmd) === fs.realpathSync(exe)
+            && lanzados[0].args.includes('-ngl') && lanzados[0].args[1].endsWith(modeloBitnet.file),
+            'y MIKA5 arranca ese motor con ese modelo, sin más pasos');
+          let listo = await m.getReadiness('bitnet');
+          for (let i = 0; i < 100 && listo.readiness !== READINESS.READY; i += 1) { await esperar(100); listo = await m.getReadiness('bitnet'); }
+          check(listo.readiness === READINESS.READY && listo.engine.status === 'ready',
+            'el proveedor queda listo para conversar');
+          const plan2 = m.engineSetupPlan('bitnet');
+          check(plan2.possible && plan2.steps.length === 0, 'con todo instalado, la siguiente vez no hay nada que descargar');
+          // Alguien cambia el motor instalado: deja de ejecutarse.
+          await motores.detener('bitnet');
+          fs.writeFileSync(exe, 'sustituido');
+          motores.descubrir(spec, { fresca: true });
+          check(m.engineIdentity('bitnet').approved === false
+            && (await m.getReadiness('bitnet', { autoStart: true })).action === 'approve-engine' && lanzados.length === 1,
+            'si el motor instalado se sustituye, MIKA5 deja de ejecutarlo y vuelve a pedir permiso');
+        }
+
+        // El motor descargado no coincide con su huella: no se instala.
+        {
+          const lanzados = [];
+          const perfil = path.join(tmp, 'perfil-malo');
+          const { m } = montar(perfil, lanzados);
+          servidor.removeAllListeners('request');
+          servidor.on('request', (req, res) => { res.writeHead(200); res.end(Buffer.concat([binario.subarray(0, -1), Buffer.from([binario.at(-1) ^ 1])])); });
+          m.prepareEngine('bitnet');
+          const fin = await hastaTerminar(m);
+          check(fin.state === 'failed' && fin.errorCode === 'MODEL_DOWNLOAD_CHECKSUM'
+            && !fs.existsSync(path.join(perfil, 'engines', 'bitnet', nombreExe)) && lanzados.length === 0,
+            'un motor alterado en la descarga se descarta: ni se instala ni se ejecuta');
+        }
+      } finally {
+        spec.runtimes.length = 0;
+        spec.catalogo.splice(0, spec.catalogo.length, ...catalogoReal);
+        PROVIDERS.bitnet.baseUrl = baseOriginal;
       }
     }
 

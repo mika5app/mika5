@@ -23,7 +23,7 @@ const { createAbortContext } = require('../provider-runtime');
 // en silencio la primera vez que se corrigiera uno solo.
 function crearAdaptadorServidorLlama({
   providerId, name, etiqueta, baseUrl, comoIniciar, paquete, descargaHf, guia, compatibilidad, aceptaEjecutable, catalogo,
-  instalacion, libraryUrl, requisitos
+  instalacion, libraryUrl, requisitos, argumentos, variantes, runtimes, experimental
 }) {
   const adaptador = {
     name,
@@ -39,7 +39,14 @@ function crearAdaptadorServidorLlama({
     // salen de la `baseUrl` del adaptador, la misma dirección que consulta el
     // cliente: no hay un segundo sitio donde declararlos.
     engine: {
+      // A qué proveedor pertenece esta declaración.
+      id: providerId,
       tipo: 'managed',
+      // Motores ya compilados que MIKA5 puede descargar, por sistema: URL
+      // exacta, tamaño y SHA-256. Vacío si todavía no hay ninguno publicado.
+      runtimes: Array.isArray(runtimes) ? runtimes : [],
+      // Experimental: todavía no hay un motor preparado para todos los sistemas.
+      experimental: experimental === true,
       // Nombre del motor tal y como se le enseña al usuario junto al modelo.
       etiqueta,
       ejecutable: 'llama-server',
@@ -61,7 +68,7 @@ function crearAdaptadorServidorLlama({
       // `--alias` da al modelo cargado el nombre que el usuario eligió.
       // Host y puerto van SIEMPRE explícitos: el puerto por defecto del
       // ejecutable cambia entre versiones (8080, 9931) y no es el de MIKA5.
-      argumentos: ({ host, port, model, hf, alias, ctx, cpu }) => [
+      argumentos: argumentos || (({ host, port, model, hf, alias, ctx, cpu }) => [
         ...(hf ? ['-hf', hf] : ['-m', model]),
         ...(alias ? ['--alias', alias] : []),
         // Sin `-c` el servidor reserva el contexto MÁXIMO del modelo —131 072
@@ -71,12 +78,12 @@ function crearAdaptadorServidorLlama({
         '-np', '1',
         ...(cpu ? ['-ngl', '0'] : []),
         '--host', host, '--port', String(port)
-      ],
+      ]),
       // Formas de arrancar, de más a menos exigente. Si el motor se cierra
       // antes de servir el modelo se prueba la siguiente: lo habitual es que
       // la tarjeta gráfica integrada se quede sin memoria, no que el modelo
       // no sirva.
-      variantes: [{ ctx: 16384 }, { ctx: 8192 }, { ctx: 8192, cpu: true }],
+      variantes: variantes || [{ ctx: 16384 }, { ctx: 8192 }, { ctx: 8192, cpu: true }],
       aceptaEjecutable: aceptaEjecutable || null,
       // Modelos que MIKA5 sabe ofrecer para este motor, con su origen exacto.
       catalogo: Array.isArray(catalogo) ? catalogo : []

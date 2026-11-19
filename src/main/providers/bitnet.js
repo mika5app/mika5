@@ -25,6 +25,10 @@ const adaptadorBitnet = crearAdaptadorServidorLlama({
   guia: 'https://github.com/microsoft/BitNet#installation',
   // bitnet.cpp no se instala con un paquete: se compila en el equipo.
   instalacion: 'source',
+  experimental: true,
+  // Motores de BitNet ya compilados que MIKA5 puede instalar. bitnet.cpp no
+  // publica binarios: cada entrada es una compilación de MIKA5, con su huella.
+  runtimes: [],
   // Lo que pide su README para compilar: Python, CMake y Clang, además de Git
   // para obtener el código.
   requisitos: ['git', 'python', 'cmake', 'clang'],
@@ -35,13 +39,27 @@ const adaptadorBitnet = crearAdaptadorServidorLlama({
     if (!architecture) return 'unverified';
     return /^bitnet/.test(architecture) ? 'compatible' : 'incompatible';
   },
+  // Los argumentos del lanzador oficial, `run_inference_server.py`: sólo CPU
+  // (`-ngl 0`) y batching continuo (`-cb`). bitnet.cpp está hecho para CPU.
+  argumentos: ({ host, port, model, alias, ctx }) => [
+    '-m', model,
+    ...(alias ? ['--alias', alias] : []),
+    '-c', String(ctx || 4096),
+    '-ngl', '0',
+    '-cb',
+    '--host', host, '--port', String(port)
+  ],
+  variantes: [{ ctx: 4096 }, { ctx: 2048 }],
   // El motor de BitNet es el `llama-server` que compila bitnet.cpp, no
   // cualquier programa con ese nombre: el de llama.cpp se llama igual y no
   // carga modelos de 1,58 bits. Se reconoce por estar dentro de un clon de
   // bitnet.cpp, que trae `run_inference_server.py` en su raíz.
-  aceptaEjecutable: (ruta, { fs, platform }) => {
+  aceptaEjecutable: (ruta, { fs, platform, carpetaPropia }) => {
     const rutas = platform === 'win32' ? require('path').win32 : require('path').posix;
     let dir = rutas.dirname(ruta);
+    // El motor que instaló MIKA5: descargado de su catálogo y comprobado
+    // contra su SHA-256 antes de quedar ahí.
+    if (carpetaPropia && dir === carpetaPropia) return true;
     for (let nivel = 0; nivel < 5; nivel += 1) {
       try {
         if (fs.statSync(rutas.join(dir, 'run_inference_server.py')).isFile()) return true;

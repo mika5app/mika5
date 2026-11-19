@@ -1069,6 +1069,16 @@ class AIProviderManager {
     this.descargas = opciones.descargas || new GestorDeDescargas();
     // Carpeta de los modelos que MIKA5 descarga. Sin ella no se ofrece descarga.
     this.modelsDir = opciones.modelsDir || null;
+    // Carpeta donde MIKA5 instala motores ya compilados, uno por proveedor.
+    this.enginesDir = opciones.enginesDir || null;
+    this._preparaciones = new Map();
+    if (this.enginesDir) {
+      const rutas = this.motores._platform === 'win32' ? path.win32 : path.posix;
+      for (const id of registroDeProveedores.ids()) {
+        const spec = registroDeProveedores.getAdapter(id).engine;
+        if (spec && spec.tipo === 'managed') this.motores.carpetasDeMotor[id] = rutas.join(this.enginesDir, id);
+      }
+    }
     this._fallosRegistrados = new Map();
     this._pruebas = new Map();
     this.engineConfigs = {};
@@ -1851,6 +1861,10 @@ class AIProviderManager {
       guideUrl: spec.guia || null,
       canDownload: spec.descargaHf === true,
       catalog: this.engineCatalog(providerId),
+      // Para «Instalar y comenzar»: qué falta y cuánto ocupa.
+      setup: this.engineSetupPlan(providerId),
+      setupStatus: this.engineSetupStatus(providerId),
+      experimental: spec.experimental === true,
       download: this.descargas.estado(),
       canStart: diagnostico.ok,
       errorCode: diagnostico.ok ? null : diagnostico.errorCode,
@@ -1929,11 +1943,23 @@ class AIProviderManager {
     if (disp.reachable === true) return estado;
     this.motores.reiniciarFallo(providerId);
     this._pruebas.delete(providerId);
-    // El alias es el nombre vigente del modelo, buscado por su fichero.
-    const vigente = this._modeloConfigurado(providerId);
-    return this.motores.iniciar(providerId, spec, { ...config, modelId: vigente ? vigente.id : config.modelId }, {
+    return this.motores.iniciar(providerId, spec, this._configDeArranque(providerId), {
       variante: (config.launch || {})[config.model] || 0
     });
+  }
+
+  /**
+   * Configuración con la que se lanza el proceso del motor. El alias viaja
+   * como argumento y vuelve en las respuestas del servidor: con un carácter no
+   * ASCII —el «·» del identificador, o una tilde en el nombre del fichero— un
+   * servidor antiguo devuelve HTTP 500 al listar el modelo. Medido con el
+   * motor real de BitNet. Se pasa sólo ASCII.
+   */
+  _configDeArranque(providerId) {
+    const config = this.getEngineConfig(providerId);
+    const vigente = this._modeloConfigurado(providerId);
+    const alias = String(vigente ? vigente.id : (config.modelId || '')).replace(/[^\x20-\x7E]+/g, '-');
+    return { ...config, modelId: alias || undefined };
   }
 
   /**
@@ -1954,6 +1980,15 @@ class AIProviderManager {
       body: JSON.stringify({ model: 'default', messages: [{ role: 'user', content: 'ok' }], max_tokens: 1, stream: false }),
       signal: AbortSignal.timeout(120000)
     }).then(async (res) => {
+      // Hay servidores que listan el modelo antes de terminar de cargarlo y
+      // contestan 503 a la inferencia mientras tanto: medido con el motor real
+      // de BitNet. Eso no es un fallo, es «todavía no»: se olvida esta prueba
+      // para que la siguiente consulta la repita. El techo lo pone el plazo
+      // de carga del gestor de motores.
+      if (res.status === 503) {
+        if (this._pruebas.get(providerId) === prueba) this._pruebas.delete(providerId);
+        return;
+      }
       const datos = res.ok ? await res.json().catch(() => null) : null;
       prueba.resultado = Boolean(datos && Array.isArray(datos.choices) && datos.choices.length);
     }).catch(() => {
@@ -2008,6 +2043,110 @@ class AIProviderManager {
       await delay(500);
     }
     throw new Error(`${adapter.name}: el motor local tardó demasiado en cargar el modelo.`);
+  }
+
+  /** Motor ya compilado que MIKA5 puede instalar en ESTE sistema, o null. */
+  _runtimeDisponible(providerId) {
+    const spec = this._engineSpec(providerId);
+    if (!spec || !this.enginesDir) return null;
+    return (spec.runtimes || []).find(r => r.platform === this.motores._platform && r.arch === process.arch) || null;
+  }
+
+  /**
+   * Qué haría «Instalar y comenzar» para este proveedor: qué falta, cuánto
+   * ocupa y si se puede hacer en este sistema. No descarga nada.
+   */
+  engineSetupPlan(providerId) {
+    const spec = this._engineSpec(providerId);
+    if (!spec || spec.tipo !== 'managed') return null;
+    const config = this.getEngineConfig(providerId);
+    const tieneMotor = Boolean(this.motores.localizar(spec, config));
+    const runtime = tieneMotor ? null : this._runtimeDisponible(providerId);
+    const tieneModelo = this._modelosDeMotor(providerId).length > 0;
+    const modelo = tieneModelo || !this.modelsDir ? null : (spec.catalogo || [])[0] || null;
+    const pasos = [];
+    if (runtime) pasos.push({ kind: 'engine', label: spec.etiqueta, size: runtime.size });
+    if (modelo) pasos.push({ kind: 'model', label: modelo.label, size: modelo.size, license: modelo.license });
+    return {
+      // Se puede preparar si hay motor (o se puede instalar) y hay modelo (o se puede descargar).
+      possible: (tieneMotor || Boolean(runtime)) && (tieneModelo || Boolean(modelo)),
+      engineMissing: !tieneMotor,
+      engineAvailable: tieneMotor || Boolean(runtime),
+      steps: pasos,
+      totalSize: pasos.reduce((suma, p) => suma + p.size, 0)
+    };
+  }
+
+  /** Estado de la preparación en curso o de la última. */
+  engineSetupStatus(providerId) {
+    const p = this._preparaciones.get(providerId);
+    if (!p) return { state: 'idle' };
+    const descarga = this.descargas.estado();
+    return {
+      state: p.state, step: p.step, errorCode: p.errorCode || null,
+      received: p.state === 'running' && descarga.state === 'downloading' ? descarga.received : 0,
+      total: p.state === 'running' && descarga.state === 'downloading' ? descarga.total : 0
+    };
+  }
+
+  /**
+   * «Instalar y comenzar», ya autorizado por el usuario: instala el motor si
+   * falta, descarga un modelo si no hay ninguno, y arranca. Cada descarga se
+   * comprueba contra el tamaño y el SHA-256 declarados antes de usarse.
+   * Devuelve enseguida; el avance se consulta con `engineSetupStatus()`.
+   */
+  prepareEngine(providerId) {
+    const spec = this._engineSpec(providerId);
+    const plan = this.engineSetupPlan(providerId);
+    if (!spec || !plan || !plan.possible) return { ok: false, errorCode: 'ENGINE_SETUP_UNAVAILABLE' };
+    const previa = this._preparaciones.get(providerId);
+    if (previa && previa.state === 'running') return { ok: true, already: true };
+    const preparacion = { state: 'running', step: null, errorCode: null };
+    this._preparaciones.set(providerId, preparacion);
+
+    const descargar = (entrada, dir) => new Promise((resolve) => {
+      const r = this.descargas.iniciar({ providerId, entrada, dir, alTerminar: resolve });
+      if (!r.ok) resolve({ state: 'failed', errorCode: r.errorCode });
+      else if (r.already) resolve({ state: 'done' });
+    });
+    const fallar = (codigo) => { preparacion.state = 'failed'; preparacion.errorCode = codigo; };
+
+    (async () => {
+      const runtime = plan.engineMissing ? this._runtimeDisponible(providerId) : null;
+      if (runtime) {
+        preparacion.step = 'engine';
+        const fin = await descargar(runtime, this.motores.carpetasDeMotor[providerId]);
+        if (fin.state !== 'done') return fallar(fin.errorCode || 'MODEL_DOWNLOAD_FAILED');
+        // El usuario autorizó instalar exactamente este motor, y lo descargado
+        // coincide con su huella: esa es su aprobación. Si el fichero cambia
+        // después, deja de valer como la de cualquier otro ejecutable.
+        this.motores.descubrir(spec, { fresca: true });
+        const identidad = this.engineIdentity(providerId);
+        if (!identidad || identidad.sha256 !== runtime.sha256) return fallar('ENGINE_APPROVAL_REQUIRED');
+        this.approveEngine(providerId, identidad.sha256);
+      }
+      if (!this.engineIdentity(providerId)?.approved) return fallar('ENGINE_APPROVAL_REQUIRED');
+
+      if (!this._modelosDeMotor(providerId, { refresh: true }).length) {
+        const modelo = (spec.catalogo || [])[0];
+        if (!modelo) return fallar('ENGINE_MODEL_REQUIRED');
+        preparacion.step = 'model';
+        const fin = await descargar(modelo, this.modelsDir);
+        if (fin.state !== 'done') return fallar(fin.errorCode || 'MODEL_DOWNLOAD_FAILED');
+      }
+
+      // Arrancar con un modelo compatible: el ya elegido, o el primero que haya.
+      preparacion.step = 'start';
+      this._modelosDescubiertos = null;
+      const modelos = this._modelosDeMotor(providerId, { refresh: true });
+      const elegido = this._modeloConfigurado(providerId) || modelos[0];
+      if (!elegido) return fallar('ENGINE_MODEL_REQUIRED');
+      await this.selectEngineModel(providerId, elegido.id);
+      preparacion.state = 'done';
+      return undefined;
+    })().catch(() => fallar('ENGINE_SPAWN_FAILED'));
+
+    return { ok: true, already: false };
   }
 
   /** Catálogo del motor: qué puede descargarse y qué está ya en el equipo. */
@@ -2079,7 +2218,9 @@ class AIProviderManager {
     if (autoStart && disp.reachable === false
       && this.motores.estado(providerId).state === ESTADO_MOTOR.IDLE
       && this.motores.diagnosticar(spec, config).ok) {
-      await this.motores.iniciar(providerId, spec, config);
+      await this.motores.iniciar(providerId, spec, this._configDeArranque(providerId), {
+        variante: (config.launch || {})[config.model] || 0
+      });
     }
 
     const estado = this.motores.estado(providerId);
@@ -2172,6 +2313,9 @@ class AIProviderManager {
       else if (preparacion.readiness === READINESS.LOADING_MODEL) status = E.LOADING;
       else if (preparacion.readiness === READINESS.STARTING) status = E.STARTING;
       else if (estado.state === ESTADO_MOTOR.FAILED) status = E.ERROR;
+      // El motor propio está en marcha y contesta, pero con un error: no está
+      // detenido, está fallando.
+      else if (estado.owned && preparacion.readiness === READINESS.ERROR) status = E.ERROR;
       else if (!this.motores.localizar(spec, config)) status = E.NOT_INSTALLED;
       else if (!aprobado) status = E.NEEDS_APPROVAL;
       else if (!disp.modelsAvailable) status = E.NEEDS_MODEL;
@@ -2209,7 +2353,7 @@ class AIProviderManager {
     this.motores.reiniciarFallo(providerId);
     const disp = await this.getAvailability(providerId);
     if (disp.reachable !== true) {
-      await this.motores.iniciar(providerId, spec, this.getEngineConfig(providerId));
+      await this.motores.iniciar(providerId, spec, this._configDeArranque(providerId));
     }
     return this.getReadiness(providerId);
   }

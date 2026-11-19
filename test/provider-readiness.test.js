@@ -144,6 +144,8 @@ async function main() {
   // Un modelo servido por un motor se identifica como «motor · modelo».
   const nombreEn = (proveedor, nombre) => `${proveedor === 'bitnet' ? 'BitNet' : 'llama.cpp'} · ${nombre}`;
   const L = (nombre) => nombreEn('llamacpp', nombre);
+  // El alias que recibe el proceso del motor es sólo ASCII.
+  const aliasDe = (id) => id.replace(/[^\x20-\x7E]+/g, '-');
   // Aprobación del ejecutable de prueba, tal y como la daría el usuario: ruta
   // real y huella del contenido. Sin ella no se arranca nada.
   const aprobar = (ruta) => {
@@ -520,7 +522,11 @@ async function main() {
       check([uno.readiness, dos.readiness].every(r => r === READINESS.STARTING || r === READINESS.LOADING_MODEL),
         `${id}: recién lanzado se presenta como en camino (${uno.readiness}, ${dos.readiness})`);
       check(lanzados[0].cmd === exe && lanzados[0].opciones.shell === false
-        && lanzados[0].args.join(' ') === `-m ${modelo} --alias ${nombreEn(id, 'prueba')} -c 16384 -np 1 --host 127.0.0.1 --port ${puerto}`,
+        // Cada motor con sus argumentos: BitNet usa los de su lanzador oficial
+        // (sólo CPU, batching continuo); llama.cpp, contexto acotado y una ranura.
+        && lanzados[0].args.join(' ') === (id === 'bitnet'
+          ? `-m ${modelo} --alias ${aliasDe(nombreEn(id, 'prueba'))} -c 4096 -ngl 0 -cb --host 127.0.0.1 --port ${puerto}`
+          : `-m ${modelo} --alias ${aliasDe(nombreEn(id, 'prueba'))} -c 16384 -np 1 --host 127.0.0.1 --port ${puerto}`),
         `${id}: se lanza el ejecutable elegido, sin shell, en bucle local y en el puerto del adaptador`);
 
       const vistos = new Set([uno.readiness]);
@@ -997,8 +1003,10 @@ async function main() {
           'al renderer va el nombre del modelo, nunca su ruta');
 
         await m.selectEngineModel('llamacpp', L('qwen-q4'));
+        check(/^[\x20-\x7E]+$/.test(aliasDe(L('qwen-q4'))) && aliasDe(L('qwen-q4')) === 'llama.cpp - qwen-q4',
+          'el alias que se pasa al proceso del motor no lleva caracteres fuera de ASCII');
         check(lanzados.length === 1 && lanzados[0].cmd === fs.realpathSync(exeA)
-          && lanzados[0].args.join(' ') === `-m ${enHf} --alias ${L('qwen-q4')} -c 16384 -np 1 --host 127.0.0.1 --port ${puerto}`,
+          && lanzados[0].args.join(' ') === `-m ${enHf} --alias ${aliasDe(L('qwen-q4'))} -c 16384 -np 1 --host 127.0.0.1 --port ${puerto}`,
           'elegir un modelo arranca el motor descubierto con ese modelo');
         const listo = await esperarListo();
         check(listo.readiness === READINESS.READY && listo.engine.selectedModel === L('qwen-q4')
