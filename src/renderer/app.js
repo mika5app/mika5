@@ -399,6 +399,23 @@ function discardRejectedImage(id) {
 function onSelectedModelChanged() {
   renderAttachmentPreview();
   updateSendButtonState();
+  iniciarMotorConModeloElegido();
+}
+
+// En un motor gestionable, elegir un modelo es lo que lo pone en marcha: el
+// proceso principal arranca el motor con ese modelo, o lo cambia si ya tenía
+// otro. Con un servidor que lanzó el usuario no hay nada que cambiar y el
+// proceso principal lo rechaza; aquí no es un error que enseñar.
+async function iniciarMotorConModeloElegido() {
+  const motor = providerReadiness && providerReadiness.engine;
+  const modelo = el('modelSelect') ? el('modelSelect').value : '';
+  if (!motor || !motor.managed || !modelo || typeof window.mika5.ai.selectEngineModel !== 'function') return;
+  try {
+    await window.mika5.ai.selectEngineModel(currentProvider, modelo);
+  } catch (_) {
+    return;
+  }
+  await loadRuntime();
 }
 
 /**
@@ -2190,6 +2207,7 @@ function showToast(message, type = "success") {
     toast.style.opacity = "0";
     setTimeout(() => toast.remove(), 300);
   }, duration);
+  return toast;
 }
 
 function generateId() {
@@ -2324,7 +2342,18 @@ async function saveCurrentConversation(messages = conversationHistory) {
 // código estable y de los metadatos permitidos. El mensaje técnico del
 // proveedor no cruza el puente: se queda en el log del proceso principal.
 function describirEstadoProveedor(disp) {
-  if (!disp || !disp.errorCode) return '';
+  // Arrancando o cargando el modelo no hay error que contar. Y si lo que
+  // impide usar el proveedor es el motor local, se dice eso: es más útil que
+  // «no se pudo contactar con el servidor».
+  if (!disp) return '';
+  if (disp.readiness === 'starting' || disp.readiness === 'loading-model') return '';
+  const codigoMotor = disp.engine && disp.engine.errorCode;
+  if (codigoMotor) {
+    const claveMotor = `provider.error.${codigoMotor}`;
+    const textoMotor = t(claveMotor);
+    if (textoMotor !== claveMotor) return textoMotor;
+  }
+  if (!disp.errorCode) return '';
   const clave = `provider.error.${disp.errorCode}`;
   const traducido = t(clave);
   if (traducido !== clave) return traducido;
@@ -2336,6 +2365,279 @@ function describirEstadoProveedor(disp) {
     : porEstado;
 }
 
+// Preparación del proveedor activo: la disponibilidad de siempre más en qué
+// punto está el usuario y qué puede hacer. `autoStart` deja que el proceso
+// principal ponga en marcha un motor local parado; sólo se pide para el
+// proveedor seleccionado, nunca para todos.
+//
+// Si la preparación falla se cae a la disponibilidad sola: sin estados de
+// arranque ni acción guiada, pero con el catálogo y el estado reales.
+let providerReadiness = null;
+let readinessPollTimer = null;
+
+// Texto del motor local, si lo que impide usar el proveedor es el motor.
+function describirMotor(disp) {
+  const codigo = disp && disp.engine && disp.engine.errorCode;
+  if (!codigo) return '';
+  const clave = `provider.error.${codigo}`;
+  const traducido = t(clave);
+  return traducido === clave ? '' : traducido;
+}
+
+// Qué decir en el selector de modelos cuando está vacío.
+function textoSelectorVacio(disp, uiState) {
+  if (esperandoMotor(disp.readiness)) return t(`provider.readinessDetail.${disp.readiness}`);
+  return describirMotor(disp) || t(`provider.selectEmpty.${uiState}`);
+}
+
+async function consultarPreparacion() {
+  if (typeof window.mika5.ai.getReadiness === 'function') {
+    try {
+      return await window.mika5.ai.getReadiness(undefined, { autoStart: true });
+    } catch (e) {
+      console.warn('getReadiness failed:', e?.message || e);
+    }
+  }
+  return window.mika5.ai.getAvailability();
+}
+
+// Arrancando o cargando el modelo: el proveedor está en camino.
+function esperandoMotor(readiness) {
+  return readiness === 'starting' || readiness === 'loading-model';
+}
+
+// Mientras un motor arranca o carga el modelo no hay nada que el usuario
+// pueda hacer salvo esperar, así que la interfaz vuelve a preguntar sola.
+// Un único temporizador, y sólo si el proveedor sigue siendo el mismo.
+function programarSondeoDePreparacion(enEspera) {
+  clearTimeout(readinessPollTimer);
+  readinessPollTimer = null;
+  if (!enEspera) return;
+  const proveedor = currentProvider;
+  readinessPollTimer = setTimeout(() => {
+    if (currentProvider === proveedor) loadRuntime();
+  }, 2000);
+}
+
+// Acción guiada del menú. La etiqueta sale del código de acción; si el
+// proveedor está listo, el botón no existe.
+function renderProviderAction(disp) {
+  const boton = el('btnProviderAction');
+  if (!boton) return;
+  const accion = disp && disp.action;
+  const clave = `provider.action.${accion}`;
+  const etiqueta = accion ? t(clave) : clave;
+  if (!accion || etiqueta === clave) {
+    boton.style.display = 'none';
+    delete boton.dataset.action;
+    return;
+  }
+  boton.dataset.action = accion;
+  boton.style.display = '';
+  const texto = boton.querySelector('.more-actions-item-label');
+  if (texto) texto.textContent = etiqueta;
+  boton.setAttribute('aria-label', etiqueta);
+  boton.title = etiqueta;
+}
+
+async function runProviderAction(accion = providerReadiness && providerReadiness.action) {
+  switch (accion) {
+    case 'configure-key':
+    case 'configure-provider':
+      showApiKeyModal();
+      break;
+    case 'configure-engine':
+      await showEngineModal();
+      break;
+    case 'approve-engine':
+      await approveEngine();
+      break;
+    case 'start-engine':
+      await startLocalEngine();
+      break;
+    case 'download-model':
+      el('btnPull')?.click();
+      break;
+    case 'install-engine':
+    case 'start-service':
+    case 'retry':
+      await loadRuntime();
+      break;
+    default:
+  }
+}
+
+const ACCIONES_DE_CONFIGURACION = ['configure-key', 'configure-provider', 'configure-engine', 'approve-engine'];
+
+// La aprobación se pide en un diálogo nativo del proceso principal, con la
+// ruta real y la huella del programa. Aquí sólo se refleja el resultado.
+async function approveEngine() {
+  try {
+    const resultado = await window.mika5.ai.approveEngine(currentProvider);
+    renderEngineModal(resultado?.engine);
+    if (resultado?.errorCode) showToast(t(`provider.error.${resultado.errorCode}`), 'error');
+  } catch (e) {
+    showToast(t('provider.error.ENGINE_APPROVAL_REQUIRED'), 'error');
+  }
+  await loadRuntime();
+}
+
+function guiarPreparacion() {
+  const accion = providerReadiness && providerReadiness.action;
+  if (!providerReadiness || providerReadiness.readiness !== 'needs-setup') return;
+  if (!ACCIONES_DE_CONFIGURACION.includes(accion)) return;
+  const aviso = showToast(t(`provider.setupHint.${accion}`), 'warning');
+  if (!aviso) return;
+  aviso.dataset.providerAction = accion;
+  aviso.setAttribute('role', 'button');
+  aviso.style.cursor = 'pointer';
+  // El contenedor de avisos deja pasar los clics a lo que hay debajo; este
+  // aviso en concreto sí tiene que recibirlos.
+  aviso.style.pointerEvents = 'auto';
+  aviso.addEventListener('click', () => { runProviderAction(accion); });
+}
+
+async function startLocalEngine() {
+  try {
+    await window.mika5.ai.startEngine(currentProvider);
+  } catch (e) {
+    showToast(t('provider.error.ENGINE_SPAWN_FAILED'), 'error');
+  }
+  await loadRuntime();
+}
+
+// --- Motor local (llama.cpp, BitNet) ---
+function renderEngineModal(engine) {
+  const ejecutable = el('engineExecutablePath');
+  const lista = el('engineExecutableSelect');
+  const modelos = el('engineModelsInfo');
+  const estado = el('engineStatus');
+  const iniciar = el('engineStartButton');
+  const instalar = el('engineInstallButton');
+  const guia = el('engineGuideButton');
+  const descarga = el('engineDownloadSection');
+  const encontrados = (engine && engine.executables) || [];
+  const disponibles = (engine && engine.models) || [];
+
+  if (ejecutable) ejecutable.textContent = engine?.executable || t('engine.executable.none');
+  // Con varios motores instalados se elige entre los encontrados.
+  if (lista) {
+    lista.innerHTML = '';
+    lista.style.display = encontrados.length > 1 ? '' : 'none';
+    for (const ruta of encontrados) {
+      const opcion = document.createElement('option');
+      opcion.value = ruta;
+      opcion.textContent = ruta;
+      lista.appendChild(opcion);
+    }
+    if (engine?.executable) lista.value = engine.executable;
+  }
+  const aprobar = el('engineApproveButton');
+  if (aprobar) aprobar.style.display = engine?.executable && !engine?.executableApproved ? '' : 'none';
+  if (instalar) instalar.style.display = !engine?.executable && engine?.canInstall ? '' : 'none';
+  if (guia) {
+    guia.style.display = !engine?.executable && engine?.guideUrl ? '' : 'none';
+    guia.dataset.url = engine?.guideUrl || '';
+  }
+  if (modelos) {
+    modelos.textContent = disponibles.length
+      ? t('engine.models.found').replace('{n}', String(disponibles.length))
+      : t('engine.models.none');
+  }
+  if (descarga) descarga.style.display = engine?.executable && engine?.canDownload ? '' : 'none';
+  if (iniciar) iniciar.disabled = !engine?.canStart;
+  if (estado) {
+    const clave = `provider.error.${engine?.errorCode}`;
+    const texto = engine?.errorCode ? t(clave) : '';
+    estado.textContent = texto && texto !== clave ? texto : (engine?.canStart ? t('engine.ready') : '');
+  }
+}
+
+async function selectEngineExecutable(ruta) {
+  try {
+    renderEngineModal(await window.mika5.ai.selectEngineExecutable(currentProvider, ruta));
+    await loadRuntime();
+  } catch (e) {
+    showToast(t('provider.error.ENGINE_EXECUTABLE_NOT_ALLOWED'), 'error');
+  }
+}
+
+// Instalar pide autorización en un diálogo nativo del proceso principal. Aquí
+// sólo se enseña que está en curso y qué pasó.
+async function installEngineFromModal() {
+  const boton = el('engineInstallButton');
+  const estado = el('engineStatus');
+  if (boton) boton.disabled = true;
+  if (estado) estado.textContent = t('engine.install.running');
+  try {
+    const resultado = await window.mika5.ai.installEngine(currentProvider);
+    renderEngineModal(resultado?.engine);
+    if (resultado?.ok) showToast(t('engine.install.done'), 'success');
+    else if (!resultado?.canceled) showToast(t(`provider.error.${resultado?.errorCode || 'ENGINE_INSTALL_FAILED'}`), 'error');
+  } catch (e) {
+    showToast(t('provider.error.ENGINE_INSTALL_FAILED'), 'error');
+  } finally {
+    if (boton) boton.disabled = false;
+  }
+  await loadRuntime();
+}
+
+function openEngineGuide() {
+  const url = el('engineGuideButton')?.dataset.url;
+  if (url) window.mika5.openExternal(url);
+}
+
+async function downloadEngineModelFromModal() {
+  const repo = (el('engineDownloadInput')?.value || '').trim();
+  if (!repo) return;
+  try {
+    const resultado = await window.mika5.ai.downloadEngineModel(currentProvider, repo);
+    if (resultado?.canceled) return;
+    if (resultado?.errorCode) {
+      showToast(t(`provider.error.${resultado.errorCode}`), 'error');
+      return;
+    }
+    closeEngineModal();
+    showToast(t('engine.download.started'), 'success');
+  } catch (e) {
+    showToast(t('provider.error.ENGINE_SPAWN_FAILED'), 'error');
+  }
+  await loadRuntime();
+}
+
+async function showEngineModal() {
+  const modal = el('engineModal');
+  if (!modal) return;
+  const titulo = el('engineModalTitle');
+  if (titulo) titulo.textContent = `${t('engine.title')} — ${providerDisplayName(currentProvider)}`;
+  modal.style.display = 'flex';
+  try {
+    renderEngineModal(await window.mika5.ai.describeEngine(currentProvider));
+  } catch (e) {
+    renderEngineModal(null);
+  }
+}
+
+function closeEngineModal() {
+  const modal = el('engineModal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function chooseEngineFile(kind) {
+  try {
+    const resultado = await window.mika5.ai.chooseEngineFile(currentProvider, kind);
+    renderEngineModal(resultado?.engine);
+    if (resultado?.errorCode) showToast(t(`provider.error.${resultado.errorCode}`), 'error');
+  } catch (e) {
+    showToast(t('provider.error.ENGINE_PATH_INVALID'), 'error');
+  }
+}
+
+async function startEngineFromModal() {
+  closeEngineModal();
+  await startLocalEngine();
+}
+
 async function loadRuntime() {
   // Disponibilidad del proveedor activo, con los estados separados. Antes esto
   // era `status()`, que para todo proveedor cloud devolvía `ok: !!apiKey`: la
@@ -2343,7 +2645,7 @@ async function loadRuntime() {
   // deshabilitado, y un runtime sin credencial no podía estar disponible nunca.
   let disp;
   try {
-    disp = await window.mika5.ai.getAvailability();
+    disp = await consultarPreparacion();
   } catch (e) {
     // Si el propio canal falla no se sabe nada del proveedor. Se dice eso, no
     // que esté caído: el error es de la aplicación, no del servidor remoto.
@@ -2360,6 +2662,14 @@ async function loadRuntime() {
   // alguien al otro lado y no que se pueda trabajar, así que tienen estado
   // propio y no se pintan en verde.
   const uiState = disp.uiState || 'unknown';
+  // Arrancando o cargando el modelo: ni conectado ni caído, en camino. Tiene
+  // prioridad sobre el estado de disponibilidad, que durante el arranque dice
+  // «sin conexión» y sería verdad a medias.
+  const readiness = disp.readiness || null;
+  const enEspera = esperandoMotor(readiness);
+  providerReadiness = disp;
+  programarSondeoDePreparacion(enEspera);
+  renderProviderAction(disp);
   const CLASE_POR_ESTADO = {
     'connected': 'status-ok',
     'offline': 'status-offline',
@@ -2370,9 +2680,10 @@ async function loadRuntime() {
     'rate-limited': 'status-degraded',
     'provider-error': 'status-degraded'
   };
-  statusEl.textContent = t(`provider.state.${uiState}`);
-  statusEl.className = `status-pill ${CLASE_POR_ESTADO[uiState] || 'status-unknown'}`;
+  statusEl.textContent = enEspera ? t(`provider.readiness.${readiness}`) : t(`provider.state.${uiState}`);
+  statusEl.className = `status-pill ${enEspera ? 'status-loading' : (CLASE_POR_ESTADO[uiState] || 'status-unknown')}`;
   statusEl.dataset.providerState = uiState;
+  statusEl.dataset.providerReadiness = readiness || '';
   // El tooltip se compone de textos localizados a partir del código, nunca del
   // mensaje del proveedor: un error técnico puede arrastrar rutas, endpoints o
   // fragmentos de credencial, y el título de un elemento es visible y copiable.
@@ -2481,7 +2792,7 @@ async function loadRuntime() {
     // tres situaciones se leían igual, «Proveedor no disponible».
     const opt = document.createElement("option");
     opt.value = "";
-    opt.textContent = t(`provider.selectEmpty.${uiState}`);
+    opt.textContent = textoSelectorVacio(disp, uiState);
     el("modelSelect").appendChild(opt);
     el("modelSelect").disabled = true;
     const pullLocal = el("btnPullLocal");
@@ -2503,6 +2814,13 @@ async function loadRuntime() {
       }
     }
   } catch (_) {}
+
+  // En un motor gestionable manda el modelo con el que arrancó, no el último
+  // que se usó con cualquier proveedor.
+  const modeloDelMotor = disp.engine && disp.engine.selectedModel;
+  if (modeloDelMotor && Array.from(el("modelSelect").options).some(o => o.value === modeloDelMotor)) {
+    el("modelSelect").value = modeloDelMotor;
+  }
 
   const pullLocal = el("btnPullLocal");
   const pullLibrary = el("btnPull");
@@ -2950,12 +3268,16 @@ async function switchProvider(providerId) {
 
     updatePrivacyUI();
     await loadRuntime();
-
     if (result.privacy === 'cloud') {
       showToast(t('toast.cloudMode'), 'warning');
     } else {
       showToast(t('toast.privateMode'), 'success');
     }
+    // El usuario acaba de elegir este proveedor: si le falta algo que sólo él
+    // puede aportar, se le dice qué y se le deja a un clic. Es un aviso y no
+    // un diálogo que se abra solo: elegir un proveedor no debe tapar la
+    // ventana ni impedir elegir otro.
+    guiarPreparacion();
   } catch (e) {
     showToast('Error: ' + (e?.message || e), 'error');
   }

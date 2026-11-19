@@ -108,6 +108,54 @@ and BitNet never answer each other's probes.
 `assertVisionSupported()` fails closed and returns a specific reason, so the UI can say
 why an image was refused instead of failing generically.
 
+## Provider readiness and local engines
+
+`getReadiness()` in `ai-providers.js` is a view over `getAvailability()`, not a second
+model: the eight `UI_STATE` values still say what happened, and `readiness`
+(`available`, `needs-setup`, `starting`, `loading-model`, `ready`, `unavailable`,
+`error`) plus `action` say where the user stands and what they can do. It is the same
+for a local engine and a remote API.
+
+Local adapters declare their own `engine`; there is no second provider registry.
+`src/main/local-engines.js` only locates an executable, starts it and stops what it
+started:
+
+- the executable name comes from a closed list (`ollama`, `llama-server`); a path the
+  user picks is accepted only if its file name is on that list
+- `spawn` with separate arguments and `shell: false`, loopback only
+- nothing is started if something already listens on the port, so a server the user
+  launched by hand is reused and never duplicated
+- only processes MIKA5 started are stopped, on `will-quit`; switching provider does not
+  stop an engine
+- a failed start is not retried by polling, only by the user
+- nothing is downloaded or installed without a native confirmation dialog
+
+llama.cpp and BitNet are managed engines. `src/main/engine-discovery.js` finds
+`llama-server` (PATH, winget, scoop, Homebrew, `~/<repo>/build/bin`) and GGUF models
+(llama.cpp cache, Hugging Face cache, LM Studio, Jan, a `models` folder in a clone, and
+the blobs Ollama already downloaded). It only reads known folders, with depth and entry
+caps, and validates the GGUF magic bytes instead of trusting the extension. Discovered
+models are offered in the model selector; picking one starts the engine with it, and
+picking another restarts an engine MIKA5 owns. The renderer only sees model names — paths
+stay in the main process, and a model or executable that was not discovered is rejected.
+A manual choice still goes through a native dialog. The choice is stored in `app_state`
+as `engine_<providerId>`. An Ollama blob is not guaranteed to load in llama.cpp: some use
+architectures only Ollama understands, and that is only known when loading.
+
+Installing an engine (`winget`/`brew`, llama.cpp only) and downloading a model
+(`llama-server -hf`, llama.cpp only) each require a native confirmation dialog opened by
+the main process. BitNet has no package, so only its official guide is offered. Ollama is an external service: MIKA5
+reuses it and starts `ollama serve` only when it is installed, stopped, not managed by
+systemd and `OLLAMA_HOST` is unset or points at loopback on 11434. `OLLAMA_HOST` is never
+overridden.
+
+`autoStart` is honoured only for the provider being queried and only when the IPC
+argument is literally `true`. `MIKA5_ENGINE_AUTOSTART=0` turns every automatic start off.
+
+Not verified: a real `llama-server` or bitnet.cpp binary. `test/provider-readiness.test.js`
+drives the real manager and adapters against `test/helpers/fake-llama-server.js`, a child
+process that speaks the same protocol including the 503 while loading.
+
 ## Cancellation
 
 `src/main/request-registry.js` keeps one `AbortController` per request id

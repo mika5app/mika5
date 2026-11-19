@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - BitNet (bitnet.cpp) local provider. It talks to the `llama-server` started by `run_inference_server.py` on `127.0.0.1:8081/v1`, a different port from llama.cpp so both can run at once. Private, no API key, no vision.
+- Provider readiness. Every provider now reports the same states (available, needs setup, starting, loading model, ready, unavailable, error) with a suggested action. llama.cpp and BitNet can be started by MIKA5 once the executable and a GGUF model are chosen; Ollama is started with `ollama serve` when it is installed and stopped. Engines started by MIKA5 stop when it quits; servers started by the user are reused and left alone. Nothing is downloaded or installed without confirmation.
+- Local engine discovery. MIKA5 finds `llama-server` and the GGUF models already on the machine, including the ones Ollama downloaded, and lists them in the model selector; picking a model starts the engine. Installing llama.cpp through winget or Homebrew and downloading a model from Hugging Face are offered behind a native confirmation dialog.
 
 ## [0.3.1] - 2026-11-07
 

@@ -1477,6 +1477,114 @@ async function run() {
     assert(r.soloSystem, `${etiqueta}: nunca viajan como turno de usuario o asistente`);
   }
 
+  // --- Preparación del proveedor: estados de arranque y acción guiada ---
+  // Se ejercita el loadRuntime() y el switchProvider() reales contra un canal
+  // `ai:get-readiness` guionizado. Lo que se valida es la interfaz: que
+  // «iniciando» y «cargando modelo» no se pinten como caída, que el sondeo
+  // llegue solo al estado final y que la acción guiada lleve al sitio correcto.
+  const guionReadiness = [];
+  const peticionesReadiness = [];
+  const baseReadiness = {
+    configured: true, reachable: false, authenticated: null, modelsAvailable: 0, models: [],
+    canAttempt: false, ready: false, uiState: 'offline', errorCode: 'PROVIDER_TRANSPORT_UNREACHABLE', httpStatus: null
+  };
+  ipcMain.handle('ai:get-readiness', (_event, id, opciones) => {
+    peticionesReadiness.push({ id, opciones });
+    const paso = guionReadiness.length > 1 ? guionReadiness.shift() : guionReadiness[0];
+    return { ...baseReadiness, ...paso };
+  });
+  ipcMain.handle('ai:describe-engine', () => ({
+    managed: true, requiresModel: true, executable: null, model: null, canStart: false,
+    errorCode: 'ENGINE_NOT_INSTALLED', state: 'idle', owned: false
+  }));
+  const estadoPildora = () => win.webContents.executeJavaScript(`(() => {
+    const p = document.getElementById('rtStatus');
+    const b = document.getElementById('btnProviderAction');
+    const s = document.getElementById('modelSelect');
+    return {
+      texto: p.textContent, clase: p.className, readiness: p.dataset.providerReadiness,
+      accion: b.style.display === 'none' ? null : b.dataset.action,
+      etiquetaAccion: b.querySelector('.more-actions-item-label').textContent,
+      selector: s.options[0] ? s.options[0].textContent : '', deshabilitado: s.disabled,
+      modelos: Array.from(s.options).map(o => o.value).filter(Boolean)
+    };
+  })()`, true);
+
+  // 1. Motor arrancando → cargando modelo → listo, sin intervención.
+  guionReadiness.push(
+    { readiness: 'starting', action: null, engine: { managed: true, state: 'starting', owned: true, errorCode: null } },
+    { readiness: 'loading-model', action: null, reachable: true, httpStatus: 503, uiState: 'provider-error',
+      errorCode: 'PROVIDER_HTTP_503', engine: { managed: true, state: 'running', owned: true, errorCode: null } },
+    { readiness: 'ready', action: null, reachable: true, uiState: 'connected', errorCode: null, canAttempt: true,
+      ready: true, modelsAvailable: 1, models: [{ name: 'modelo-local' }],
+      engine: { managed: true, state: 'running', owned: true, errorCode: null } }
+  );
+  await win.webContents.executeJavaScript(`(() => { currentProvider = 'llamacpp'; providerPrivacy = 'private'; return loadRuntime(); })()`, true);
+  const arrancando = await estadoPildora();
+  assert.strictEqual(arrancando.readiness, 'starting', 'la píldora refleja que el motor está arrancando');
+  assert(arrancando.clase.includes('status-loading') && !arrancando.clase.includes('status-offline'),
+    'un motor arrancando no se pinta como caído');
+  assert(arrancando.deshabilitado && arrancando.selector && !/127\.0\.0\.1|80\d\d|llama-server/.test(arrancando.selector),
+    'el selector explica la espera sin puertos ni órdenes');
+  assert.strictEqual(arrancando.accion, null, 'mientras arranca no se ofrece ninguna acción');
+  assert.deepStrictEqual(peticionesReadiness[0].opciones, { autoStart: true },
+    'la interfaz pide arranque automático para el proveedor seleccionado');
+  await waitFor(win, `document.getElementById('rtStatus').dataset.providerReadiness === 'ready'`, 15000);
+  const listo = await estadoPildora();
+  assert(listo.clase.includes('status-ok') && !listo.deshabilitado, 'al terminar el arranque el proveedor queda conectado');
+  assert.deepStrictEqual(listo.modelos, ['modelo-local'], 'y el catálogo del motor aparece sin recargar a mano');
+  const trasListo = peticionesReadiness.length;
+  await new Promise(resolve => setTimeout(resolve, 2600));
+  assert.strictEqual(peticionesReadiness.length, trasListo, 'una vez listo, la interfaz deja de sondear');
+
+  // 2. Motor sin configurar: elegir el proveedor abre su configuración.
+  guionReadiness.length = 0;
+  guionReadiness.push({ readiness: 'needs-setup', action: 'configure-engine',
+    engine: { managed: true, state: 'idle', owned: false, errorCode: 'ENGINE_NOT_INSTALLED' } });
+  ipcMain.removeHandler('ai:set-provider');
+  ipcMain.handle('ai:set-provider', (_event, id) => ({ provider: id, privacy: id === 'openai' ? 'cloud' : 'private' }));
+  await win.webContents.executeJavaScript(`switchProvider('bitnet')`, true);
+  const sinMotor = await estadoPildora();
+  assert.strictEqual(sinMotor.accion, 'configure-engine', 'el menú ofrece configurar el motor');
+  assert(sinMotor.etiquetaAccion.length > 0 && sinMotor.selector.length > 0, 'la acción y el selector llevan texto localizado');
+  // Elegir un proveedor sin configurar avisa, pero no abre nada por su cuenta:
+  // un diálogo automático taparía la ventana e impediría elegir otro.
+  const pulsarAviso = accion => win.webContents.executeJavaScript(`(() => {
+    const aviso = document.querySelector('#toast-container [data-provider-action="${accion}"]');
+    if (!aviso) return { existe: false };
+    const abiertos = ['engineModal', 'apiKeyModal'].filter(id => document.getElementById(id).style.display === 'flex');
+    const r = aviso.getBoundingClientRect();
+    const enPunto = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    aviso.click();
+    return { existe: true, texto: aviso.textContent, abiertosAntes: abiertos, pulsable: enPunto === aviso };
+  })()`, true);
+  const avisoMotor = await pulsarAviso('configure-engine');
+  assert(avisoMotor.existe && avisoMotor.texto.length > 0, 'aparece un aviso con la acción pendiente');
+  assert(avisoMotor.pulsable, 'el aviso recibe el clic de verdad, no sólo por código');
+  assert.deepStrictEqual(avisoMotor.abiertosAntes, [], 'ningún diálogo se abre solo al elegir el proveedor');
+  await waitFor(win, `document.getElementById('engineModal').style.display === 'flex'`);
+  const modalMotor = await win.webContents.executeJavaScript(`(() => ({
+    visible: document.getElementById('engineModal').style.display === 'flex',
+    titulo: document.getElementById('engineModalTitle').textContent,
+    iniciar: document.getElementById('engineStartButton').disabled,
+    estado: document.getElementById('engineStatus').textContent
+  }))()`, true);
+  assert(modalMotor.visible && modalMotor.titulo.includes('BitNet'), 'pulsar el aviso abre la configuración del motor del proveedor elegido');
+  assert(modalMotor.iniciar && modalMotor.estado.length > 0, 'sin ejecutable no se puede iniciar, y se dice por qué');
+  await win.webContents.executeJavaScript(`closeEngineModal()`, true);
+
+  // 3. Proveedor cloud sin clave: elegirlo lleva a la clave, no a un selector vacío.
+  guionReadiness.length = 0;
+  guionReadiness.push({ readiness: 'needs-setup', action: 'configure-key', configured: false, reachable: null,
+    uiState: 'configuration-required', errorCode: 'PROVIDER_CREDENTIAL_REQUIRED', engine: null });
+  await win.webContents.executeJavaScript(`switchProvider('openai')`, true);
+  const sinClave = await estadoPildora();
+  assert.strictEqual(sinClave.accion, 'configure-key', 'el menú ofrece configurar la clave');
+  const avisoClave = await pulsarAviso('configure-key');
+  assert(avisoClave.existe && avisoClave.abiertosAntes.length === 0, 'el aviso de la clave aparece sin abrir nada solo');
+  await waitFor(win, `document.getElementById('apiKeyModal').style.display === 'flex'`);
+  await win.webContents.executeJavaScript(`closeApiKeyModal()`, true);
+
   win.destroy();
 
   console.log('Electron renderer integration tests passed');

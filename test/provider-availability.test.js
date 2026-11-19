@@ -581,7 +581,10 @@ console.log('\n=== 10 bis. loadRuntime() sólo puebla el selector con canAttempt
         AUTOMATIC_MODEL_ID: '__automatic__',
         formatBytesRenderer: () => '1 GB',
         syncModelDropdown: () => {},
-        describirEstadoProveedor: () => ''
+        describirEstadoProveedor: () => '',
+        // Estado de la preparación del proveedor: `loadRuntime()` lo escribe.
+        providerReadiness: null,
+        readinessPollTimer: null
       }
     };
   };
@@ -589,7 +592,12 @@ console.log('\n=== 10 bis. loadRuntime() sólo puebla el selector con canAttempt
   const ejecutarLoadRuntime = async (disp) => {
     const { nodos, globales, diccionario } = construirEntorno(disp);
     const nombres = Object.keys(globales);
-    const cuerpo = renderer.slice('loadRuntime');
+    // `loadRuntime()` se apoya en estas funciones del propio renderer. Se
+    // extraen del mismo fichero, igual que ella: son código de producción, no
+    // dobles, así que lo que decide el selector sigue siendo lo real.
+    const AUXILIARES = ['esperandoMotor', 'describirMotor', 'textoSelectorVacio', 'consultarPreparacion',
+      'programarSondeoDePreparacion', 'renderProviderAction'];
+    const cuerpo = [...AUXILIARES, 'loadRuntime'].map(nombre => renderer.slice(nombre)).join('\n');
     const fabrica = new Function(...nombres, `${cuerpo}\nreturn loadRuntime;`);
     await fabrica(...nombres.map(n => globales[n]))();
     const select = nodos.get('modelSelect');

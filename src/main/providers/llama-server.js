@@ -21,13 +21,37 @@ const { createAbortContext } = require('../provider-runtime');
 // cambia entre ellos es el id, la etiqueta, el puerto por defecto y cómo se
 // arranca el servidor; duplicar el cliente HTTP haría que los dos divergieran
 // en silencio la primera vez que se corrigiera uno solo.
-function crearAdaptadorServidorLlama({ providerId, name, etiqueta, baseUrl, comoIniciar }) {
-  return {
+function crearAdaptadorServidorLlama({ providerId, name, etiqueta, baseUrl, comoIniciar, paquete, descargaHf, guia }) {
+  const adaptador = {
     name,
     privacy: 'private',
     requiresKey: false,
     baseUrl,
     timeout: 300000, // 5 min — modelos grandes son lentos
+
+    // Motor gestionable: con el ejecutable y un modelo GGUF elegidos una vez,
+    // MIKA5 arranca `llama-server` al seleccionar el proveedor. Host y puerto
+    // salen de la `baseUrl` del adaptador, la misma dirección que consulta el
+    // cliente: no hay un segundo sitio donde declararlos.
+    engine: {
+      tipo: 'managed',
+      ejecutable: 'llama-server',
+      requiereModelo: true,
+      baseUrl: () => adaptador.baseUrl,
+      // Gestor de paquetes oficial con el que se puede instalar, si lo hay,
+      // y página oficial de instalación para cuando no.
+      paquete: paquete || null,
+      guia: guia || null,
+      // `-hf` hace que el propio servidor descargue un GGUF de Hugging Face a
+      // su caché. Sólo se usa tras autorizarlo el usuario.
+      descargaHf: descargaHf === true,
+      // `--alias` da al modelo cargado el nombre que el usuario eligió.
+      argumentos: ({ host, port, model, hf, alias }) => [
+        ...(hf ? ['-hf', hf] : ['-m', model]),
+        ...(alias ? ['--alias', alias] : []),
+        '--host', host, '--port', String(port)
+      ]
+    },
 
     async chat({ model, messages, images = [], signal }) {
       const selectedModel = model || 'default';
@@ -155,6 +179,7 @@ function crearAdaptadorServidorLlama({ providerId, name, etiqueta, baseUrl, como
       }
     }
   };
+  return adaptador;
 }
 
 module.exports = { crearAdaptadorServidorLlama };

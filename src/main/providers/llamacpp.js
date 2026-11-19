@@ -15,7 +15,10 @@ const adaptadorLlamacpp = crearAdaptadorServidorLlama({
   name: 'llama.cpp (Local)',
   etiqueta: 'llama.cpp',
   baseUrl: 'http://127.0.0.1:8080/v1',
-  comoIniciar: 'llama-server -m modelo.gguf --port 8080'
+  comoIniciar: 'llama-server -m modelo.gguf --port 8080',
+  paquete: { winget: 'ggml.llamacpp', brew: 'llama.cpp' },
+  guia: 'https://github.com/ggml-org/llama.cpp/blob/master/docs/install.md',
+  descargaHf: true
 });
 
 module.exports = { adaptadorLlamacpp };

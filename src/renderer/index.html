@@ -2275,14 +2275,14 @@
                                     <span class="provider-name">⚙️ llama.cpp (Local)</span>
                                     <span class="privacy-tag private">100% Privado</span>
                                 </div>
-                                <div class="provider-desc">GGUF directo. Inicia: llama-server -m modelo.gguf --port 8080</div>
+                                <div class="provider-desc">GGUF directo. MIKA5 inicia el motor.</div>
                             </div>
                             <div class="provider-option" onclick="switchProvider('bitnet')">
                                 <div class="provider-option-header">
                                     <span class="provider-name">⚙️ BitNet (Local)</span>
                                     <span class="privacy-tag private">100% Privado</span>
                                 </div>
-                                <div class="provider-desc">1-bit. Inicia: run_inference_server.py --port 8081</div>
+                                <div class="provider-desc">Modelos de 1 bit. MIKA5 inicia el motor.</div>
                             </div>
                         </div>
                     </div>
@@ -2316,6 +2316,13 @@
                                     <span class="loading-pulse">●</span> Conectando...
                                 </span>
                             </div>
+
+                            <button id="btnProviderAction" class="btn-icon more-actions-item" role="menuitem" type="button" style="display: none;" onclick="runProviderAction()" aria-label="Preparar proveedor">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polygon points="6 4 20 12 6 20 6 4"></polygon>
+                                </svg>
+                                <span class="more-actions-item-label"></span>
+                            </button>
 
                             <div class="more-actions-divider" role="none"></div>
 
@@ -2539,6 +2546,35 @@
     <script src="./app.js"></script>
 
     <!-- Modal API Key -->
+    <div id="engineModal" class="modal" style="display: none;" onclick="if(event.target===this)closeEngineModal()">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="engineModalTitle" data-i18n="engine.title">Motor local</h3>
+                <button onclick="closeEngineModal()" class="btn-icon" aria-label="Cerrar">×</button>
+            </div>
+            <div class="modal-body">
+                <p class="hint" data-i18n="engine.intro">MIKA5 busca el motor y los modelos que ya tienes. Elige el modelo en el selector de modelos y el motor se inicia solo.</p>
+                <label data-i18n="engine.executable.label">Programa (llama-server):</label>
+                <p id="engineExecutablePath" class="hint" style="word-break:break-all;"></p>
+                <select id="engineExecutableSelect" style="width:100%;display:none;" onchange="selectEngineExecutable(this.value)" aria-label="Programa"></select>
+                <button id="engineApproveButton" class="btn-primary" type="button" style="display:none;" onclick="approveEngine()" data-i18n="engine.approve">Autorizar este programa…</button>
+                <button id="engineInstallButton" class="btn-primary" type="button" style="display:none;" onclick="installEngineFromModal()" data-i18n="engine.install">Instalar motor…</button>
+                <button id="engineGuideButton" class="btn-icon" type="button" style="display:none;" onclick="openEngineGuide()" data-i18n="engine.guide">Cómo instalarlo</button>
+                <button class="btn-icon" type="button" onclick="chooseEngineFile('executable')" data-i18n="engine.executable.choose">Elegir programa…</button>
+                <label data-i18n="engine.model.label">Modelos (GGUF):</label>
+                <p id="engineModelsInfo" class="hint"></p>
+                <button class="btn-icon" type="button" onclick="chooseEngineFile('model')" data-i18n="engine.model.choose">Elegir otro archivo…</button>
+                <div id="engineDownloadSection" style="display:none;">
+                    <label for="engineDownloadInput" data-i18n="engine.download.label">Descargar de Hugging Face:</label>
+                    <input type="text" id="engineDownloadInput" placeholder="usuario/modelo-GGUF" autocomplete="off" spellcheck="false" />
+                    <button class="btn-icon" type="button" onclick="downloadEngineModelFromModal()" data-i18n="engine.download">Descargar…</button>
+                </div>
+                <p id="engineStatus" class="hint" aria-live="polite"></p>
+                <button id="engineStartButton" class="btn-primary" type="button" onclick="startEngineFromModal()" data-i18n="engine.start" disabled>Iniciar motor</button>
+            </div>
+        </div>
+    </div>
+
     <div id="apiKeyModal" class="modal" style="display: none;" onclick="if(event.target===this)closeApiKeyModal()">
         <div class="modal-content">
             <div class="modal-header">

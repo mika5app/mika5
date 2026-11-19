@@ -18,7 +18,9 @@ const adaptadorBitnet = crearAdaptadorServidorLlama({
   name: 'BitNet (Local)',
   etiqueta: 'BitNet',
   baseUrl: 'http://127.0.0.1:8081/v1',
-  comoIniciar: 'python run_inference_server.py -m models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf --port 8081'
+  comoIniciar: 'python run_inference_server.py -m models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf --port 8081',
+  // bitnet.cpp no tiene paquete: se compila desde su repositorio.
+  guia: 'https://github.com/microsoft/BitNet#installation'
 });
 
 module.exports = { adaptadorBitnet };
