@@ -351,6 +351,45 @@ try {
   const evil = dbApi.addKnowledgeFromText({ projectId: '../../../etc', title: 'Evil', content: 'hack' });
   assertEq(evil.ok, false, 'rejects path traversal projectId');
 
+
+  // ============================================
+  console.log('\n=== Conversación larga: 26, 100 y 500 mensajes ===');
+  // ============================================
+  // MIKA5 no impone un máximo de mensajes por conversación. Lo que se limita
+  // es el contexto que se envía al modelo, y eso lo decide el renderer.
+  const pLargo = dbApi.createProject({ name: 'Conversación larga' });
+  const cLargo = dbApi.createChat({ projectId: pLargo.id, title: 'Larga' });
+  let escritos = 0;
+  for (const objetivo of [26, 100, 500]) {
+    for (; escritos < objetivo; escritos += 1) {
+      const r = dbApi.addMessage({
+        chatId: cLargo.id, role: escritos % 2 === 0 ? 'user' : 'assistant', content: `mensaje ${escritos}`
+      });
+      if (!r.ok) throw new Error(`addMessage falló en el mensaje ${escritos}`);
+    }
+    assertEq(dbApi.countMessages(cLargo.id), objetivo, `con ${objetivo} mensajes, todos siguen guardados`);
+    const todos = dbApi.listMessages(cLargo.id);
+    assertEq(todos.length, objetivo, `listMessages devuelve los ${objetivo}`);
+    assertEq(todos[0].content, 'mensaje 0', `con ${objetivo} mensajes, el primero no se ha perdido`);
+    assertEq(todos[objetivo - 1].content, `mensaje ${objetivo - 1}`, `con ${objetivo} mensajes, el orden se conserva`);
+  }
+  const pagina = dbApi.listMessages(cLargo.id, { limit: 50, offset: 0 });
+  assertEq(pagina.length, 50, 'el historial largo se puede leer por páginas');
+  // Una SEGUNDA conexión al mismo fichero ve los 500: están en disco, no sólo
+  // en la memoria de la conexión que los escribió. No sustituye a cerrar y
+  // abrir la aplicación, pero es lo que una reapertura encontraría.
+  {
+    const { getDb: obtenerDb } = require('../src/main/db');
+    const Database = require('better-sqlite3');
+    const otra = new Database(obtenerDb().name, { readonly: true });
+    try {
+      const fila = otra.prepare('SELECT COUNT(*) AS n FROM messages WHERE chat_id = ?').get(cLargo.id);
+      assertEq(fila.n, 500, 'una segunda conexión al fichero encuentra los 500 mensajes');
+    } finally {
+      otra.close();
+    }
+  }
+
 } catch (e) {
   console.error('\nFATAL:', e.message);
   console.error(e.stack);

@@ -1669,6 +1669,38 @@ async function run() {
   assert(instruccionesDe(turnoLocal).primeraEsSystem && instruccionesDe(turnoLocal).veces === 1,
     'las instrucciones del sistema siguen yendo una vez, como system, tras los cambios de proveedor');
 
+
+  // --- Conversaciones largas: 26, 100 y 500 mensajes sin interrupciones ---
+  // Antes un aviso a los 25 y un diálogo a los 30 detenían el envío. Aquí se
+  // envía de verdad con ese historial guardado: si apareciese un diálogo, el
+  // envío no terminaría y la espera vencería.
+  let historialLargo = [];
+  ipcMain.removeHandler('db:listMessages');
+  ipcMain.handle('db:listMessages', () => historialLargo);
+  for (const n of [26, 100, 500]) {
+    historialLargo = Array.from({ length: n }, (_, i) => ({
+      id: i + 1, role: i % 2 === 0 ? 'user' : 'assistant', content: `mensaje ${i} `.padEnd(120, 'x')
+    }));
+    const turno = await enviarYConsentir(`turno tras ${n} mensajes`);
+    const interrupciones = await win.webContents.executeJavaScript(`(() => ({
+      aviso: Boolean(document.querySelector('.context-warning')),
+      dialogos: Array.from(document.querySelectorAll('.modal, [role="dialog"]'))
+        .filter(m => getComputedStyle(m).display !== 'none').map(m => m.id || m.className)
+    }))()`, true);
+    assert.strictEqual(interrupciones.aviso, false, `${n} mensajes: no aparece el aviso de conversación larga`);
+    assert.deepStrictEqual(interrupciones.dialogos, [], `${n} mensajes: ningún diálogo interrumpe el envío`);
+    const conversacion = turno.messages.filter(m => !(m.role === 'system' && m.content.includes(INSTRUCCION)));
+    const enviados = conversacion.reduce((suma, m) => suma + String(m.content).length, 0);
+    assert(enviados <= 32000 + 200, `${n} mensajes: el contexto enviado tiene techo (${enviados} caracteres)`);
+    assert(String(turno.messages.at(-1).content).includes(`turno tras ${n} mensajes`),
+      `${n} mensajes: el mensaje actual siempre se envía`);
+    assert(instruccionesDe(turno).primeraEsSystem && instruccionesDe(turno).veces === 1,
+      `${n} mensajes: las instrucciones del sistema se conservan`);
+    if (n === 26) {
+      assert.strictEqual(conversacion.length, 27, 'con 26 mensajes guardados se envían los 26 y el actual, sin recortar');
+    }
+  }
+
   win.destroy();
 
   console.log('Electron renderer integration tests passed');

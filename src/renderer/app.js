@@ -633,17 +633,6 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape') closeImageViewer();
 });
 
-// Sistema de gestión progresiva de contexto
-const CONTEXT_MANAGEMENT = {
-  SOFT_LIMIT: 25,        // Mensajes antes de alerta
-  HARD_LIMIT: 40,        // Máximo mensajes permitidos
-  AUTO_SAVE_TRIGGER: 30, // Sugerir guardar
-  PRESERVE_RATIO: 0.3    // 30% iniciales + 70% recientes
-};
-// Track which chats have already been warned/prompted to avoid repetition
-const _contextWarningShown = new Set(); // chatId -> soft warning already shown
-const _contextSavePrompted = new Set(); // chatId -> save dialog already shown
-
 let conversationHistory = []; // Historial completo
 
 // ============================================
@@ -2214,128 +2203,45 @@ function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).substr(2);
 }
 
-async function manageConversationContext(currentMessages) {
-  const totalMessages = currentMessages.length;
-  const chatId = activeChatId || '_none';
+// Presupuesto de contexto que se envía al modelo, en caracteres.
+//
+// La conversación entera vive en SQLite y no tiene límite de mensajes. Lo que
+// sí tiene techo es lo que viaja en cada petición: mandar todo el historial
+// siempre desbordaría la ventana del modelo y encarecería cada turno. Se
+// conservan los mensajes más recientes que caben, y como mínimo los dos
+// últimos intercambios aunque sean largos.
+//
+// Antes había además un límite por NÚMERO de mensajes: aviso a los 25, un
+// diálogo que detenía el envío a los 30 y recorte a los 40. No medía nada
+// real —cuarenta mensajes cortos caben de sobra— e interrumpía conversaciones
+// normales pidiendo guardarlas, cuando guardar no cambiaba nada: el historial
+// se relee de la base de datos en cada envío.
+const MAX_CONTEXT_CHARS = 32000;
+const MIN_RECENT_PAIRS = 2;
 
-  // Soft warning: show once per chat session
-  if (totalMessages >= CONTEXT_MANAGEMENT.SOFT_LIMIT &&
-      totalMessages < CONTEXT_MANAGEMENT.AUTO_SAVE_TRIGGER) {
-    if (!_contextWarningShown.has(chatId)) {
-      _contextWarningShown.add(chatId);
-      showContextWarning(totalMessages);
+function trimContextToBudget(messages) {
+  const totalChars = messages.reduce((sum, m) => sum + (m.content || '').length, 0);
+  if (totalChars <= MAX_CONTEXT_CHARS) return messages;
+
+  let charCount = 0;
+  let cutIndex = messages.length;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    charCount += (messages[i].content || '').length;
+    cutIndex = i;
+    const keptMessages = messages.length - i;
+    if (charCount > MAX_CONTEXT_CHARS && keptMessages >= MIN_RECENT_PAIRS * 2) {
+      cutIndex = i + 1;
+      break;
     }
   }
-
-  // Save suggestion: show once per chat session
-  if (totalMessages >= CONTEXT_MANAGEMENT.AUTO_SAVE_TRIGGER &&
-      totalMessages < CONTEXT_MANAGEMENT.HARD_LIMIT) {
-    if (!_contextSavePrompted.has(chatId)) {
-      _contextSavePrompted.add(chatId);
-      await suggestSaveConversation(currentMessages);
-    }
+  const trimmed = messages.slice(cutIndex);
+  if (cutIndex > 0) {
+    trimmed.unshift({
+      role: 'system',
+      content: `[Previous ${cutIndex} messages omitted to fit context window.]`
+    });
   }
-
-  // Hard limit: always trim (this is silent, no UI prompt)
-  if (totalMessages >= CONTEXT_MANAGEMENT.HARD_LIMIT) {
-    return smartContextTrim(currentMessages);
-  }
-
-  return currentMessages;
-}
-
-function smartContextTrim(messages) {
-  const preserveCount = Math.floor(CONTEXT_MANAGEMENT.HARD_LIMIT * CONTEXT_MANAGEMENT.PRESERVE_RATIO);
-  const keepCount = CONTEXT_MANAGEMENT.HARD_LIMIT - preserveCount - 1;
-
-  const initialContext = messages.slice(0, preserveCount);
-  const recentContext = messages.slice(-keepCount);
-  const summaryMessage = {
-    role: 'system',
-    content: `[Resumen contextual: ${messages.length - (preserveCount + keepCount)} mensajes anteriores omitidos]`
-  };
-
-  return [...initialContext, summaryMessage, ...recentContext];
-}
-
-function showContextWarning(messageCount) {
-  // Don't duplicate if already visible
-  const existing = document.querySelector('.context-warning');
-  if (existing) return;
-
-  const warningEl = document.createElement('div');
-  warningEl.className = 'context-warning';
-  warningEl.innerHTML = `
-    <div class="context-warning-content">
-      <span class="warning-icon">⚠️</span>
-      <span>Conversación larga (${messageCount} mensajes). Considera guardar.</span>
-      <button type="button" class="btn-small context-warning-save">Guardar</button>
-      <button type="button" class="btn-small context-warning-dismiss" aria-label="Cerrar">×</button>
-    </div>
-  `;
-  const btn = warningEl.querySelector('.context-warning-save');
-  if (btn) btn.addEventListener('click', () => saveCurrentConversation());
-  const dismissBtn = warningEl.querySelector('.context-warning-dismiss');
-  if (dismissBtn) dismissBtn.addEventListener('click', () => {
-    if (warningEl.parentNode) warningEl.parentNode.removeChild(warningEl);
-  });
-
-  const chatContainer = document.querySelector('.chat-area') || document.querySelector('#chat')?.parentElement || document.body;
-  chatContainer.insertBefore(warningEl, chatContainer.firstChild);
-
-  setTimeout(() => {
-    if (warningEl.parentNode) warningEl.parentNode.removeChild(warningEl);
-  }, 15000);
-}
-
-async function suggestSaveConversation(messages) {
-  const yes = await mikaConfirm(
-    'Guardar conversación',
-    `La conversación está creciendo (${messages.length} mensajes). ¿Deseas guardarla para liberar espacio y continuar?`
-  );
-  if (yes) await saveCurrentConversation(messages);
-}
-
-async function saveCurrentConversation(messages = conversationHistory) {
-  const defaultTitle = generateChatDocTitle(messages.filter(m => m.role !== 'system'));
-  const conversationName = await mikaPrompt('Guardar conversación', 'Nombre para guardar esta conversación:', defaultTitle);
-  if (conversationName == null || !conversationName.trim()) return;
-
-  const name = conversationName.trim();
-
-  // Save as Knowledge document in DB instead of localStorage
-  const body = messages.map(m => {
-    const prefix = m.role === 'user' ? '**Usuario:**' : m.role === 'assistant' ? '**Asistente:**' : `**${m.role}:**`;
-    return `${prefix}\n\n${m.content || ''}\n\n---\n\n`;
-  }).join('');
-
-  const content = `# ${name}\n\nFecha: ${new Date().toISOString()}\nMensajes: ${messages.length}\n\n---\n\n${body}`;
-
-  const savePayload = {
-    projectId: activeProjectId || QUICK_CHAT_ID,
-    title: name,
-    content,
-    mimeType: 'text/markdown'
-  };
-  if (activeProjectId === QUICK_CHAT_ID && activeChatId) {
-    savePayload.chatId = activeChatId;
-  }
-
-  try {
-    const result = await saveDocument(savePayload);
-    if (result?.ok) {
-      showToast(`Conversación "${name}" guardada en Knowledge`, 'success');
-      await renderKnowledgeList();
-    } else {
-      showToast('Error al guardar: ' + (result?.error || 'desconocido'), 'error');
-    }
-  } catch (e) {
-    showToast('Error al guardar conversación', 'error');
-  }
-
-  if (messages.length > 20) {
-    conversationHistory = messages.slice(-10);
-  }
+  return trimmed;
 }
 
 // Texto localizado del estado de un proveedor, construido SÓLO a partir del
@@ -3806,8 +3712,6 @@ async function refreshChats() {
         const wasActive = activeChatId === c.id;
         await Store.deleteChat(c.id);
         // Clean up per-chat tracking state
-        _contextWarningShown.delete(c.id);
-        _contextSavePrompted.delete(c.id);
         chatDrafts.delete(c.id);
         await refreshChats();
         if (wasActive) {
@@ -5907,40 +5811,13 @@ async function send() {
     baseMessages.push({ role: 'user', content: contentToSend });
     conversationHistory = baseMessages;
 
-    // === Gestión progresiva de contexto (mensajes) ===
-    let managedContext = await manageConversationContext(conversationHistory);
-    if (managedContext !== conversationHistory) conversationHistory = managedContext;
-    let trimmedMessages = managedContext;
-
-    // === Context Window Management (caracteres) ===
-    // Fallback: limitar por tamaño si sigue siendo grande
-    const MAX_CONTEXT_CHARS = 32000;
-    const MIN_RECENT_PAIRS = 2;
-    const totalChars = trimmedMessages.reduce((sum, m) => sum + (m.content || '').length, 0);
-
-    if (totalChars > MAX_CONTEXT_CHARS) {
-      let charCount = 0;
-      let cutIndex = trimmedMessages.length;
-      for (let i = trimmedMessages.length - 1; i >= 0; i--) {
-        charCount += (trimmedMessages[i].content || '').length;
-        cutIndex = i;
-        const keptMessages = trimmedMessages.length - i;
-        if (charCount > MAX_CONTEXT_CHARS && keptMessages >= MIN_RECENT_PAIRS * 2) {
-          cutIndex = i + 1;
-          break;
-        }
-      }
-      trimmedMessages = trimmedMessages.slice(cutIndex);
-      if (cutIndex > 0) {
-        trimmedMessages.unshift({
-          role: 'system',
-          content: `[Previous ${cutIndex} messages omitted to fit context window.]`
-        });
-        console.log(`Context trimmed (chars): ${managedContext.length} → ${trimmedMessages.length} messages`);
-      }
+    // === Contexto enviado al modelo ===
+    // Sin límite por número de mensajes: sólo el presupuesto de contexto.
+    const trimmedMessages = trimContextToBudget(conversationHistory);
+    if (trimmedMessages !== conversationHistory) {
+      console.log(`Context trimmed (chars): ${conversationHistory.length} → ${trimmedMessages.length} messages`);
     }
 
-    // Build ONE combined system message (many models ignore all but the first system message)
     const systemParts = [];
 
     // Part 1: Project/chat instructions
