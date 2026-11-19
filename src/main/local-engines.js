@@ -119,7 +119,14 @@ function clasificarSalida(salida) {
   if (/out\s*of\s*(device\s*)?memory|OutOfDeviceMemory|failed to allocate|bad_alloc|not enough memory/i.test(texto)) {
     return 'ENGINE_OUT_OF_MEMORY';
   }
-  if (/unknown (model )?architecture|unsupported model|unknown pre-tokenizer|invalid magic|not a valid gguf/i.test(texto)) {
+  // El fichero no es un modelo que este motor entienda. Incluye los GGUF que
+  // Ollama guarda con metadatos propios: medido con `qwen3.5:latest`, llama.cpp
+  // sale con «error loading model hyperparameters: key
+  // qwen35.rope.dimension_sections has wrong array length; expected 4, got 3».
+  // Eso no lo arregla menos contexto ni usar sólo CPU: reintentar las otras
+  // formas de arranque era perder el tiempo, y el modelo seguía ofreciéndose.
+  // La falta de memoria se mira antes: también acaba en «failed to load model».
+  if (/unknown (model )?architecture|unsupported model|unknown pre-tokenizer|invalid magic|not a valid gguf|error loading model (hyperparameters|architecture|vocabulary)|has wrong array length|key not found in model/i.test(texto)) {
     return 'ENGINE_MODEL_UNSUPPORTED';
   }
   return 'ENGINE_EXITED';

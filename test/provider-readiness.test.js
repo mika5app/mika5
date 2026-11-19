@@ -132,6 +132,17 @@ async function main() {
   const puertoOllama = await puertoLibre();
   process.env.MIKA5_OLLAMA_BASE = `http://127.0.0.1:${puertoOllama}`;
 
+  // Lo mismo para los motores gestionados. Sus direcciones por defecto (8080 y
+  // 8081) son las de ESTE equipo: si MIKA5 tiene arrancado un llama.cpp o un
+  // BitNet mientras corre la suite, contestaban a las sondas y las pruebas que
+  // preguntan por un motor parado veían uno en marcha. Ocurrió con los dos.
+  // Aquí esas dos direcciones responden «nadie escucha»; las pruebas que
+  // levantan un servidor lo hacen en un puerto libre, que no se toca.
+  const fetchDeVerdad = global.fetch;
+  global.fetch = (url, opciones) => (/^http:\/\/127\.0\.0\.1:(8080|8081)\//.test(String(url))
+    ? Promise.reject(Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }) }))
+    : fetchDeVerdad(url, opciones));
+
   const {
     AIProviderManager, PROVIDERS, registroDeProveedores, UI_STATE,
     READINESS, READINESS_ACTION, resolverReadiness
@@ -655,6 +666,13 @@ async function main() {
     check(clasificarSalida('ggml_vulkan: vk::Device::allocateMemory: ErrorOutOfDeviceMemory') === 'ENGINE_OUT_OF_MEMORY'
       && clasificarSalida('failed to allocate Vulkan0 buffer of size 1031798784') === 'ENGINE_OUT_OF_MEMORY',
       'quedarse sin memoria se reconoce por lo que escribe el motor');
+    // Salida real de llama-server con el GGUF que Ollama guarda para qwen3.5:latest.
+    const SALIDA_OLLAMA = "E llama_model_load: error loading model: error loading model hyperparameters: key qwen35.rope.dimension_sections has wrong array length; expected 4, got 3\nE llama_model_load_from_file_impl: failed to load model\nE srv  server_run_i: exiting due to model loading error";
+    check(clasificarSalida(SALIDA_OLLAMA) === 'ENGINE_MODEL_UNSUPPORTED',
+      'un GGUF con metadatos que el motor no entiende es un modelo no compatible, no un cierre cualquiera');
+    check(clasificarSalida('ErrorOutOfDeviceMemory\nE llama_model_load: error loading model: unable to allocate\nfailed to load model') === 'ENGINE_OUT_OF_MEMORY'
+      && clasificarSalida('failed to load model') === 'ENGINE_EXITED',
+      'la falta de memoria sigue siendo falta de memoria, y un «failed to load model» a secas no condena al modelo');
     check(clasificarSalida("unknown model architecture: 'rara'") === 'ENGINE_MODEL_UNSUPPORTED',
       'un modelo que el motor no entiende se reconoce aparte');
     check(clasificarSalida('') === 'ENGINE_EXITED' && clasificarSalida('otra cosa') === 'ENGINE_EXITED',
