@@ -2203,6 +2203,45 @@ function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).substr(2);
 }
 
+// Segunda búsqueda, por significado, cuando la de palabras no encontró nada.
+//
+// La primera búsqueda recorre todos los documentos buscando las palabras de la
+// pregunta. Si el usuario pregunta con otras palabras que las del documento
+// —«¿cuándo prescribe una deuda?» frente a «extinción de las obligaciones»—
+// no hay coincidencia, y sin esto se volvía a enviar el principio de los
+// documentos. Aquí se comparan los significados, sobre los mismos documentos y
+// con el mismo alcance. Necesita el modelo de embeddings; si no está o tarda,
+// se sigue con lo que ya había, que no es peor que antes.
+async function completarPorSignificado(chunks, { projectId, chatId, includeProjectScope, pregunta, maxChars }) {
+  if (!Array.isArray(chunks) || !chunks.length || chunks[0].selection === 'relevance') return chunks;
+  const totales = new Map(chunks.map(c => [c.title, c.doc_chunks || 0]));
+  const hayMas = [...totales.values()].reduce((a, b) => a + b, 0) > chunks.length;
+  if (!hayMas || !String(pregunta || '').trim()) return chunks;
+  try {
+    const respuesta = await withTimeout(
+      window.mika5.rag.query(projectId, pregunta, 8, { chatId, includeProjectScope }),
+      8000, 'buscar en los documentos'
+    );
+    const hallados = (respuesta && respuesta.ok && respuesta.chunks) || [];
+    if (!hallados.length) return chunks;
+    let usados = 0;
+    const elegidos = [];
+    for (const h of hallados) {
+      const largo = String(h.chunk_text || '').length;
+      if (elegidos.length && usados + largo > maxChars) continue;
+      elegidos.push({
+        title: h.title, chunk_index: h.chunk_index, chunk_text: h.chunk_text,
+        doc_chunks: totales.get(h.title) || 0, selection: 'relevance'
+      });
+      usados += largo;
+    }
+    return elegidos.sort((a, b) => String(a.title).localeCompare(String(b.title)) || a.chunk_index - b.chunk_index);
+  } catch (e) {
+    console.warn('[KNOWLEDGE] búsqueda por significado no disponible:', e?.message || e);
+    return chunks;
+  }
+}
+
 // Presupuesto de contexto que se envía al modelo, en caracteres.
 //
 // La conversación entera vive en SQLite y no tiene límite de mensajes. Lo que
@@ -5877,16 +5916,29 @@ async function send() {
         const mode = isQuickChatScope ? 'selective' : 'complete';
         // Quick Chat no tiene conocimiento de proyecto: sólo el del chat actual.
         const scopeOpts = { includeProjectScope: !isQuickChatScope };
-        const chunks = await window.mika5.rag.listChunksRaw(kProjId, kChatId, maxRagChars, mode, scopeOpts);
+        // La pregunta viaja con la consulta: de un documento largo se traen
+        // los fragmentos que hablan de ella, no los primeros.
+        let chunks = await window.mika5.rag.listChunksRaw(kProjId, kChatId, maxRagChars, mode, scopeOpts, dbContent);
+        chunks = await completarPorSignificado(chunks, {
+          projectId: kProjId, chatId: kChatId, includeProjectScope: scopeOpts.includeProjectScope,
+          pregunta: dbContent, maxChars: maxRagChars
+        });
         if (chunks && chunks.length > 0) {
           const titles = [...new Set(chunks.map(c => c.title))];
           ragDocumentTitles = titles.filter(Boolean);
           knowledgeListContext = `Documentos en la base de conocimiento del proyecto (${titles.length}):\n${titles.map(t => '- ' + t).join('\n')}`;
 
           const contextText = chunks.map(c =>
-            `[Documento: ${c.title || "Sin título"}] (fragmento ${(c.chunk_index || 0) + 1}):\n${c.chunk_text}`
+            `[Documento: ${c.title || "Sin título"}] (fragmento ${(c.chunk_index || 0) + 1}${c.doc_chunks ? ` de ${c.doc_chunks}` : ''}):\n${c.chunk_text}`
           ).join("\n\n---\n\n");
-          ragContext = `El usuario tiene los siguientes documentos cargados en la base de conocimiento de este proyecto. Cuando el usuario pregunte sobre "archivos", "documentos", "contexto del proyecto" o el contenido del proyecto, se refiere a ESTE contenido:\n\n${contextText}\n\nFin de los documentos del proyecto. Basa tu respuesta en este contenido.`;
+          // El modelo recibe una parte de los documentos. Tiene que saberlo, o
+          // concluye que lo que no ve no existe y se lo dice así al usuario.
+          const totalFragmentos = titles.reduce((suma, titulo) =>
+            suma + (chunks.find(c => c.title === titulo)?.doc_chunks || 0), 0);
+          const avisoParcial = totalFragmentos > chunks.length
+            ? `\n\nIMPORTANTE: los documentos son más largos que lo que cabe aquí. Se muestran ${chunks.length} de ${totalFragmentos} fragmentos${chunks[0].selection === 'relevance' ? ', elegidos por su relación con la pregunta' : ''}. Si la respuesta no está en estos fragmentos, no afirmes que el documento no la contiene: di que no aparece en la parte consultada y pide al usuario que reformule o indique el apartado.`
+            : '';
+          ragContext = `El usuario tiene los siguientes documentos cargados en la base de conocimiento de este proyecto. Cuando el usuario pregunte sobre "archivos", "documentos", "contexto del proyecto" o el contenido del proyecto, se refiere a ESTE contenido:\n\n${contextText}\n\nFin de los documentos del proyecto. Basa tu respuesta en este contenido.${avisoParcial}`;
         }
       }
     } catch (chunkErr) {

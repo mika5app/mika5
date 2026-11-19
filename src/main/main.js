@@ -239,13 +239,15 @@ ipcMain.handle("rag:getFullDocumentText", async (_e, knowledgeItemId) => {
   }
 });
 // Returns chunk text with server-side truncation and round-robin distribution across documents
-ipcMain.handle("rag:listChunksRaw", (_e, projectId, chatId, maxChars, mode = 'selective', opts = {}) => {
+ipcMain.handle("rag:listChunksRaw", (_e, projectId, chatId, maxChars, mode = 'selective', opts = {}, query) => {
   try {
     return dbApi.listChunksRaw({
       projectId,
       chatId,
       maxChars,
       mode,
+      // La pregunta del usuario, para elegir los fragmentos que la responden.
+      query: typeof query === 'string' ? query : undefined,
       includeProjectScope: opts && opts.includeProjectScope !== undefined
         ? !!opts.includeProjectScope
         : undefined

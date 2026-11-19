@@ -130,6 +130,7 @@ const EN_NPM_TEST = [
   'test:provider-availability',
   'test:provider-readiness',
   'test:conversation-context',
+  'test:knowledge-retrieval',
   'test:update-check',
   'test:third-party-notices',
   'test:provider-credentials',
@@ -156,7 +157,7 @@ for (const suite of EN_NPM_TEST) {
 // Scripts que deben existir, se invoquen desde el gate canónico o a mano.
 const SCRIPTS_REQUERIDOS = [
   'test', 'test:all', 'test:gui', 'test:db', 'test:rag', 'test:vision', 'test:alibaba',
-  'test:provider-capabilities', 'test:provider-availability', 'test:provider-readiness', 'test:conversation-context', 'test:update-check', 'test:third-party-notices', 'test:provider-credentials', 'test:provider-registry', 'test:request-context', 'test:provider-cancellation',
+  'test:provider-capabilities', 'test:provider-availability', 'test:provider-readiness', 'test:conversation-context', 'test:knowledge-retrieval', 'test:update-check', 'test:third-party-notices', 'test:provider-credentials', 'test:provider-registry', 'test:request-context', 'test:provider-cancellation',
   'test:cloud-consent', 'test:network-security', 'test:knowledge-scope',
   'test:knowledge-cli', 'test:ensure-electron-binary', 'test:ci-gates', 'test:palette', 'test:visual-ui-shell', 'test:visual-ui-conversation', 'test:electron-test-isolation', 'test:visual-ui-polish', 'test:ipc-contracts',
   'test:print-pdf-electron', 'test:electron-renderer',

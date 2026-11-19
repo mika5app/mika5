@@ -268,6 +268,24 @@ results.
 The cache key covers all three scope components (project, chat, whether project-level
 documents are included). Every route that changes indexed content invalidates it.
 
+## Which fragments go with a question
+
+A long document does not fit in the model's context, so the send path picks fragments.
+`src/main/knowledge-retrieval.js` scores every fragment in scope against the words of the
+question (accent-insensitive, numbers never dropped, exact references such as
+"artículo 380" matched with word boundaries) and returns the best ones in document order,
+within the character budget. It is lexical on purpose: it does not depend on an embedding
+model being loaded. If the words find nothing, the renderer falls back to the existing
+embedding search (`rag.query`) over the same scope, and only then to the first fragments.
+
+Scope is applied before ranking: a question never widens what a request may see. Each
+fragment carries `doc_chunks`, and the prompt tells the model when it is seeing part of a
+document, so it does not claim that what it was not shown does not exist.
+
+Not solved: a task that needs the whole of a long document at once (a full summary, a
+complete comparison) still receives only the fragments that fit. Scanned PDFs are OCR'd
+up to 20 pages.
+
 ## Knowledge/RAG scope
 
 A knowledge document belongs to a project, and optionally to one chat. Retrieval returns

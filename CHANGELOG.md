@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - The header showed "Ollama (Local)" for llama.cpp and BitNet. It now shows the selected provider, and the Ollama model library is only offered with Ollama.
+- Long documents were only read from the start: the first fragments were sent whatever the question, so asking for article 380 of a long code answered that it was not in the documents. Every fragment of every document in scope is now searched for the words of the question, with a meaning-based search as a fallback, and the model is told when it is seeing part of a document.
 - Asking to analyse and change an image no longer makes the model report an internal "describe-only-do-not-edit" restriction. The model receives your message unchanged, and MIKA5 says when the provider can analyse images but not edit them.
 
 ## [0.3.1] - 2026-11-07

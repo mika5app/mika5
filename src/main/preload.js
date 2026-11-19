@@ -33,7 +33,7 @@ contextBridge.exposeInMainWorld("mika5", {
     queryByChat: (chatId, text, k) => ipcRenderer.invoke("rag:queryByChat", chatId, text, k),
     indexKnowledgeItem: (knowledgeItemId) => ipcRenderer.invoke("rag:indexKnowledgeItem", knowledgeItemId),
     getDocumentText: (knowledgeItemId) => ipcRenderer.invoke("rag:getDocumentText", knowledgeItemId),
-    listChunksRaw: (projectId, chatId, maxChars, mode = 'selective', opts) => ipcRenderer.invoke("rag:listChunksRaw", projectId, chatId, maxChars, mode, opts)
+    listChunksRaw: (projectId, chatId, maxChars, mode = 'selective', opts, query) => ipcRenderer.invoke("rag:listChunksRaw", projectId, chatId, maxChars, mode, opts, query)
   },
   files: {
     downloadImage: (params) => ipcRenderer.invoke('files:download-image', params)
