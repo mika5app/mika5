@@ -745,6 +745,8 @@ async function main() {
       const r = await hasta(x => x.readiness === READINESS.ERROR);
       check(r.engine.errorCode === 'ENGINE_MODEL_UNSUPPORTED' && lanzados.length === 1,
         'un modelo que el motor no entiende no se reintenta de tres formas: no va a cargar');
+      check(r.action === READINESS_ACTION.CONFIGURE_ENGINE,
+        'y lo que se ofrece es elegir otro modelo, no volver a arrancar con el mismo');
       const despues = await m.getReadiness('llamacpp');
       check(m.getEngineConfig('llamacpp').verified[modelo] === 'incompatible' && !despues.models.some(x => x.name === L('prueba')),
         'y deja de ofrecerse');

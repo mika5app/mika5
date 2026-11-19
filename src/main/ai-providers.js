@@ -924,6 +924,10 @@ function readinessDeMotor(codigo, tipo) {
     case 'ENGINE_EXTERNALLY_CONFIGURED':
     case 'ENGINE_AUTOSTART_DISABLED':
       return { readiness: R.UNAVAILABLE, action: A.START_SERVICE };
+    case 'ENGINE_MODEL_UNSUPPORTED':
+      // El motor no entiende ese modelo: volver a arrancarlo con el mismo no
+      // lleva a nada. Lo que toca es elegir otro.
+      return { readiness: R.ERROR, action: A.CONFIGURE_ENGINE };
     default:
       // Puerto ocupado, proceso que salió, plazo agotado: el intento falló.
       return { readiness: R.ERROR, action: A.START_ENGINE };
