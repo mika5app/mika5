@@ -371,7 +371,9 @@ function detectUserIntentDetailed(input = {}) {
     add('image-variation', 12, 'generate-new-visual-from-reference');
     variationSignals.push('reference-based-version');
   }
-  const editVerb = /\b(edita|editar|cambia|cambiar|cambio|modifica|modificar|quita|quitar|remueve|remover|elimina|eliminar|agrega|agregar|anade|anadir|sustituye|sustituir|reemplaza|reemplazar|pon|poner|coloca|colocar|hazle|hazlo|dejalo|vuelvelo|mueve|mover|agranda|agrandar|reduce|reducir|alinea|alinear|redisena|redisenar|moderniza|modernizar|renueva|renovar|actualiza|actualizar)\b|hacer(?:la|lo)?\s+mas/;
+  // «modernízalo», «cámbiala», «editarlos»: el pronombre pegado al verbo no
+  // cambia lo que se pide, y sin contemplarlo la petición pasaba por análisis.
+  const editVerb = /\b(edita|editar|cambia|cambiar|cambio|modifica|modificar|quita|quitar|remueve|remover|elimina|eliminar|agrega|agregar|anade|anadir|sustituye|sustituir|reemplaza|reemplazar|pon|poner|coloca|colocar|hazle|hazlo|dejalo|vuelvelo|mueve|mover|agranda|agrandar|reduce|reducir|alinea|alinear|redisena|redisenar|moderniza|modernizar|renueva|renovar|actualiza|actualizar)(?:lo|la|los|las)?\b|hacer(?:la|lo)?\s+mas/;
   if (editVerb.test(normalizedText) && visualContext.hasVisualContext) add('image-edit', 9, 'edit-operation');
   else if (visualContext.hasVisualContext && hasApproximateVisualEditVerb(normalizedText)) add('image-edit', 7, 'approximate-edit-verb');
   if (/\bfondo\b/.test(normalizedText)) {
@@ -385,7 +387,7 @@ function detectUserIntentDetailed(input = {}) {
   if (/\b(quita|remueve|elimina)\b.*\bfondo\b/.test(normalizedText)) editSubtypes.push('background-removal');
   if (/\b(agrega|anade|pon)\b/.test(normalizedText)) editSubtypes.push('element-addition');
   if (/\b(reemplaza|sustituye)\b/.test(normalizedText)) editSubtypes.push('element-replacement');
-  if (/\b(moderno|hazlo|dejalo|vuelvelo|redisena|redisenar|moderniza|modernizar|renueva|renovar|actualiza|actualizar)\b/.test(normalizedText)) editSubtypes.push('style-change');
+  if (/\b(moderno|hazlo|dejalo|vuelvelo|redisena|redisenar|moderniza|modernizar|renueva|renovar|actualiza|actualizar)(?:lo|la|los|las)?\b/.test(normalizedText)) editSubtypes.push('style-change');
   if (/\b(agranda|reduce|mas grande|mas pequeno)\b/.test(normalizedText)) editSubtypes.push('resize');
   if (/\b(mueve|alinea|mismo plano|en linea|de frente)\b/.test(normalizedText)) editSubtypes.push('layout-adjustment');
 
@@ -525,7 +527,11 @@ function buildImageVariationPlan({ text = '', detailed, visualContext, lastVisua
 }
 
 function buildVisionAnalysisPlan({ text = '', visualContext } = {}) {
-  return { mode: 'vision-analysis', objective: text, constraints: ['describe-only-do-not-edit'], needsClarification: !visualContext?.hasVisualContext, visualContext };
+  // Sin restricciones: analizar una imagen no lleva ninguna. Aquí había una
+  // etiqueta interna («describe-only-do-not-edit») que acababa dentro del
+  // mensaje enviado al modelo, y el modelo la repetía al usuario como si fuera
+  // una prohibición suya.
+  return { mode: 'vision-analysis', objective: text, constraints: [], needsClarification: !visualContext?.hasVisualContext, visualContext };
 }
 
 function buildImageGenerationPlan({ text = '', visualContext = null } = {}) {
@@ -581,6 +587,11 @@ function buildModelPromptFromPlan(plan) {
       'No devuelvas instrucciones ni texto explicativo; genera únicamente la imagen.'
     ].join('\n');
   }
+  // Para analizar una imagen el modelo recibe lo que escribió el usuario, tal
+  // cual. El plan es un dato interno del routing: convertirlo en texto y
+  // mandarlo en lugar del mensaje sustituía las palabras del usuario por jerga
+  // de MIKA5.
+  if (plan?.mode === 'vision-analysis') return String(plan.objective || '');
   const lines = [`Tarea visual: ${plan.mode}.`];
   if (plan.objective) lines.push(`Objetivo: ${plan.objective}`);
   if (plan.operations?.length) lines.push(`Operaciones: ${plan.operations.join(', ')}.`);
@@ -1393,8 +1404,14 @@ class AIProviderManager {
     if (options && !/\n1\./.test(routed.message || '')) {
       routed.message += '\nPuedo:\n1. Analizar la imagen actual\n2. Generar una nueva imagen basada en tu instrucción';
     }
+    // El usuario pidió cambiar o crear una imagen y este proveedor sólo sabe
+    // mirarlas. Se le dice con claridad, en vez de dejar que el modelo prometa
+    // —o niegue con una excusa inventada— algo que no depende de él.
+    const pidioGenerar = GENERATIVE_VISUAL_MODES.includes(detailed.intent)
+      || GENERATIVE_VISUAL_MODES.includes(detailed.generationCandidate);
     return {
       ...routed,
+      imageEditUnavailable: Boolean(pidioGenerar && !capabilities.imageGeneration),
       capabilities,
       detailed,
       visualContext,

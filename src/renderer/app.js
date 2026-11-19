@@ -5610,6 +5610,9 @@ async function send() {
         currentModel: model === AUTOMATIC_MODEL_ID ? '' : model
       });
       routedIntent = route.intent;
+      // Aviso de la aplicación, no del modelo: este proveedor analiza imágenes
+      // pero no las edita ni las genera.
+      if (route.imageEditUnavailable) showToast(t('image.editUnavailable'), 'info');
       resolvedVisualContext = route.visualContext;
       activeVisualRoute = route;
       if (route.action === 'error') {

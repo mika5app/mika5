@@ -566,3 +566,48 @@ const attached = attachOpenAIImages([
 assert.equal(typeof attached[0].content, 'string', 'los mensajes previos no se tocan');
 assert(Array.isArray(attached[2].content));
 assert.equal(attached[2].content[0].text, 'segundo');
+
+// --- Imágenes: lo que recibe el modelo es lo que escribió el usuario ---
+// Informe de campo: al pedir «analiza este logo y modernízalo» el modelo
+// contestaba que tenía una restricción «describe-only-do-not-edit». No era
+// suya: era una etiqueta interna del routing que MIKA5 escribía dentro del
+// mensaje, en lugar de las palabras del usuario.
+{
+  const { AIProviderManager, registroDeProveedores } = require('../src/main/ai-providers');
+  const gestorDeRutas = new AIProviderManager({ prepare: () => ({ all: () => [], get: () => undefined, run: () => {} }) });
+  const adjunto = [{ type: 'image', mediaType: 'image/png', base64: 'AAAA', name: 'logo.png', chatId: 'c' }];
+  const FRASES = [
+    'analiza este logo y modernizalo',
+    'describe esta imagen y luego cambia el fondo',
+    'que ves en esta imagen',
+    'moderniza este logotipo',
+    'explica este diagrama'
+  ];
+  let rutasComprobadas = 0;
+  for (const providerId of registroDeProveedores.ids()) {
+    const editaImagenes = providerId === 'alibaba';
+    for (const text of FRASES) {
+      const ruta = gestorDeRutas.routeIntent({ text, providerId, chatId: 'c', attachments: adjunto, currentModel: 'm' });
+      const todo = JSON.stringify([ruta.modelPrompt, ruta.plan, ruta.message || '']);
+      assert(!/describe-only|do-not-edit/.test(todo),
+        `${providerId} / «${text}»: ninguna etiqueta interna de restricción llega al modelo`);
+      if (ruta.intent === 'vision-analysis' || ruta.intent === 'normal-chat') {
+        assert.equal(ruta.modelPrompt, text,
+          `${providerId} / «${text}»: el modelo recibe el mensaje del usuario sin reescribir`);
+        assert.equal(ruta.action, 'chat', `${providerId} / «${text}»: analizar una imagen es un chat`);
+      }
+      const pidioCambio = /moderniz|cambia/.test(text);
+      assert.equal(ruta.imageEditUnavailable, pidioCambio && !editaImagenes,
+        `${providerId} / «${text}»: ${pidioCambio && !editaImagenes ? 'se avisa de que no puede editar' : 'no se avisa de nada'}`);
+      rutasComprobadas += 1;
+    }
+  }
+  // Alibaba sí edita: su camino no cambia.
+  const edicion = gestorDeRutas.routeIntent({
+    text: 'moderniza este logotipo', providerId: 'alibaba', chatId: 'c', attachments: adjunto, currentModel: 'm'
+  });
+  assert.equal(edicion.intent, 'image-edit');
+  assert.equal(edicion.action, 'generate-image', 'en Alibaba una edición sigue yendo a generación de imágenes');
+  assert(edicion.generationPrompt && edicion.plan.operations.includes('style-change'), 'y conserva el plan de edición');
+  console.log(`Image routing prompt tests passed (${rutasComprobadas} rutas)`);
+}
