@@ -72,6 +72,60 @@ for (const archivo of flujos) {
   }
 }
 
+console.log('\n=== 4b. Protecciones preparadas para cuando el repositorio sea publico ===');
+{
+  const regla = (nombre) => JSON.parse(leer(`.github/rulesets/${nombre}.json`));
+  const main = regla('main');
+  const tipos = (r) => r.rules.map(x => x.type).sort().join();
+  check(main.target === 'branch' && main.enforcement === 'active'
+    && main.conditions.ref_name.include.join() === 'refs/heads/main' && main.bypass_actors.length === 0,
+    'main: regla activa sobre refs/heads/main, sin nadie que la salte');
+  check(tipos(main) === 'deletion,non_fast_forward,pull_request,required_status_checks',
+    'main: pull request obligatorio, checks obligatorios, sin force-push ni borrado');
+  // Los checks exigidos son los que el flujo produce de verdad en todo pull
+  // request: el nombre del trabajo que llama al flujo canonico, mas cada
+  // trabajo que corre siempre. Un nombre inventado dejaria main sin poder
+  // fusionar nada; uno de un trabajo condicional (package), tambien.
+  const build = leer('.github/workflows/build.yml');
+  const canonico = leer('.github/workflows/_canonical.yml');
+  const llamador = /\n  ([a-z][a-z0-9_-]*):\n    uses: \.\/\.github\/workflows\/_canonical\.yml/.exec(build)[1];
+  const sistemas = /\n  quality-gates:\n[\s\S]*?matrix:\n\s+os: \[([^\]]+)\]/.exec(canonico)[1].split(',').map(x => x.trim());
+  const esperados = [`${llamador} / source`, ...sistemas.map(os => `${llamador} / quality-gates (${os})`)].sort();
+  const exigidos = main.rules.find(r => r.type === 'required_status_checks').parameters.required_status_checks;
+  check(/\n  source:\n/.test(canonico) && !/\n  source:\n(?:    .*\n)*?    if:/.test(canonico)
+    && exigidos.map(c => c.context).sort().join('|') === esperados.join('|'),
+    `main exige exactamente los checks que siempre corren (${esperados.join(', ')})`);
+  check(/^  pull_request:\n    branches:\n      - main\n/m.test(build) && !/^  pull_request:\n(?:    .*\n)*?    paths/m.test(build),
+    'y el flujo corre en todo pull request a main, sin filtro de rutas que deje un check sin informar');
+  check(main.rules.find(r => r.type === 'pull_request').parameters.required_approving_review_count === 0,
+    'main: cero aprobaciones exigidas mientras haya una sola persona (nadie aprueba su propio pull request)');
+
+  const fijas = regla('release-tags-immutable');
+  const crear = regla('release-tags-create');
+  check([fijas, crear].every(r => r.target === 'tag' && r.enforcement === 'active' && r.conditions.ref_name.include.join() === 'refs/tags/v*'),
+    'las dos reglas de tags cubren refs/tags/v*');
+  check(tipos(fijas) === 'deletion,non_fast_forward,update' && fijas.bypass_actors.length === 0,
+    'un tag de version no se mueve ni se borra, y nadie lo salta');
+  check(tipos(crear) === 'creation' && crear.bypass_actors.some(a => a.actor_type === 'RepositoryRole' && a.actor_id === 5 && a.bypass_mode === 'always'),
+    'solo un administrador crea tags de version: asi se puede seguir publicando');
+  // El flujo de release se dispara con el tag: si la regla de creacion no
+  // dejara pasar a nadie, no habria forma de publicar.
+  check(/tags:\n\s+- 'v\*\.\*\.\*'/.test(build), 'y el release sigue disparandose con un tag v*.*.*');
+
+  const ajustes = JSON.parse(leer('.github/repository-settings.json')).security_and_analysis;
+  check(ajustes.secret_scanning.status === 'enabled' && ajustes.secret_scanning_push_protection.status === 'enabled',
+    'los ajustes preparados activan el escaneo de secretos y su bloqueo al subir');
+
+  const guia = leer('docs/going-public.md');
+  const ordenes = [...guia.matchAll(/```powershell\n([\s\S]*?)```/g)].flatMap(m => m[1].trim().split('\n'));
+  check(ordenes.length >= 10 && ordenes.every(o => /^gh (repo edit|api|pr checks) /.test(o)),
+    `la guia de publicacion solo contiene ordenes de gh (${ordenes.length})`);
+  const ficheros = ordenes.map(o => /--input (\S+)/.exec(o)).filter(Boolean).map(m => m[1]);
+  check(ficheros.length === 4 && ficheros.every(f => fs.existsSync(path.join(ROOT, f))),
+    'y cada fichero que esas ordenes envian existe');
+  check(!/<<|\$\(|`n/.test(ordenes.join('\n')), 'ninguna orden depende de sintaxis que PowerShell no entienda igual que bash');
+}
+
 console.log('\n=== 5. Nada personal en lo que se publica ===');
 const ignorar = new Set(['.git', 'node_modules', 'dist', 'vendor', 'package-lock.json']);
 const personales = [];
