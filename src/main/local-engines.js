@@ -460,6 +460,19 @@ class GestorDeMotores {
     motor.timerCarga = null;
   }
 
+  /**
+   * Da por fallido un motor propio que arrancó pero no sirve: se retira el
+   * proceso y queda el motivo. No toca un servidor que MIKA5 no inició.
+   */
+  fallar(providerId, codigo) {
+    const motor = this._motores.get(providerId);
+    if (!motor || !motor.child) return;
+    this._limpiarTemporizadores(motor);
+    this._matar(motor);
+    motor.state = ESTADO_MOTOR.FAILED;
+    motor.errorCode = codigo;
+  }
+
   /** Olvida un fallo para permitir un reintento pedido por el usuario. */
   reiniciarFallo(providerId) {
     const motor = this._motores.get(providerId);

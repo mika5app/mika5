@@ -1701,6 +1701,87 @@ async function run() {
     }
   }
 
+
+  // --- Motor local: proveedor, modelo, origen y motor efectivo, por separado ---
+  // Informe de campo: con llama.cpp elegido el selector enseñaba
+  // «ollama/glm-ocr:latest» —un modelo que nadie había elegido ni cargado— y el
+  // estado decía «Sin conexión» con el motor simplemente parado.
+  const MOTOR = 'llama.cpp · llama3.2:3b';
+  const modelosDelMotor = [
+    { name: MOTOR, label: 'llama3.2:3b', origin: 'Ollama', compatibility: 'unverified' },
+    { name: 'llama.cpp · qwen3.5:0.8b', label: 'qwen3.5:0.8b', origin: 'Ollama', compatibility: 'unverified' }
+  ];
+  let motorSimulado = { status: 'stopped', selectedModel: null };
+  const eleccionesDeMotor = [];
+  ipcMain.handle('ai:get-readiness', () => ({
+    configured: true, reachable: motorSimulado.status === 'ready', authenticated: null,
+    models: modelosDelMotor, modelsAvailable: modelosDelMotor.length, canAttempt: true,
+    ready: motorSimulado.status === 'ready', uiState: motorSimulado.status === 'ready' ? 'connected' : 'offline',
+    errorCode: motorSimulado.status === 'ready' ? null : 'PROVIDER_TRANSPORT_UNREACHABLE', httpStatus: null,
+    readiness: motorSimulado.status === 'ready' ? 'ready' : 'available', action: null,
+    engine: {
+      managed: true, external: false, owned: motorSimulado.status === 'ready', label: 'llama.cpp',
+      state: motorSimulado.status === 'ready' ? 'running' : 'idle', errorCode: null,
+      status: motorSimulado.status, selectedModel: motorSimulado.selectedModel,
+      modelOrigin: motorSimulado.selectedModel ? 'Ollama' : null
+    }
+  }));
+  ipcMain.handle('ai:select-engine-model', (_event, proveedor, modelo) => {
+    eleccionesDeMotor.push({ proveedor, modelo });
+    motorSimulado = { status: 'ready', selectedModel: modelo };
+    return {};
+  });
+  // El último modelo usado fue uno de Ollama: no puede colarse como elegido.
+  appState.set('lastModel', 'llama3.2:3b');
+  await win.webContents.executeJavaScript(`switchProvider('llamacpp')`, true);
+  const leerMotor = () => win.webContents.executeJavaScript(`(() => {
+    const s = document.getElementById('modelSelect');
+    const p = document.getElementById('rtStatus');
+    return {
+      proveedor: currentProvider, rotulo: document.getElementById('currentProviderName').textContent,
+      valor: s.value, primera: s.options[0].textContent, deshabilitado: s.disabled,
+      opciones: Array.from(s.options).map(o => o.textContent), valores: Array.from(s.options).map(o => o.value),
+      origenes: Array.from(s.options).map(o => o.dataset.description || ''),
+      pildora: p.textContent, estadoMotor: p.dataset.engineStatus, clase: p.className, titulo: p.title || ''
+    };
+  })()`, true);
+  const parado = await leerMotor();
+  assert.strictEqual(parado.rotulo, 'llama.cpp (Local)', 'el proveedor mostrado es llama.cpp');
+  assert.strictEqual(parado.valor, '', 'sin modelo elegido el selector no tiene ninguno seleccionado');
+  assert(!parado.deshabilitado && parado.primera.length > 0 && !parado.valores.includes('llama3.2:3b'),
+    'el selector pide elegir, y no hereda el último modelo usado con Ollama');
+  assert.deepStrictEqual(parado.opciones.slice(1), ['llama3.2:3b', 'qwen3.5:0.8b'],
+    'los modelos se enseñan por su nombre, sin prefijo de proveedor');
+  assert(parado.origenes.slice(1).every(o => o.includes('Ollama')),
+    'el origen del fichero se enseña aparte, como descripción');
+  assert.strictEqual(parado.estadoMotor, 'stopped', 'el estado es el del motor: detenido');
+  assert(!/Sin conexión|Offline/.test(parado.pildora) && !parado.clase.includes('status-offline'),
+    `un motor parado y listo para arrancar no se rotula «sin conexión» (${parado.pildora})`);
+
+  // Elegir un modelo es lo que arranca el motor, con el modelo elegido.
+  await win.webContents.executeJavaScript(`(() => {
+    document.getElementById('modelSelect').value = ${JSON.stringify(MOTOR)};
+    onSelectedModelChanged();
+  })()`, true);
+  await waitFor(win, `document.getElementById('rtStatus').dataset.engineStatus === 'ready'`);
+  const servido = await leerMotor();
+  assert.deepStrictEqual(eleccionesDeMotor, [{ proveedor: 'llamacpp', modelo: MOTOR }],
+    'la elección llega al proceso principal con el proveedor y el modelo elegidos, una vez');
+  assert.strictEqual(servido.valor, MOTOR, 'el selector queda en el modelo que el motor sirve');
+  assert(servido.clase.includes('status-ok') && /llama\.cpp/.test(servido.titulo) && /Ollama/.test(servido.titulo),
+    `listo: se dice qué motor ejecuta y de dónde salió el modelo (${servido.titulo})`);
+
+  historialLargo = [];
+  const guardadosAntes = state.dbAttempts.length;
+  const turnoMotor = await enviarYConsentir('turno con llama.cpp');
+  assert.strictEqual(`${turnoMotor.providerId}|${turnoMotor.model}`, `llamacpp|${MOTOR}`,
+    'la petición sale por llama.cpp con el modelo elegido: ni Ollama ni otro modelo');
+  assert(instruccionesDe(turnoMotor).primeraEsSystem && instruccionesDe(turnoMotor).veces === 1,
+    'las instrucciones del sistema se conservan con el motor local');
+  const guardados = state.dbAttempts.slice(guardadosAntes);
+  assert(guardados.length >= 1 && guardados.every(g => g.model === MOTOR),
+    'los mensajes nuevos se guardan atribuidos a «llama.cpp · modelo», no a un nombre que parezca de Ollama');
+
   win.destroy();
 
   console.log('Electron renderer integration tests passed');

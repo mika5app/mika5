@@ -22,7 +22,8 @@ const { createAbortContext } = require('../provider-runtime');
 // arranca el servidor; duplicar el cliente HTTP haría que los dos divergieran
 // en silencio la primera vez que se corrigiera uno solo.
 function crearAdaptadorServidorLlama({
-  providerId, name, etiqueta, baseUrl, comoIniciar, paquete, descargaHf, guia, compatibilidad, aceptaEjecutable, catalogo
+  providerId, name, etiqueta, baseUrl, comoIniciar, paquete, descargaHf, guia, compatibilidad, aceptaEjecutable, catalogo,
+  instalacion
 }) {
   const adaptador = {
     name,
@@ -37,6 +38,8 @@ function crearAdaptadorServidorLlama({
     // cliente: no hay un segundo sitio donde declararlos.
     engine: {
       tipo: 'managed',
+      // Nombre del motor tal y como se le enseña al usuario junto al modelo.
+      etiqueta,
       ejecutable: 'llama-server',
       requiereModelo: true,
       baseUrl: () => adaptador.baseUrl,
@@ -44,6 +47,8 @@ function crearAdaptadorServidorLlama({
       // y página oficial de instalación para cuando no.
       paquete: paquete || null,
       guia: guia || null,
+      // `source`: no hay instalador, se compila en el equipo.
+      instalacion: instalacion || (paquete ? 'package' : null),
       // Qué puede decirse de un GGUF sin cargarlo, a partir de lo que declara.
       compatibilidad: compatibilidad || (() => 'unverified'),
       // `-hf` hace que el propio servidor descargue un GGUF de Hugging Face a

@@ -280,7 +280,10 @@ function descubrirModelos(contexto) {
   for (const crudo of crudos) {
     if (rutasVistas.has(clave(crudo.path))) continue;
     rutasVistas.add(clave(crudo.path));
-    let id = crudo.origen === 'Ollama' ? `ollama/${crudo.nombre}` : crudo.nombre;
+    // El nombre del modelo, sin prefijo de origen: que un GGUF lo descargase
+    // Ollama no lo convierte en «un modelo de Ollama». De dónde salió va en
+    // `source`, y qué motor lo ejecuta lo decide quien lo ofrece.
+    let id = crudo.nombre;
     for (let n = 2; ids.has(id); n += 1) id = `${crudo.nombre} (${n})`;
     ids.add(id);
     let size = 0;

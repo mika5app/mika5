@@ -48,6 +48,10 @@ const servidor = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/v1/models') {
     return json(200, { object: 'list', data: [{ id: 'modelo-de-prueba', object: 'model' }] });
   }
+  if (req.method === 'POST' && req.url === '/v1/chat/completions' && process.env.FAKE_LLAMA_CHAT_FAILS === '1') {
+    // El servidor lista el modelo pero no sabe generar con él.
+    return json(500, { error: { message: 'failed to process request' } });
+  }
   if (req.method === 'POST' && req.url === '/v1/chat/completions') {
     let cuerpo = '';
     req.on('data', (parte) => { cuerpo += parte; });

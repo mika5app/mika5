@@ -880,6 +880,25 @@ const COMPATIBILITY = Object.freeze({
   UNVERIFIED: 'unverified'
 });
 
+/**
+ * En qué punto está un motor local. Es lo que se le enseña al usuario en vez
+ * de «sin conexión», que para un motor que MIKA5 gestiona no dice nada: un
+ * motor parado a la espera de un modelo y un motor roto no son lo mismo.
+ */
+const ENGINE_STATUS = Object.freeze({
+  NOT_INSTALLED: 'not-installed',
+  NEEDS_APPROVAL: 'needs-approval',
+  NEEDS_MODEL: 'needs-model',
+  STOPPED: 'stopped',
+  STARTING: 'starting',
+  LOADING: 'loading',
+  READY: 'ready',
+  ERROR: 'error'
+});
+
+/** Versión del criterio con que se guardan los veredictos de compatibilidad. */
+const VERDICTS_VERSION = 2;
+
 /** Repositorio de Hugging Face: `usuario/modelo`, con cuantización opcional. */
 const HF_REPO_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,95}\/[A-Za-z0-9][A-Za-z0-9._-]{0,95}(?::[A-Za-z0-9._-]{1,40})?$/;
 
@@ -1051,6 +1070,7 @@ class AIProviderManager {
     // Carpeta de los modelos que MIKA5 descarga. Sin ella no se ofrece descarga.
     this.modelsDir = opciones.modelsDir || null;
     this._fallosRegistrados = new Map();
+    this._pruebas = new Map();
     this.engineConfigs = {};
     this.currentProvider = 'local';
     this.apiKeys = {};
@@ -1649,9 +1669,15 @@ class AIProviderManager {
             }
           }
           if (leido.verified && typeof leido.verified === 'object' && !Array.isArray(leido.verified)) {
+            // Los «incompatible» guardados con el criterio anterior no valen:
+            // entonces cualquier cierre del motor marcaba el modelo, y el
+            // cierre habitual era quedarse sin memoria gráfica, no un modelo
+            // que no sirve. Se descartan; los «compatible» sí son evidencia.
+            const vigentes = leido.verdicts === VERDICTS_VERSION;
             guardado.verified = {};
             for (const [ruta, veredicto] of Object.entries(leido.verified)) {
-              if (Object.values(COMPATIBILITY).includes(veredicto)) guardado.verified[ruta] = veredicto;
+              if (veredicto === COMPATIBILITY.COMPATIBLE
+                || (vigentes && veredicto === COMPATIBILITY.INCOMPATIBLE)) guardado.verified[ruta] = veredicto;
             }
           }
           if (leido.approval && typeof leido.approval.path === 'string'
@@ -1668,6 +1694,7 @@ class AIProviderManager {
   }
 
   _guardarEngineConfig(providerId, config) {
+    config.verdicts = VERDICTS_VERSION;
     this.engineConfigs[providerId] = config;
     this.db.prepare('INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)')
       .run(`engine_${providerId}`, JSON.stringify(config));
@@ -1690,8 +1717,7 @@ class AIProviderManager {
     if (tipo === 'model') {
       // Nombre con el que se le presenta al usuario. Para un fichero elegido a
       // mano, el del propio fichero.
-      config.modelId = modelId
-        || validada.split(/[\\/]/).pop().replace(/\.gguf$/i, '');
+      config.modelId = modelId || this._idDeMotor(spec, validada.split(/[\\/]/).pop().replace(/\.gguf$/i, ''));
       // Un fichero que el usuario elige a mano vuelve a intentarse aunque
       // antes fallara: puede que el fallo no fuera del modelo.
       if (!modelId && config.verified) delete config.verified[validada];
@@ -1732,13 +1758,23 @@ class AIProviderManager {
     const spec = this._engineSpec(providerId);
     const config = this.getEngineConfig(providerId);
     const modelos = this.discoverEngineModels(opciones).map(m => ({ ...m }));
-    if (config.model && config.modelId && !modelos.some(m => m.path === config.model)) {
-      modelos.unshift({ id: config.modelId, path: config.model, source: 'manual', size: 0, architecture: null });
+    if (config.model && !modelos.some(m => m.path === config.model)) {
+      // Un fichero elegido a mano: se nombra por su fichero.
+      modelos.unshift({
+        id: config.model.split(/[\\/]/).pop().replace(/\.gguf$/i, ''),
+        path: config.model, source: 'manual', size: 0, architecture: null
+      });
     }
     const comprobado = config.verified || {};
     return modelos
       .map(m => ({
         ...m,
+        // Tres identidades que no se mezclan: el motor que lo ejecuta va en el
+        // identificador, el nombre del modelo en `label` y su procedencia en
+        // `source`. Un GGUF que descargó Ollama servido por llama.cpp es
+        // «llama.cpp · llama3.2:3b», con origen Ollama.
+        id: this._idDeMotor(spec, m.id),
+        label: m.id,
         // Manda la evidencia: lo que pasó al cargarlo en este equipo. Si no la
         // hay, lo que el propio fichero declara. Nunca una suposición.
         compatibility: comprobado[m.path] || (spec && spec.compatibilidad ? spec.compatibilidad(m) : COMPATIBILITY.UNVERIFIED),
@@ -1746,6 +1782,18 @@ class AIProviderManager {
         launch: (config.launch || {})[m.path]
       }))
       .filter(m => m.compatibility !== COMPATIBILITY.INCOMPATIBLE);
+  }
+
+  /** Identificador de un modelo servido por un motor: «motor · modelo». */
+  _idDeMotor(spec, nombre) {
+    return `${(spec && spec.etiqueta) || 'motor'} · ${nombre}`;
+  }
+
+  /** Nombre con que se enseña el modelo configurado, buscado por su fichero. */
+  _modeloConfigurado(providerId) {
+    const config = this.getEngineConfig(providerId);
+    if (!config.model) return null;
+    return this._modelosDeMotor(providerId).find(m => m.path === config.model) || null;
   }
 
   /** Apunta lo que pasó al cargar un modelo: es la única prueba real. */
@@ -1774,9 +1822,11 @@ class AIProviderManager {
       executables: this.motores.descubrir(spec),
       executableChosen: Boolean(config.executable),
       executableApproved: Boolean(this.engineIdentity(providerId)?.approved),
-      model: config.modelId || null,
+      // Dónde escucha el motor: sólo se enseña en la configuración avanzada.
+      endpoint: (() => { try { return new URL(spec.baseUrl()).host; } catch (_) { return null; } })(),
+      installKind: spec.instalacion || null,
       // Al renderer sólo va el nombre y el origen: la ruta se queda aquí.
-      models: modelos.map(m => ({ id: m.id, source: m.source, size: m.size, compatibility: m.compatibility })),
+      models: modelos.map(m => ({ id: m.id, label: m.label, source: m.source, size: m.size, compatibility: m.compatibility })),
       // Sistema detectado: decide qué instalador se ofrece.
       platform: this.motores._platform,
       arch: process.arch,
@@ -1789,7 +1839,7 @@ class AIProviderManager {
       canStart: diagnostico.ok,
       errorCode: diagnostico.ok ? null : diagnostico.errorCode,
       // `estado()` trae la ruta del modelo cargado; al renderer va el nombre.
-      model: config.modelId || null
+      model: (spec.tipo === 'managed' ? this._modeloConfigurado(providerId)?.id : null) || null
     };
   }
 
@@ -1862,7 +1912,38 @@ class AIProviderManager {
     const disp = await this.getAvailability(providerId);
     if (disp.reachable === true) return estado;
     this.motores.reiniciarFallo(providerId);
-    return this.motores.iniciar(providerId, spec, config, { variante: (config.launch || {})[config.model] || 0 });
+    this._pruebas.delete(providerId);
+    // El alias es el nombre vigente del modelo, buscado por su fichero.
+    const vigente = this._modeloConfigurado(providerId);
+    return this.motores.iniciar(providerId, spec, { ...config, modelId: vigente ? vigente.id : config.modelId }, {
+      variante: (config.launch || {})[config.model] || 0
+    });
+  }
+
+  /**
+   * Una inferencia mínima contra el motor propio recién cargado. Se lanza una
+   * sola vez por arranque y no bloquea: quien consulta ve «cargando» hasta
+   * que contesta. `resultado` es null mientras está en curso.
+   */
+  _probarInferencia(providerId, estado) {
+    const clave = `${estado.model}#${estado.variant}`;
+    const previa = this._pruebas.get(providerId);
+    if (previa && previa.clave === clave) return previa;
+    const prueba = { clave, resultado: null };
+    this._pruebas.set(providerId, prueba);
+    const adapter = registroDeProveedores.getAdapter(providerId);
+    fetch(`${adapter.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'default', messages: [{ role: 'user', content: 'ok' }], max_tokens: 1, stream: false }),
+      signal: AbortSignal.timeout(120000)
+    }).then(async (res) => {
+      const datos = res.ok ? await res.json().catch(() => null) : null;
+      prueba.resultado = Boolean(datos && Array.isArray(datos.choices) && datos.choices.length);
+    }).catch(() => {
+      prueba.resultado = false;
+    });
+    return prueba;
   }
 
   /**
@@ -1995,24 +2076,48 @@ class AIProviderManager {
     };
     let preparacion = resolverReadiness(disp, motor);
 
-    // Evidencia de compatibilidad: un modelo que el motor propio cargó y sirve
-    // es compatible; uno con el que el motor se cerró al arrancar no lo es.
+    // Evidencia de compatibilidad. Que el servidor liste el modelo no prueba
+    // que sepa generar con él: para un motor propio se hace UNA inferencia
+    // mínima antes de darlo por listo. Sólo entonces es «compatible».
+    let probando = false;
     if (spec.tipo === 'managed' && estado.model && estado.model === config.model) {
-      if (estado.owned && disp.reachable === true && disp.httpStatus !== 503 && disp.ready) {
-        this.motores.marcarListo(providerId);
-        this._registrarCompatibilidad(providerId, estado.model, COMPATIBILITY.COMPATIBLE);
-        // Se recuerda con qué arranque funcionó, para no repetir los que fallan.
-        // Se relee la configuración: el registro anterior acaba de guardarla.
-        const vigente = this.getEngineConfig(providerId);
-        if (Number.isInteger(estado.variant) && (vigente.launch || {})[estado.model] !== estado.variant) {
-          vigente.launch = { ...(vigente.launch || {}), [estado.model]: estado.variant };
-          this._guardarEngineConfig(providerId, vigente);
+      if (estado.owned && disp.ready && !estado.ready) {
+        const prueba = this._probarInferencia(providerId, estado);
+        if (prueba.resultado === true) {
+          this.motores.marcarListo(providerId);
+          this._registrarCompatibilidad(providerId, estado.model, COMPATIBILITY.COMPATIBLE);
+          // Se recuerda con qué arranque funcionó, para no repetir los que fallan.
+          // Se relee la configuración: el registro anterior acaba de guardarla.
+          const vigente = this.getEngineConfig(providerId);
+          if (Number.isInteger(estado.variant) && (vigente.launch || {})[estado.model] !== estado.variant) {
+            vigente.launch = { ...(vigente.launch || {}), [estado.model]: estado.variant };
+            this._guardarEngineConfig(providerId, vigente);
+          }
+        } else if (prueba.resultado === false) {
+          this.motores.fallar(providerId, 'ENGINE_INFERENCE_FAILED');
+        } else {
+          probando = true;
         }
-      } else if (estado.state === ESTADO_MOTOR.FAILED
-        && (estado.errorCode === 'ENGINE_EXITED' || estado.errorCode === 'ENGINE_MODEL_UNSUPPORTED')) {
-        // Quedarse sin memoria NO hace incompatible al modelo: es un límite
-        // del equipo, y el usuario puede cerrar otros programas y reintentar.
+      } else if (estado.state === ESTADO_MOTOR.FAILED && estado.errorCode === 'ENGINE_MODEL_UNSUPPORTED') {
+        // Sólo cuando el motor DICE que no entiende el modelo. Quedarse sin
+        // memoria es un límite del equipo, y un cierre sin causa conocida no
+        // demuestra nada: ninguno de los dos hace incompatible al modelo.
         this._registrarCompatibilidad(providerId, estado.model, COMPATIBILITY.INCOMPATIBLE);
+      }
+    }
+    if (probando || this.motores.estado(providerId).state !== estado.state) {
+      // El estado cambió en esta misma consulta: se recalcula con el nuevo.
+      const actual = this.motores.estado(providerId);
+      motor.state = actual.state;
+      motor.errorCode = actual.errorCode;
+      Object.assign(estado, actual);
+      if (probando) {
+        // Servidor en pie, inferencia aún sin confirmar: sigue cargando.
+        disp.ready = false;
+        preparacion = { readiness: READINESS.LOADING_MODEL, action: null };
+      } else if (actual.state === ESTADO_MOTOR.FAILED) {
+        disp.ready = false;
+        preparacion = readinessDeMotor(actual.errorCode, spec.tipo);
       }
     }
 
@@ -2025,8 +2130,8 @@ class AIProviderManager {
       const modelos = this._modelosDeMotor(providerId);
       if (modelos.length) {
         disp.models = modelos.map(m => ({
-          name: m.id, size: m.size, digest: m.id, sizeFormatted: m.size ? formatBytes(m.size) : '',
-          description: m.source, compatibility: m.compatibility
+          name: m.id, label: m.label, origin: m.source, size: m.size, digest: m.id,
+          sizeFormatted: m.size ? formatBytes(m.size) : '', compatibility: m.compatibility
         }));
         disp.modelsAvailable = modelos.length;
         // Siempre se puede elegir: también tras un fallo, porque la salida de
@@ -2038,18 +2143,45 @@ class AIProviderManager {
       }
     }
 
+    // Modelo que el motor tiene (o tendría) cargado, por su fichero. Si ese
+    // fichero ya no se ofrece —no existe, o se supo incompatible— no hay
+    // modelo elegido: la interfaz no debe enseñar otro en su lugar como si
+    // estuviese listo.
+    const configurado = spec.tipo === 'managed' && !esExterno ? this._modeloConfigurado(providerId) : null;
+    const aprobado = spec.tipo !== 'managed' || Boolean(this.engineIdentity(providerId)?.approved);
+    let status = null;
+    if (spec.tipo === 'managed') {
+      const E = ENGINE_STATUS;
+      if (preparacion.readiness === READINESS.READY) status = E.READY;
+      else if (preparacion.readiness === READINESS.LOADING_MODEL) status = E.LOADING;
+      else if (preparacion.readiness === READINESS.STARTING) status = E.STARTING;
+      else if (estado.state === ESTADO_MOTOR.FAILED) status = E.ERROR;
+      else if (!this.motores.localizar(spec, config)) status = E.NOT_INSTALLED;
+      else if (!aprobado) status = E.NEEDS_APPROVAL;
+      else if (!disp.modelsAvailable) status = E.NEEDS_MODEL;
+      else status = E.STOPPED;
+    }
+
     return {
       ...disp,
       ...preparacion,
       engine: {
-        selectedModel: config.modelId || null,
+        selectedModel: configurado ? configurado.id : null,
+        // Las tres identidades, por separado, para que la interfaz no tenga
+        // que deducirlas de un nombre.
+        label: spec.etiqueta || null,
+        modelOrigin: configurado ? configurado.source : null,
+        external: esExterno,
+        status,
         managed: spec.tipo === 'managed',
         state: estado.state,
         owned: estado.owned,
         // Con el servidor contestando, lo que impediría arrancarlo no es un
         // problema del usuario: no se le enseña.
-        errorCode: disp.reachable === true ? null
-          : (estado.state === ESTADO_MOTOR.FAILED ? estado.errorCode : motor.diagnostico)
+        // Un fallo del motor propio se dice siempre: puede haberse retirado
+        // en esta misma consulta, cuando el servidor aún contestaba.
+        errorCode: estado.state === ESTADO_MOTOR.FAILED ? estado.errorCode
+          : (disp.reachable === true ? null : motor.diagnostico)
       }
     };
   }
@@ -2108,6 +2240,7 @@ module.exports = {
   resolverReadiness,
   HF_REPO_RE,
   COMPATIBILITY,
+  ENGINE_STATUS,
   probeOllamaVision,
   getProviderContract,
   resolveVisionSupport,

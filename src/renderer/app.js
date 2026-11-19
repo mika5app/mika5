@@ -2320,6 +2320,12 @@ function describirEstadoProveedor(disp) {
 let providerReadiness = null;
 let readinessPollTimer = null;
 
+// De dónde salió el fichero de un modelo, en palabras.
+function origenDeModelo(origen) {
+  if (!origen) return '';
+  return origen === 'manual' ? t('engine.origin.manual') : origen;
+}
+
 // Texto del motor local, si lo que impide usar el proveedor es el motor.
 function describirMotor(disp) {
   const codigo = disp && disp.engine && disp.engine.errorCode;
@@ -2590,10 +2596,18 @@ function renderEngineModal(engine) {
   const resumen = el('engineSummary');
   if (resumen) {
     let paso = 'engine.step.ready';
-    if (!engine?.executable) paso = engine?.canInstall ? 'engine.step.install' : 'engine.step.missing';
+    if (!engine?.executable) {
+      // Sin instalador no se finge uno: si hay que compilarlo, se dice.
+      paso = engine?.canInstall ? 'engine.step.install'
+        : (engine?.installKind === 'source' ? 'engine.step.source' : 'engine.step.missing');
+    }
     else if (!engine.executableApproved) paso = 'engine.step.approve';
     else if (engine.requiresModel && !(engine.models || []).length) paso = 'engine.step.model';
-    resumen.textContent = t(paso);
+    resumen.textContent = t(paso).replace('{p}', providerDisplayName(currentProvider).replace(/\s*\(Local\)$/, ''));
+  }
+  const direccion = el('engineEndpoint');
+  if (direccion) {
+    direccion.textContent = engine?.endpoint ? `${t('engine.endpoint')} ${engine.endpoint}` : '';
   }
   renderEngineCatalog(engine);
   // Con varios motores instalados se elige entre los encontrados.
@@ -2840,8 +2854,23 @@ async function loadRuntime() {
     'rate-limited': 'status-degraded',
     'provider-error': 'status-degraded'
   };
-  statusEl.textContent = enEspera ? t(`provider.readiness.${readiness}`) : t(`provider.state.${uiState}`);
-  statusEl.className = `status-pill ${enEspera ? 'status-loading' : (CLASE_POR_ESTADO[uiState] || 'status-unknown')}`;
+  // Un motor local gestionado tiene su propio estado. «Sin conexión» no dice
+  // nada de un motor que está parado esperando a que se elija un modelo, ni
+  // lo distingue de uno que falló o de uno que no está instalado.
+  const estadoMotor = disp.engine && disp.engine.status;
+  const CLASE_POR_MOTOR = {
+    'ready': 'status-ok', 'starting': 'status-loading', 'loading': 'status-loading',
+    'stopped': 'status-unconfigured', 'needs-model': 'status-unconfigured',
+    'needs-approval': 'status-unconfigured', 'not-installed': 'status-unconfigured', 'error': 'status-offline'
+  };
+  if (estadoMotor) {
+    statusEl.textContent = t(`engine.status.${estadoMotor}`);
+    statusEl.className = `status-pill ${CLASE_POR_MOTOR[estadoMotor] || 'status-unknown'}`;
+  } else {
+    statusEl.textContent = enEspera ? t(`provider.readiness.${readiness}`) : t(`provider.state.${uiState}`);
+    statusEl.className = `status-pill ${enEspera ? 'status-loading' : (CLASE_POR_ESTADO[uiState] || 'status-unknown')}`;
+  }
+  statusEl.dataset.engineStatus = estadoMotor || '';
   statusEl.dataset.providerState = uiState;
   statusEl.dataset.providerReadiness = readiness || '';
   // El tooltip se compone de textos localizados a partir del código, nunca del
@@ -2850,6 +2879,13 @@ async function loadRuntime() {
   const rotuloError = describirEstadoProveedor(disp);
   if (rotuloError) statusEl.title = rotuloError;
   else statusEl.removeAttribute('title');
+  // Con el motor sirviendo, el rótulo dice qué motor ejecuta el modelo y de
+  // dónde salió el fichero: son cosas distintas y no deben leerse como una.
+  if (estadoMotor === 'ready' && disp.engine.selectedModel) {
+    statusEl.title = t('engine.identity')
+      .replace('{engine}', disp.engine.label || '')
+      .replace('{origin}', origenDeModelo(disp.engine.modelOrigin));
+  }
 
   // El punto del disparador lleva el estado completo, no un booleano: marcar
   // «offline» un proveedor que está sin verificar era decir que está caído.
@@ -2884,7 +2920,11 @@ async function loadRuntime() {
       const sizeFormatted = raw.sizeFormatted || raw.size_human || (size ? formatBytesRenderer(Number(size)) : '');
       const capabilities = raw.capabilities || raw.caps || raw.tags || [];
       const speed = raw.speed || raw.latency || raw.quality || '';
-      const description = raw.description || raw.info || '';
+      // Modelo de un motor local: su procedencia es una descripción, no parte
+      // del nombre.
+      const description = raw.origin
+        ? t('engine.origin').replace('{origin}', origenDeModelo(raw.origin))
+        : (raw.description || raw.info || '');
       return {
         name,
         privacy: raw.privacy,
@@ -2894,6 +2934,7 @@ async function loadRuntime() {
         speed,
         description,
         taskType: raw.taskType || 'chat',
+        label: raw.label,
         compatibility: raw.compatibility,
         supportsVision: raw.supportsVision === true
       };
@@ -2932,7 +2973,7 @@ async function loadRuntime() {
       for (const m of models) {
         const opt = document.createElement("option");
         opt.value = m.name;
-        opt.textContent = m.name;
+        opt.textContent = m.label || m.name;
         opt.dataset.source = (currentProvider === 'llamacpp' || currentProvider === 'bitnet' || (currentProvider === 'local' && m.privacy !== 'cloud') ? 'local' : 'cloud');
         if (m.size) opt.dataset.size = String(m.size);
         if (m.sizeFormatted) opt.dataset.sizeFormatted = m.sizeFormatted;
@@ -2983,6 +3024,15 @@ async function loadRuntime() {
   const modeloDelMotor = disp.engine && disp.engine.selectedModel;
   if (modeloDelMotor && Array.from(el("modelSelect").options).some(o => o.value === modeloDelMotor)) {
     el("modelSelect").value = modeloDelMotor;
+  } else if (disp.engine && disp.engine.managed && !disp.engine.external) {
+    // El motor no tiene ningún modelo elegido. No se enseña el primero de la
+    // lista —ni el último que se usó con otro proveedor— como si estuviese
+    // cargado: hasta que el usuario elija uno, el selector lo dice.
+    const sinElegir = document.createElement('option');
+    sinElegir.value = '';
+    sinElegir.textContent = t('engine.pickModel');
+    el("modelSelect").insertBefore(sinElegir, el("modelSelect").firstChild);
+    el("modelSelect").value = '';
   }
 
   const pullLocal = el("btnPullLocal");

@@ -190,6 +190,28 @@ Measured on Windows with the real winget `llama-server` and a GGUF Ollama had al
 downloaded: ready in about 11 s and a chat answered. Not measured: a real bitnet.cpp
 engine, a real catalogue download, Linux and macOS.
 
+Three identities, never merged. For a managed engine the model id is `<engine> · <model>`
+(`llama.cpp · llama3.2:3b`), `label` is the model name and `source` is where the file came
+from (Ollama, Hugging Face, LM Studio, MIKA5, manual). That id is what is stored with a
+message, so history shows which engine answered. A GGUF from Ollama is not "an Ollama
+model" and is not assumed incompatible because of its origin. `engine.selectedModel` is
+looked up by file path; if that file is no longer offered there is no selected model, and
+the renderer shows "pick a model" instead of the first entry or the last model used with
+another provider.
+
+`engine.status` (`not-installed`, `needs-approval`, `needs-model`, `stopped`, `starting`,
+`loading`, `ready`, `error`) is what the status pill shows for a managed engine. "Offline"
+says nothing about an engine MIKA5 starts on demand. `ready` requires one real inference
+against the engine MIKA5 started (`_probarInferencia`, once per start, non-blocking);
+until it answers the state is `loading`, and if it fails the engine is withdrawn with
+`ENGINE_INFERENCE_FAILED`. Verdicts are versioned (`verdicts`): an `incompatible` stored
+by an older rule is dropped on load, because it was recorded for any exit, including
+running out of memory. Only `ENGINE_MODEL_UNSUPPORTED` marks a model now.
+
+llama-server requests carry `max_tokens: 4096` and `enable_thinking: false`, the same
+limits as the Ollama path. Measured without them: a small reasoning model generated until
+the five-minute timeout.
+
 ## Update notice
 
 `src/main/update-check.js` only informs. It asks the public releases repository for the

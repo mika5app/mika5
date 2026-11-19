@@ -24,6 +24,8 @@ const adaptadorLlamacpp = crearAdaptadorServidorLlama({
   // lo que el propio llama-server descargó a su caché.
   compatibilidad: ({ source, architecture }) => {
     if (architecture && /^bitnet/.test(architecture)) return 'incompatible';
+    // Los modelos de embeddings son GGUF, pero no conversan.
+    if (architecture && /bert|embed/.test(architecture)) return 'incompatible';
     return source === 'llama.cpp' ? 'compatible' : 'unverified';
   },
   // Modelos pequeños, de sus autores, con licencia abierta. Cada entrada fija

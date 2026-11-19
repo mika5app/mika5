@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - The header showed "Ollama (Local)" for llama.cpp and BitNet. It now shows the selected provider, and the Ollama model library is only offered with Ollama.
+- With llama.cpp selected, the model selector showed a model nobody had chosen or loaded, named as if it belonged to Ollama, and the status said "offline" for an engine that was simply stopped. Engine, model and where the file came from are now separate: a GGUF that Ollama downloaded and llama.cpp serves is "llama.cpp · model", source Ollama. With no model chosen the selector says so instead of showing the first one, and the status is the engine's own: not installed, needs authorization, needs a model, stopped, starting, loading, ready or error.
+- Models wrongly marked incompatible are offered again. A model was marked whenever the engine exited, and the usual cause was running out of graphics memory. Only an engine that reports it does not understand the model marks it now, and verdicts stored under the old rule are discarded.
+- A local engine is reported ready only after one real inference with the loaded model, not just because the server lists it.
+- llama.cpp requests had no output limit: a small reasoning model generated until the five-minute timeout. Requests now carry the same limits as the Ollama path.
+- BitNet says plainly that it is not installed and has to be built from source, instead of offering to configure the llama.cpp program.
 - llama.cpp closed a few seconds after starting on machines with an integrated GPU. The server reserved the model's maximum context and ran out of graphics memory. MIKA5 now sets the context size, and if the engine exits before serving the model it retries by itself with less context and then on CPU only; it remembers what worked. Running out of memory is reported as such and does not mark the model as incompatible.
 - BitNet accepted any program called `llama-server`, including the one from llama.cpp. It now only recognises the engine inside a bitnet.cpp checkout.
 - Status checks while an engine loads no longer pile up, slow down as the load gets longer, and stop when the engine is withdrawn after a load deadline. The same failure is logged once, not on every check.
