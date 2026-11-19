@@ -574,3 +574,7 @@ console.log(`${'='.repeat(40)}`);
 // aqui y no con un script propio: tocar package.json dispara el empaquetado de
 // los cuatro productores, y esto no cambia ningun binario.
 require('./public-readiness.test.js');
+
+// La firma de codigo, preparada y apagada: los verificadores rechazan lo que
+// deben y ningun flujo firma sin verificar. Mismo motivo para vivir aqui.
+require('./signing-readiness.test.js');
