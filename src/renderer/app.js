@@ -2354,14 +2354,32 @@ function esperandoMotor(readiness) {
 // Mientras un motor arranca o carga el modelo no hay nada que el usuario
 // pueda hacer salvo esperar, así que la interfaz vuelve a preguntar sola.
 // Un único temporizador, y sólo si el proveedor sigue siendo el mismo.
+let readinessPollDesde = 0;
+let readinessPollEnCurso = false;
+
 function programarSondeoDePreparacion(enEspera) {
   clearTimeout(readinessPollTimer);
   readinessPollTimer = null;
-  if (!enEspera) return;
+  if (!enEspera) {
+    readinessPollDesde = 0;
+    return;
+  }
+  if (!readinessPollDesde) readinessPollDesde = Date.now();
+  // Cada dos segundos al principio; si la carga se alarga, cada cinco. El
+  // techo de la espera lo pone el proceso principal, que retira un motor que
+  // no termina de cargar: aquí no hay un bucle sin final.
+  const espera = Date.now() - readinessPollDesde < 30000 ? 2000 : 5000;
   const proveedor = currentProvider;
-  readinessPollTimer = setTimeout(() => {
-    if (currentProvider === proveedor) loadRuntime();
-  }, 2000);
+  readinessPollTimer = setTimeout(async () => {
+    // Una consulta a la vez: si la anterior no ha vuelto, no se apila otra.
+    if (currentProvider !== proveedor || readinessPollEnCurso) return;
+    readinessPollEnCurso = true;
+    try {
+      await loadRuntime();
+    } finally {
+      readinessPollEnCurso = false;
+    }
+  }, espera);
 }
 
 // Acción guiada del menú. La etiqueta sale del código de acción; si el
@@ -2566,6 +2584,18 @@ function renderEngineModal(engine) {
   if (sistema) sistema.textContent = engine?.platform ? `${t('engine.system')} ${engine.platform} ${engine.arch || ''}`.trim() : '';
   const seccionModelos = el('engineModelsSection');
   if (seccionModelos) seccionModelos.style.display = engine?.requiresModel ? '' : 'none';
+  const manual = el('engineManualModelSection');
+  if (manual) manual.style.display = engine?.requiresModel ? '' : 'none';
+  // Una frase que diga qué falta, en vez de un panel de rutas.
+  const resumen = el('engineSummary');
+  if (resumen) {
+    let paso = 'engine.step.ready';
+    if (!engine?.executable) paso = engine?.canInstall ? 'engine.step.install' : 'engine.step.missing';
+    else if (!engine.executableApproved) paso = 'engine.step.approve';
+    else if (engine.requiresModel && !(engine.models || []).length) paso = 'engine.step.model';
+    resumen.textContent = t(paso);
+  }
+  renderEngineCatalog(engine);
   // Con varios motores instalados se elige entre los encontrados.
   if (lista) {
     lista.innerHTML = '';
@@ -2597,6 +2627,88 @@ function renderEngineModal(engine) {
     const texto = engine?.errorCode ? t(clave) : '';
     estado.textContent = texto && texto !== clave ? texto : (engine?.canStart ? t('engine.ready') : '');
   }
+}
+
+// Catálogo de modelos recomendados. Sólo se ofrece lo que falta por bajar.
+function renderEngineCatalog(engine) {
+  const seccion = el('engineCatalogSection');
+  const lista = el('engineCatalogSelect');
+  if (!seccion || !lista) return;
+  const pendientes = ((engine && engine.catalog) || []).filter(m => !m.installed);
+  const descargando = engine?.download?.state === 'downloading';
+  seccion.style.display = engine?.executable && pendientes.length && !descargando ? '' : 'none';
+  lista.innerHTML = '';
+  for (const m of pendientes) {
+    const opcion = document.createElement('option');
+    opcion.value = m.id;
+    opcion.textContent = `${m.label} — ${formatBytesRenderer(m.size)}`;
+    lista.appendChild(opcion);
+  }
+  renderModelDownload(engine?.download);
+}
+
+let modelDownloadTimer = null;
+
+function renderModelDownload(estado) {
+  const caja = el('engineDownloadProgress');
+  if (!caja) return;
+  const activa = estado?.state === 'downloading';
+  caja.style.display = activa ? '' : 'none';
+  if (!activa) return;
+  const porcentaje = estado.total ? Math.floor((estado.received / estado.total) * 100) : 0;
+  if (el('engineDownloadBar')) el('engineDownloadBar').value = porcentaje;
+  if (el('engineDownloadText')) {
+    el('engineDownloadText').textContent = `${estado.label}: ${formatBytesRenderer(estado.received)} / ${formatBytesRenderer(estado.total)} (${porcentaje} %)`;
+  }
+}
+
+// Sigue una descarga hasta que termina. Un único temporizador; al acabar se
+// refresca el diálogo y el selector de modelos, donde aparece el modelo nuevo.
+function seguirDescargaDeModelo() {
+  clearTimeout(modelDownloadTimer);
+  modelDownloadTimer = setTimeout(async () => {
+    let estado;
+    try {
+      estado = await window.mika5.ai.modelDownloadStatus();
+    } catch (_) {
+      return;
+    }
+    if (estado.state === 'downloading') {
+      renderModelDownload(estado);
+      seguirDescargaDeModelo();
+      return;
+    }
+    if (estado.state === 'done') showToast(t('engine.catalog.done'), 'success');
+    else if (estado.state === 'failed') showToast(t(`provider.error.${estado.errorCode}`), 'error');
+    try {
+      renderEngineModal(await window.mika5.ai.describeEngine(currentProvider));
+    } catch (_) {}
+    await loadRuntime();
+  }, 1000);
+}
+
+async function downloadCatalogModelFromModal() {
+  const id = el('engineCatalogSelect')?.value;
+  if (!id) return;
+  try {
+    const resultado = await window.mika5.ai.downloadCatalogModel(currentProvider, id);
+    if (resultado?.canceled) return;
+    if (!resultado?.ok) {
+      showToast(t(`provider.error.${resultado?.errorCode || 'MODEL_DOWNLOAD_FAILED'}`), 'error');
+      return;
+    }
+    renderEngineModal(await window.mika5.ai.describeEngine(currentProvider));
+    if (!resultado.already) seguirDescargaDeModelo();
+    else await loadRuntime();
+  } catch (e) {
+    showToast(t('provider.error.MODEL_DOWNLOAD_FAILED'), 'error');
+  }
+}
+
+async function cancelModelDownload() {
+  try {
+    await window.mika5.ai.cancelModelDownload();
+  } catch (_) {}
 }
 
 async function selectEngineExecutable(ruta) {
@@ -2658,7 +2770,9 @@ async function showEngineModal() {
   if (titulo) titulo.textContent = `${t('engine.title')} — ${providerDisplayName(currentProvider)}`;
   modal.style.display = 'flex';
   try {
-    renderEngineModal(await window.mika5.ai.describeEngine(currentProvider));
+    const engine = await window.mika5.ai.describeEngine(currentProvider);
+    renderEngineModal(engine);
+    if (engine?.download?.state === 'downloading') seguirDescargaDeModelo();
   } catch (e) {
     renderEngineModal(null);
   }

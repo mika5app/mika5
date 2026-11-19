@@ -27,7 +27,32 @@ const adaptadorBitnet = crearAdaptadorServidorLlama({
   compatibilidad: ({ architecture }) => {
     if (!architecture) return 'unverified';
     return /^bitnet/.test(architecture) ? 'compatible' : 'incompatible';
-  }
+  },
+  // El motor de BitNet es el `llama-server` que compila bitnet.cpp, no
+  // cualquier programa con ese nombre: el de llama.cpp se llama igual y no
+  // carga modelos de 1,58 bits. Se reconoce por estar dentro de un clon de
+  // bitnet.cpp, que trae `run_inference_server.py` en su raíz.
+  aceptaEjecutable: (ruta, { fs, platform }) => {
+    const rutas = platform === 'win32' ? require('path').win32 : require('path').posix;
+    let dir = rutas.dirname(ruta);
+    for (let nivel = 0; nivel < 5; nivel += 1) {
+      try {
+        if (fs.statSync(rutas.join(dir, 'run_inference_server.py')).isFile()) return true;
+      } catch (_) {}
+      const padre = rutas.dirname(dir);
+      if (padre === dir) break;
+      dir = padre;
+    }
+    return false;
+  },
+  catalogo: [
+    {
+      id: 'bitnet-b1.58-2B-4T-i2_s', label: 'BitNet b1.58 2B 4T', architecture: 'bitnet-b1.58',
+      repo: 'microsoft/bitnet-b1.58-2B-4T-gguf', revision: 'a1f2f1c765812aa8af3f6eda4a313707064bba15',
+      file: 'ggml-model-i2_s.gguf', size: 1187801280, license: 'MIT',
+      sha256: '4221b252fdd5fd25e15847adfeb5ee88886506ba50b8a34548374492884c2162'
+    }
+  ]
 });
 
 module.exports = { adaptadorBitnet };

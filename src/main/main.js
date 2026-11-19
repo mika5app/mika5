@@ -130,7 +130,9 @@ app.whenReady().then(() => {
 
   initDb();
   // Inicializar el gestor de proveedores AI usando la instancia de DB
-  aiManager = new AIProviderManager(getDb());
+  // Los modelos que MIKA5 descarga viven en el perfil del usuario, junto a
+  // sus datos: no en la carpeta de instalación, que una actualización reemplaza.
+  aiManager = new AIProviderManager(getDb(), { modelsDir: path.join(app.getPath('userData'), 'models') });
   createWindow();
 
   // --- Startup sweep: reindex docs pendientes (Fase 1 prod-safe) ---
@@ -152,6 +154,7 @@ app.whenReady().then(() => {
 // Los motores locales que MIKA5 arrancó terminan con MIKA5. Los que ya estaban
 // en marcha —el Ollama del usuario, un llama-server lanzado a mano— no se tocan.
 app.on("will-quit", () => {
+  try { aiManager?.descargas.cancelar(); } catch (_) {}
   try { aiManager?.stopEngines(); } catch (_) {}
 });
 
@@ -636,6 +639,24 @@ ipcMain.handle('ai:install-engine', async (_e, providerId) => {
   if (!autorizado) return { ok: false, canceled: true, engine };
   return aiManager.installEngine(providerId);
 });
+// Descarga de un modelo del catálogo. El renderer manda el identificador de
+// una entrada; el origen, el tamaño y la huella salen del adaptador.
+ipcMain.handle('ai:download-catalog-model', async (_e, providerId, catalogId) => {
+  const entrada = aiManager.engineCatalog(providerId).find(e => e.id === String(catalogId || ''));
+  if (!entrada) return { ok: false, errorCode: 'MODEL_DOWNLOAD_INVALID' };
+  if (entrada.installed) return { ok: true, already: true };
+  const megas = Math.round(entrada.size / (1024 * 1024));
+  const autorizado = await autorizar(
+    'Descargar un modelo',
+    `${entrada.label} (${megas} MB, licencia ${entrada.license})\n\n`
+    + `MIKA5 lo descargará de huggingface.co/${entrada.repo} a su carpeta de modelos y comprobará `
+    + 'que el archivo es exactamente el publicado antes de usarlo. Puedes cancelar la descarga en cualquier momento.'
+  );
+  if (!autorizado) return { ok: false, canceled: true };
+  return aiManager.downloadCatalogModel(providerId, entrada.id);
+});
+ipcMain.handle('ai:model-download-status', () => aiManager.descargas.estado());
+ipcMain.handle('ai:cancel-model-download', () => aiManager.descargas.cancelar());
 ipcMain.handle('ai:download-engine-model', async (_e, providerId, repo) => {
   const nombre = String(repo || '').trim();
   const autorizado = await autorizar(

@@ -21,7 +21,9 @@ const { createAbortContext } = require('../provider-runtime');
 // cambia entre ellos es el id, la etiqueta, el puerto por defecto y cómo se
 // arranca el servidor; duplicar el cliente HTTP haría que los dos divergieran
 // en silencio la primera vez que se corrigiera uno solo.
-function crearAdaptadorServidorLlama({ providerId, name, etiqueta, baseUrl, comoIniciar, paquete, descargaHf, guia, compatibilidad }) {
+function crearAdaptadorServidorLlama({
+  providerId, name, etiqueta, baseUrl, comoIniciar, paquete, descargaHf, guia, compatibilidad, aceptaEjecutable, catalogo
+}) {
   const adaptador = {
     name,
     privacy: 'private',
@@ -48,11 +50,27 @@ function crearAdaptadorServidorLlama({ providerId, name, etiqueta, baseUrl, como
       // su caché. Sólo se usa tras autorizarlo el usuario.
       descargaHf: descargaHf === true,
       // `--alias` da al modelo cargado el nombre que el usuario eligió.
-      argumentos: ({ host, port, model, hf, alias }) => [
+      // Host y puerto van SIEMPRE explícitos: el puerto por defecto del
+      // ejecutable cambia entre versiones (8080, 9931) y no es el de MIKA5.
+      argumentos: ({ host, port, model, hf, alias, ctx, cpu }) => [
         ...(hf ? ['-hf', hf] : ['-m', model]),
         ...(alias ? ['--alias', alias] : []),
+        // Sin `-c` el servidor reserva el contexto MÁXIMO del modelo —131 072
+        // tokens en algunos— y la memoria que eso pide lo tumba al arrancar.
+        ...(ctx ? ['-c', String(ctx)] : []),
+        // Un solo usuario: una ranura, y no cuatro repartiéndose la memoria.
+        '-np', '1',
+        ...(cpu ? ['-ngl', '0'] : []),
         '--host', host, '--port', String(port)
-      ]
+      ],
+      // Formas de arrancar, de más a menos exigente. Si el motor se cierra
+      // antes de servir el modelo se prueba la siguiente: lo habitual es que
+      // la tarjeta gráfica integrada se quede sin memoria, no que el modelo
+      // no sirva.
+      variantes: [{ ctx: 16384 }, { ctx: 8192 }, { ctx: 8192, cpu: true }],
+      aceptaEjecutable: aceptaEjecutable || null,
+      // Modelos que MIKA5 sabe ofrecer para este motor, con su origen exacto.
+      catalogo: Array.isArray(catalogo) ? catalogo : []
     },
 
     async chat({ model, messages, images = [], signal }) {

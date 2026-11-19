@@ -584,7 +584,9 @@ console.log('\n=== 10 bis. loadRuntime() sólo puebla el selector con canAttempt
         describirEstadoProveedor: () => '',
         // Estado de la preparación del proveedor: `loadRuntime()` lo escribe.
         providerReadiness: null,
-        readinessPollTimer: null
+        readinessPollTimer: null,
+        readinessPollDesde: 0,
+        readinessPollEnCurso: false
       }
     };
   };

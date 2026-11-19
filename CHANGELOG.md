@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Provider readiness. Every provider now reports the same states (available, needs setup, starting, loading model, ready, unavailable, error) with a suggested action. llama.cpp and BitNet can be started by MIKA5 once the executable and a GGUF model are chosen; Ollama is started with `ollama serve` when it is installed and stopped. Engines started by MIKA5 stop when it quits; servers started by the user are reused and left alone. Nothing is downloaded or installed without confirmation.
 - Local engine discovery. MIKA5 finds `llama-server` and the GGUF models already on the machine, including the ones Ollama downloaded, and lists them in the model selector; picking a model starts the engine. Installing llama.cpp through winget or Homebrew and downloading a model from Hugging Face are offered behind a native confirmation dialog.
 
+- Recommended models. When an engine has no model, MIKA5 offers a short catalogue with sizes and a "Download model" button. The download needs your confirmation, shows progress, can be cancelled, and the file is only used if its size and SHA-256 match the published ones.
 - New-version notice. "Check for a new version" compares the installed version with the latest stable release published in the public releases repository and shows the release notes and the official download link. It only informs: nothing is downloaded or installed. Checking when MIKA5 opens is off unless you turn it on, and the request carries none of your data.
 - Links to the source, the issue tracker and the license inside the application, and `THIRD_PARTY_NOTICES.md` with the licenses of the bundled dependencies.
 - An executable for a local engine is only run after you approve it. The approval is tied to the file's real path and SHA-256, so a replaced binary is not executed.
@@ -23,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - The header showed "Ollama (Local)" for llama.cpp and BitNet. It now shows the selected provider, and the Ollama model library is only offered with Ollama.
+- llama.cpp closed a few seconds after starting on machines with an integrated GPU. The server reserved the model's maximum context and ran out of graphics memory. MIKA5 now sets the context size, and if the engine exits before serving the model it retries by itself with less context and then on CPU only; it remembers what worked. Running out of memory is reported as such and does not mark the model as incompatible.
+- BitNet accepted any program called `llama-server`, including the one from llama.cpp. It now only recognises the engine inside a bitnet.cpp checkout.
+- Status checks while an engine loads no longer pile up, slow down as the load gets longer, and stop when the engine is withdrawn after a load deadline. The same failure is logged once, not on every check.
 - Long documents were only read from the start: the first fragments were sent whatever the question, so asking for article 380 of a long code answered that it was not in the documents. Every fragment of every document in scope is now searched for the words of the question, with a meaning-based search as a fallback, and the model is told when it is seeing part of a document.
 - Asking to analyse and change an image no longer makes the model report an internal "describe-only-do-not-edit" restriction. The model receives your message unchanged, and MIKA5 says when the provider can analyse images but not edit them.
 

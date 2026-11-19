@@ -269,9 +269,13 @@ async function main() {
 
   const plan = gestorCon().diagnosticar(specLlama, CONFIG);
   check(plan.ok && plan.ejecutable === EXE, 'con ejecutable y modelo hay plan');
-  check(JSON.stringify(plan.args) === JSON.stringify(['-m', MODELO, '--host', '127.0.0.1', '--port', '8080']),
+  check(JSON.stringify(plan.args) === JSON.stringify(['-m', MODELO, '-c', '16384', '-np', '1', '--host', '127.0.0.1', '--port', '8080']),
     `los argumentos van separados y atan el servidor a bucle local (${plan.args.join(' ')})`);
-  const planBitnet = gestorCon().diagnosticar(PROVIDERS.bitnet.engine, CONFIG);
+  const conBitnet = () => gestorCon({ fs: fsFalso([EXE, MODELO, '/opt/motores/run_inference_server.py']) });
+  const planBitnet = conBitnet().diagnosticar(PROVIDERS.bitnet.engine, CONFIG);
+  check(gestorCon().diagnosticar(PROVIDERS.bitnet.engine, CONFIG).errorCode === 'ENGINE_NOT_INSTALLED'
+    && gestorCon().localizar(PROVIDERS.bitnet.engine, { executable: EXE }) === null,
+    'un llama-server que no está en un clon de bitnet.cpp no es el motor de BitNet, ni descubierto ni elegido a mano');
   check(gestorCon().diagnosticar(specLlama, { model: MODELO }).errorCode === 'ENGINE_APPROVAL_REQUIRED',
     'un ejecutable encontrado pero no aprobado por el usuario no tiene plan de arranque');
   check(gestorCon().diagnosticar(specLlama, { model: MODELO, approval: { ...APROBACION, sha256: 'f'.repeat(64) } }).errorCode === 'ENGINE_APPROVAL_REQUIRED',
@@ -335,8 +339,16 @@ async function main() {
     const g = gestorCon({ spawn });
     await g.iniciar('llamacpp', specLlama, CONFIG);
     llamadas[0].hijo.emit('exit', 1, null);
-    check(g.estado('llamacpp').state === ESTADO_MOTOR.FAILED && g.estado('llamacpp').errorCode === 'ENGINE_EXITED',
-      'un motor que sale al arrancar queda como fallo, no como «iniciando»');
+    check(llamadas.length === 2 && g.estado('llamacpp').state === ESTADO_MOTOR.STARTING
+      && llamadas[1].args.join(' ').includes('-c 8192') && !llamadas[1].args.includes('-ngl'),
+      'si el motor se cierra al cargar, se reintenta solo con menos contexto');
+    llamadas[1].hijo.emit('exit', 1, null);
+    check(llamadas.length === 3 && llamadas[2].args.join(' ').includes('-ngl 0'),
+      'y si vuelve a cerrarse, sólo con CPU');
+    llamadas[2].hijo.emit('exit', 1, null);
+    check(llamadas.length === 3 && g.estado('llamacpp').state === ESTADO_MOTOR.FAILED
+      && g.estado('llamacpp').errorCode === 'ENGINE_EXITED',
+      'agotadas las formas de arrancar queda como fallo, no como «iniciando» ni en un bucle');
     g.reiniciarFallo('llamacpp');
     check(g.estado('llamacpp').state === ESTADO_MOTOR.IDLE, 'el fallo se olvida sólo cuando el usuario reintenta');
   }
@@ -469,7 +481,9 @@ async function main() {
     // En Windows las rutas de prueba tienen que ser absolutas para win32.
     const exe = process.platform === 'win32' ? 'C:\\motores\\llama-server.exe' : EXE;
     const modelo = process.platform === 'win32' ? 'C:\\modelos\\prueba.gguf' : MODELO;
-    motores._fs = fsFalso([exe, modelo]);
+    // BitNet sólo reconoce como suyo un motor dentro de un clon de bitnet.cpp.
+    const marca = process.platform === 'win32' ? 'C:\\motores\\run_inference_server.py' : '/opt/motores/run_inference_server.py';
+    motores._fs = fsFalso([exe, modelo, marca]);
     const db = baseFalsa();
     const m = new AIProviderManager(db, { motores });
     try {
@@ -503,7 +517,7 @@ async function main() {
       check([uno.readiness, dos.readiness].every(r => r === READINESS.STARTING || r === READINESS.LOADING_MODEL),
         `${id}: recién lanzado se presenta como en camino (${uno.readiness}, ${dos.readiness})`);
       check(lanzados[0].cmd === exe && lanzados[0].opciones.shell === false
-        && lanzados[0].args.join(' ') === `-m ${modelo} --alias prueba --host 127.0.0.1 --port ${puerto}`,
+        && lanzados[0].args.join(' ') === `-m ${modelo} --alias prueba -c 16384 -np 1 --host 127.0.0.1 --port ${puerto}`,
         `${id}: se lanza el ejecutable elegido, sin shell, en bucle local y en el puerto del adaptador`);
 
       const vistos = new Set([uno.readiness]);
@@ -609,15 +623,119 @@ async function main() {
         'un motor que no logra cargar queda en ERROR con acción de reintento');
       await m.getReadiness('llamacpp', { autoStart: true });
       const trasFallo = await m.getReadiness('llamacpp', { autoStart: true });
-      check(lanzados === 1, 'el sondeo de la interfaz no relanza en bucle un motor que falló');
+      check(lanzados === 3, 'se probaron las tres formas de arrancar y el sondeo no relanza nada más');
       check(m.getEngineConfig('llamacpp').verified[modelo] === 'incompatible'
         && !trasFallo.models.some(x => x.name === 'prueba'),
         'un modelo con el que el motor se cerró queda como incompatible y deja de ofrecerse');
       await m.startEngine('llamacpp');
-      check(lanzados === 2, 'el reintento sólo ocurre cuando el usuario lo pide');
+      check(lanzados > 3, 'el reintento sólo ocurre cuando el usuario lo pide');
     } finally {
       motores.detenerTodos();
       PROVIDERS.llamacpp.baseUrl = baseOriginal;
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  console.log('\n=== 8 ter. El motor se cierra al cargar: memoria, modelo no soportado [simulada] ===');
+  // ---------------------------------------------------------------------
+  // Caso real, medido en Windows con una gráfica integrada: llama-server
+  // reservaba el contexto máximo del modelo, la memoria gráfica no alcanzaba y
+  // el proceso salía a los pocos segundos con «ErrorOutOfDeviceMemory».
+  {
+    const { clasificarSalida } = require('../src/main/local-engines');
+    check(clasificarSalida('ggml_vulkan: vk::Device::allocateMemory: ErrorOutOfDeviceMemory') === 'ENGINE_OUT_OF_MEMORY'
+      && clasificarSalida('failed to allocate Vulkan0 buffer of size 1031798784') === 'ENGINE_OUT_OF_MEMORY',
+      'quedarse sin memoria se reconoce por lo que escribe el motor');
+    check(clasificarSalida("unknown model architecture: 'rara'") === 'ENGINE_MODEL_UNSUPPORTED',
+      'un modelo que el motor no entiende se reconoce aparte');
+    check(clasificarSalida('') === 'ENGINE_EXITED' && clasificarSalida('otra cosa') === 'ENGINE_EXITED',
+      'lo que no se reconoce queda como cierre sin más, sin inventar la causa');
+
+    const esWin = process.platform === 'win32';
+    const exe = esWin ? 'C:\\motores\\llama-server.exe' : EXE;
+    const modelo = esWin ? 'C:\\modelos\\prueba.gguf' : MODELO;
+    const escenario = async (entorno, cuerpo) => {
+      const puerto = await puertoLibre();
+      const baseOriginal = PROVIDERS.llamacpp.baseUrl;
+      PROVIDERS.llamacpp.baseUrl = `http://127.0.0.1:${puerto}/v1`;
+      const lanzados = [];
+      const spawn = (cmd, args, opciones) => {
+        if (/taskkill\.exe$/i.test(cmd)) return childProcess.spawn(cmd, args, opciones);
+        lanzados.push(args.join(' '));
+        return childProcess.spawn(process.execPath, [DOBLE, ...args], {
+          stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true, env: { ...process.env, ...entorno }
+        });
+      };
+      const motores = new GestorDeMotores({ spawn, fs: fsFalso([exe, modelo]), env: { ...process.env }, platform: esWin ? 'win32' : 'linux' });
+      const db = baseFalsa([{ key: 'engine_llamacpp', value: JSON.stringify({ executable: exe, model: modelo, modelId: 'prueba', approval: aprobar(exe) }) }]);
+      const m = new AIProviderManager(db, { motores });
+      const hasta = async (fin) => {
+        let r = await m.getReadiness('llamacpp', { autoStart: true });
+        for (let i = 0; i < 120 && !fin(r); i += 1) { await esperar(100); r = await m.getReadiness('llamacpp', { autoStart: true }); }
+        return r;
+      };
+      try {
+        await cuerpo({ m, db, motores, lanzados, hasta });
+      } finally {
+        await motores.detener('llamacpp');
+        PROVIDERS.llamacpp.baseUrl = baseOriginal;
+      }
+    };
+
+    await escenario({ FAKE_LLAMA_FAIL_CTX_ABOVE: '8192' }, async ({ m, db, motores, lanzados, hasta }) => {
+      const r = await hasta(x => x.readiness === READINESS.READY || x.readiness === READINESS.ERROR);
+      check(r.readiness === READINESS.READY && lanzados.length === 2
+        && lanzados[0].includes('-c 16384') && lanzados[1].includes('-c 8192'),
+        'sin memoria para el contexto grande, MIKA5 reintenta solo con uno menor y el motor queda listo');
+      check(JSON.parse(db.almacen.get('engine_llamacpp')).launch[modelo] === 1
+        && r.models.find(x => x.name === 'prueba').compatibility === 'compatible',
+        'se recuerda qué arranque funcionó, y el modelo queda como compatible');
+      await motores.detener('llamacpp');
+      const antes = lanzados.length;
+      await m.selectEngineModel('llamacpp', 'prueba');
+      check(lanzados.length === antes + 1 && lanzados[antes].includes('-c 8192'),
+        'la próxima vez arranca directamente con lo que funcionó, sin repetir el intento fallido');
+    });
+
+    await escenario({ FAKE_LLAMA_REQUIRE_CPU: '1' }, async ({ lanzados, hasta }) => {
+      const r = await hasta(x => x.readiness === READINESS.READY || x.readiness === READINESS.ERROR);
+      check(r.readiness === READINESS.READY && lanzados.length === 3 && lanzados[2].includes('-ngl 0'),
+        'si la gráfica no puede, el último intento es sólo con CPU, y funciona');
+    });
+
+    await escenario({ FAKE_LLAMA_FAIL_CTX_ABOVE: '1' }, async ({ m, lanzados, hasta }) => {
+      const r = await hasta(x => x.readiness === READINESS.ERROR);
+      check(r.readiness === READINESS.ERROR && r.engine.errorCode === 'ENGINE_OUT_OF_MEMORY' && lanzados.length === 3,
+        'si ninguna forma cabe en memoria, se dice que falta memoria, no que el motor «se cerró»');
+      check(!(m.getEngineConfig('llamacpp').verified || {})[modelo] && r.models.some(x => x.name === 'prueba'),
+        'quedarse sin memoria no marca el modelo como incompatible: es un límite del equipo');
+      let mensaje = '';
+      try { await m.chat({ providerId: 'llamacpp', model: 'prueba', messages: [{ role: 'user', content: 'x' }] }); } catch (e) { mensaje = e.message; }
+      check(/memoria suficiente/.test(mensaje), 'al escribir, el error dice qué pasa y qué hacer, sin esperar minutos');
+    });
+
+    await escenario({ FAKE_LLAMA_UNSUPPORTED: '1' }, async ({ m, lanzados, hasta }) => {
+      const r = await hasta(x => x.readiness === READINESS.ERROR);
+      check(r.engine.errorCode === 'ENGINE_MODEL_UNSUPPORTED' && lanzados.length === 1,
+        'un modelo que el motor no entiende no se reintenta de tres formas: no va a cargar');
+      const despues = await m.getReadiness('llamacpp');
+      check(m.getEngineConfig('llamacpp').verified[modelo] === 'incompatible' && !despues.models.some(x => x.name === 'prueba'),
+        'y deja de ofrecerse');
+    });
+
+    // El registro no repite la misma línea en cada consulta de estado.
+    {
+      const lineas = [];
+      const previo = console.warn;
+      console.warn = (...args) => { lineas.push(String(args[0])); };
+      try {
+        const m = new AIProviderManager(baseFalsa(), { motores: new GestorDeMotores({ spawn: spawnFalso().spawn, fs: fsFalso([]), net: netFalsa(false), env: { PATH: '' }, platform: 'linux' }) });
+        for (let i = 0; i < 12; i += 1) await m.getReadiness('bitnet');
+      } finally {
+        console.warn = previo;
+      }
+      check(lineas.filter(l => l.startsWith('[provider:bitnet] status')).length === 1,
+        'doce consultas seguidas con el motor caído dejan una línea en el registro, no doce');
     }
   }
 
@@ -694,8 +812,9 @@ async function main() {
         check(!deBitnet.some(x => x.source === 'Ollama' || /qwen|phi/.test(x.id)),
           'los GGUF de Ollama y de otras arquitecturas no se presentan como compatibles con BitNet');
         const deLlama = soloLectura._modelosDeMotor('llamacpp');
-        check(deLlama.length === modelos.length && deLlama.every(x => x.compatibility === COMPATIBILITY.UNVERIFIED),
-          'llama.cpp los ofrece todos como «sin verificar»: de un fichero ajeno no afirma nada');
+        check(deLlama.length === modelos.length - 1 && deLlama.every(x => x.compatibility === COMPATIBILITY.UNVERIFIED)
+          && !deLlama.some(x => x.id === 'ggml-model-i2_s'),
+          'llama.cpp ofrece los demás como «sin verificar» y no ofrece el modelo de BitNet');
       }
 
       // El gestor entero sobre ese disco: elegir modelo arranca, cambiar reinicia.
@@ -739,18 +858,19 @@ async function main() {
         m.motores.reiniciarFallo('llamacpp');
         const inicial = await m.getReadiness('llamacpp', { autoStart: true });
         check(inicial.readiness === READINESS.AVAILABLE && inicial.action === null && inicial.canAttempt
-          && inicial.models.length === modelos.length && lanzados.length === 0,
-          `sin configurar nada, el selector ya ofrece los ${modelos.length} modelos descubiertos y nada arranca solo`);
+          && inicial.models.length === modelos.length - 1 && lanzados.length === 0
+          && !inicial.models.some(x => x.name === 'ggml-model-i2_s'),
+          `el selector ofrece los modelos descubiertos menos el de BitNet, y nada arranca solo`);
         check(inicial.models.every(x => !('path' in x)) && !JSON.stringify(m.describeEngine('llamacpp').models).includes(tmp),
           'al renderer va el nombre del modelo, nunca su ruta');
 
         await m.selectEngineModel('llamacpp', 'qwen-q4');
         check(lanzados.length === 1 && lanzados[0].cmd === fs.realpathSync(exeA)
-          && lanzados[0].args.join(' ') === `-m ${enHf} --alias qwen-q4 --host 127.0.0.1 --port ${puerto}`,
+          && lanzados[0].args.join(' ') === `-m ${enHf} --alias qwen-q4 -c 16384 -np 1 --host 127.0.0.1 --port ${puerto}`,
           'elegir un modelo arranca el motor descubierto con ese modelo');
         const listo = await esperarListo();
         check(listo.readiness === READINESS.READY && listo.engine.selectedModel === 'qwen-q4'
-          && listo.models.length === modelos.length,
+          && listo.models.length === modelos.length - 1,
           'con el motor en marcha el selector sigue ofreciendo todos los modelos');
 
         await m.selectEngineModel('llamacpp', 'qwen-q4');
@@ -758,13 +878,17 @@ async function main() {
           && listo.models.filter(x => x.compatibility === 'compatible').length === 1,
           'un modelo que el motor cargó y sirve pasa a «compatible»: es la única prueba real');
         check(lanzados.length === 1, 'volver a elegir el mismo modelo no reinicia el motor');
-        await m.selectEngineModel('llamacpp', 'ggml-model-i2_s');
-        check(lanzados.length === 2 && lanzados[1].args[1] === enBitnet,
+        await m.selectEngineModel('llamacpp', 'phi-3');
+        check(lanzados.length === 2 && /phi-3\.gguf$/.test(lanzados[1].args[1]),
           'elegir otro modelo detiene el motor propio y lo arranca con el nuevo');
-        check((await esperarListo()).engine.selectedModel === 'ggml-model-i2_s', 'y el motor queda listo con el nuevo modelo');
+        check((await esperarListo()).engine.selectedModel === 'phi-3', 'y el motor queda listo con el nuevo modelo');
+        let ajeno = null;
+        try { await m.selectEngineModel('llamacpp', 'ggml-model-i2_s'); } catch (e) { ajeno = e.message; }
+        check(ajeno === 'ENGINE_MODEL_MISSING' && lanzados.length === 2 && Boolean(enBitnet),
+          'un modelo de BitNet no se puede elegir en llama.cpp');
 
         const respuesta = await m.chat({
-          providerId: 'llamacpp', model: 'phi-3', messages: [{ role: 'user', content: 'hola' }]
+          providerId: 'llamacpp', model: 'sin-metadatos', messages: [{ role: 'user', content: 'hola' }]
         });
         check(lanzados.length === 3 && /eco:/.test(respuesta.message?.content || ''),
           'escribir con otro modelo elegido basta: el chat cambia el motor y espera a que conteste');
@@ -828,11 +952,11 @@ async function main() {
     const descarga = gestorCon({ spawn, plazoDeArranqueMs: 20 });
     const antes = llamadas.length;
     await descarga.iniciar('llamacpp', specLlama, { hf: 'org/modelo-GGUF', modelId: 'org/modelo-GGUF', approval: APROBACION }, { sinPlazo: true });
-    check(llamadas[antes].args.join(' ') === '-hf org/modelo-GGUF --alias org/modelo-GGUF --host 127.0.0.1 --port 8080',
+    check(llamadas[antes].args.join(' ') === '-hf org/modelo-GGUF --alias org/modelo-GGUF -c 16384 -np 1 --host 127.0.0.1 --port 8080',
       'la descarga la hace el propio llama-server con -hf, en bucle local');
     await esperar(60);
     check(descarga.estado('llamacpp').state === ESTADO_MOTOR.STARTING, 'una descarga autorizada no se corta por el plazo de arranque');
-    check(gestorCon().diagnosticar(PROVIDERS.bitnet.engine, { hf: 'org/modelo-GGUF', approval: APROBACION }).errorCode === 'ENGINE_MODEL_REQUIRED',
+    check(conBitnet().diagnosticar(PROVIDERS.bitnet.engine, { hf: 'org/modelo-GGUF', approval: APROBACION }).errorCode === 'ENGINE_MODEL_REQUIRED',
       'BitNet no declara descarga: -hf no se le pasa nunca');
     descarga.detenerTodos();
   }
@@ -856,11 +980,11 @@ async function main() {
   check(/app\.on\("will-quit"[\s\S]{0,120}stopEngines\(\)/.test(mainSrc), 'los motores propios se detienen al salir');
 
   const preloadSrc = leer('src/main/preload.js');
-  for (const canal of ['ai:install-engine', 'ai:download-engine-model']) {
+  for (const canal of ['ai:install-engine', 'ai:download-engine-model', 'ai:download-catalog-model']) {
     const cuerpo = mainSrc.slice(mainSrc.indexOf(`ipcMain.handle('${canal}'`));
     const hasta = cuerpo.indexOf('\n});');
     const autoriza = cuerpo.indexOf('await autorizar(');
-    const actua = cuerpo.search(/aiManager\.(installEngine|downloadEngineModel)\(/);
+    const actua = cuerpo.search(/aiManager\.(installEngine|downloadEngineModel|downloadCatalogModel)\(/);
     check(autoriza > 0 && actua > autoriza && actua < hasta && /if \(!autorizado\) return/.test(cuerpo.slice(autoriza, actua)),
       `${canal} pide autorización en un diálogo nativo antes de hacer nada`);
   }
@@ -869,6 +993,7 @@ async function main() {
     'el descubrimiento sólo lee el disco: no ejecuta, no descarga, no escribe');
   for (const canal of ['ai:get-readiness', 'ai:start-engine', 'ai:describe-engine', 'ai:choose-engine-file',
     'ai:select-engine-model', 'ai:select-engine-executable', 'ai:approve-engine', 'ai:install-engine',
+    'ai:download-catalog-model', 'ai:model-download-status', 'ai:cancel-model-download',
     'ai:download-engine-model']) {
     check(preloadSrc.includes(`'${canal}'`) && mainSrc.includes(`ipcMain.handle('${canal}'`),
       `${canal} está expuesto en preload y tiene handler`);
@@ -876,8 +1001,11 @@ async function main() {
 
   const appSrc = leer('src/renderer/app.js');
   const sondeo = appSrc.slice(appSrc.indexOf('function programarSondeoDePreparacion'), appSrc.indexOf('function renderProviderAction'));
-  check(/clearTimeout\(readinessPollTimer\)/.test(sondeo) && /currentProvider === proveedor/.test(sondeo),
+  check(/clearTimeout\(readinessPollTimer\)/.test(sondeo) && /currentProvider !== proveedor/.test(sondeo),
     'el sondeo de arranque es único y se abandona si el usuario cambia de proveedor');
+  check(/readinessPollEnCurso\) return;/.test(sondeo) && /finally \{\s*readinessPollEnCurso = false;/.test(sondeo),
+    'una consulta de estado no se apila sobre otra que aún no ha vuelto');
+  check(/< 30000 \? 2000 : 5000/.test(sondeo), 'el sondeo se espacia cuando la carga se alarga');
   check(/getReadiness\(undefined, \{ autoStart: true \}\)/.test(appSrc),
     'la interfaz sólo pide arranque automático para el proveedor seleccionado');
 

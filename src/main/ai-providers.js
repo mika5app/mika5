@@ -56,6 +56,7 @@ const {
 const { PROVIDER_API_VERSION, ProviderRegistry } = require('./provider-registry');
 const { ESTADO_MOTOR, GestorDeMotores, validarRutaDeMotor } = require('./local-engines');
 const { descubrirModelos } = require('./engine-discovery');
+const { GestorDeDescargas } = require('./model-download');
 
 
 
@@ -1046,6 +1047,10 @@ class AIProviderManager {
     this.db = db;
     // Inyectable para que las pruebas no arranquen procesos reales.
     this.motores = opciones.motores || new GestorDeMotores();
+    this.descargas = opciones.descargas || new GestorDeDescargas();
+    // Carpeta de los modelos que MIKA5 descarga. Sin ella no se ofrece descarga.
+    this.modelsDir = opciones.modelsDir || null;
+    this._fallosRegistrados = new Map();
     this.engineConfigs = {};
     this.currentProvider = 'local';
     this.apiKeys = {};
@@ -1561,7 +1566,7 @@ class AIProviderManager {
         // quede sería tirar esa evidencia: un mensaje de texto no distingue un
         // ECONNREFUSED de un 503.
         const probe = (sonda && sonda.probe) || probeDeError(fallo);
-        registrarFalloDeProveedor(providerId, 'status', fallo, probe.errorCode);
+        this._registrarFalloUnaVez(providerId, 'status', fallo, probe.errorCode);
         // Una sonda que falla sin código reconocible sigue significando que no
         // se pudo hablar con el servidor: para eso está la sonda.
         if (probe.reachable === null) probe.reachable = false;
@@ -1637,6 +1642,12 @@ class AIProviderManager {
           if (typeof leido.executable === 'string') guardado.executable = leido.executable;
           if (typeof leido.model === 'string') guardado.model = leido.model;
           if (typeof leido.modelId === 'string') guardado.modelId = leido.modelId;
+          if (leido.launch && typeof leido.launch === 'object' && !Array.isArray(leido.launch)) {
+            guardado.launch = {};
+            for (const [ruta, variante] of Object.entries(leido.launch)) {
+              if (Number.isInteger(variante) && variante >= 0 && variante < 8) guardado.launch[ruta] = variante;
+            }
+          }
           if (leido.verified && typeof leido.verified === 'object' && !Array.isArray(leido.verified)) {
             guardado.verified = {};
             for (const [ruta, veredicto] of Object.entries(leido.verified)) {
@@ -1702,7 +1713,8 @@ class AIProviderManager {
     let modelos = [];
     try {
       modelos = descubrirModelos({
-        fs: this.motores._fs, env: this.motores._env, platform: this.motores._platform
+        fs: this.motores._fs, env: this.motores._env, platform: this.motores._platform,
+        carpetasPropias: [this.modelsDir]
       });
     } catch (_) {
       modelos = [];
@@ -1729,7 +1741,9 @@ class AIProviderManager {
         ...m,
         // Manda la evidencia: lo que pasó al cargarlo en este equipo. Si no la
         // hay, lo que el propio fichero declara. Nunca una suposición.
-        compatibility: comprobado[m.path] || (spec && spec.compatibilidad ? spec.compatibilidad(m) : COMPATIBILITY.UNVERIFIED)
+        compatibility: comprobado[m.path] || (spec && spec.compatibilidad ? spec.compatibilidad(m) : COMPATIBILITY.UNVERIFIED),
+        // Arranque que funcionó la última vez con este modelo en este equipo.
+        launch: (config.launch || {})[m.path]
       }))
       .filter(m => m.compatibility !== COMPATIBILITY.INCOMPATIBLE);
   }
@@ -1770,6 +1784,8 @@ class AIProviderManager {
       installer: instalacion ? instalacion.gestor : null,
       guideUrl: spec.guia || null,
       canDownload: spec.descargaHf === true,
+      catalog: this.engineCatalog(providerId),
+      download: this.descargas.estado(),
       canStart: diagnostico.ok,
       errorCode: diagnostico.ok ? null : diagnostico.errorCode,
       // `estado()` trae la ruta del modelo cargado; al renderer va el nombre.
@@ -1846,7 +1862,7 @@ class AIProviderManager {
     const disp = await this.getAvailability(providerId);
     if (disp.reachable === true) return estado;
     this.motores.reiniciarFallo(providerId);
-    return this.motores.iniciar(providerId, spec, config);
+    return this.motores.iniciar(providerId, spec, config, { variante: (config.launch || {})[config.model] || 0 });
   }
 
   /**
@@ -1882,13 +1898,45 @@ class AIProviderManager {
       }
       const actual = this.motores.estado(providerId);
       if (actual.state === ESTADO_MOTOR.FAILED) {
-        throw new Error(`${adapter.name}: el motor local no pudo iniciar con este modelo (${actual.errorCode}). `
-          + 'Puede que el modelo no sea compatible con este motor; prueba con otro.');
+        const motivo = actual.errorCode === 'ENGINE_OUT_OF_MEMORY'
+          ? 'Este equipo no tiene memoria suficiente para este modelo. Prueba con uno más pequeño o cierra otros programas.'
+          : actual.errorCode === 'ENGINE_START_TIMEOUT'
+            ? 'El modelo tardó demasiado en cargar. Prueba con uno más pequeño.'
+            : 'El motor no pudo cargar este modelo. Prueba con otro.';
+        const fallo = new Error(`${adapter.name}: ${motivo}`);
+        fallo.code = actual.errorCode;
+        throw fallo;
       }
       if (!actual.owned) return;
       await delay(500);
     }
     throw new Error(`${adapter.name}: el motor local tardó demasiado en cargar el modelo.`);
+  }
+
+  /** Catálogo del motor: qué puede descargarse y qué está ya en el equipo. */
+  engineCatalog(providerId) {
+    const spec = this._engineSpec(providerId);
+    if (!spec || !this.modelsDir) return [];
+    return (spec.catalogo || []).map(entrada => ({
+      id: entrada.id, label: entrada.label, size: entrada.size, license: entrada.license, repo: entrada.repo,
+      installed: this.descargas.yaDescargado(this.modelsDir, entrada)
+    }));
+  }
+
+  /**
+   * Descarga ya autorizada de un modelo del catálogo. El renderer manda el
+   * identificador de la entrada; el origen, el tamaño y la huella salen del
+   * adaptador, nunca de fuera.
+   */
+  downloadCatalogModel(providerId, catalogId) {
+    const spec = this._engineSpec(providerId);
+    const entrada = spec && (spec.catalogo || []).find(e => e.id === catalogId);
+    if (!entrada || !this.modelsDir) return { ok: false, errorCode: 'MODEL_DOWNLOAD_INVALID' };
+    return this.descargas.iniciar({
+      providerId, entrada, dir: this.modelsDir,
+      // Al terminar, el modelo nuevo tiene que aparecer sin esperar a la caché.
+      alTerminar: () => { this._modelosDescubiertos = null; }
+    });
   }
 
   /** Instalación ya autorizada por el usuario, con el gestor de paquetes oficial. */
@@ -1951,8 +1999,19 @@ class AIProviderManager {
     // es compatible; uno con el que el motor se cerró al arrancar no lo es.
     if (spec.tipo === 'managed' && estado.model && estado.model === config.model) {
       if (estado.owned && disp.reachable === true && disp.httpStatus !== 503 && disp.ready) {
+        this.motores.marcarListo(providerId);
         this._registrarCompatibilidad(providerId, estado.model, COMPATIBILITY.COMPATIBLE);
-      } else if (estado.state === ESTADO_MOTOR.FAILED && estado.errorCode === 'ENGINE_EXITED') {
+        // Se recuerda con qué arranque funcionó, para no repetir los que fallan.
+        // Se relee la configuración: el registro anterior acaba de guardarla.
+        const vigente = this.getEngineConfig(providerId);
+        if (Number.isInteger(estado.variant) && (vigente.launch || {})[estado.model] !== estado.variant) {
+          vigente.launch = { ...(vigente.launch || {}), [estado.model]: estado.variant };
+          this._guardarEngineConfig(providerId, vigente);
+        }
+      } else if (estado.state === ESTADO_MOTOR.FAILED
+        && (estado.errorCode === 'ENGINE_EXITED' || estado.errorCode === 'ENGINE_MODEL_UNSUPPORTED')) {
+        // Quedarse sin memoria NO hace incompatible al modelo: es un límite
+        // del equipo, y el usuario puede cerrar otros programas y reintentar.
         this._registrarCompatibilidad(providerId, estado.model, COMPATIBILITY.INCOMPATIBLE);
       }
     }
@@ -2010,6 +2069,20 @@ class AIProviderManager {
   /** Al cerrar: se detiene lo que MIKA5 arrancó, y nada más. */
   stopEngines() {
     this.motores.detenerTodos();
+  }
+
+  /**
+   * Registra un fallo sin repetirlo. La interfaz consulta el estado cada pocos
+   * segundos mientras un motor arranca: escribir la misma línea en cada
+   * consulta llenaba el registro sin decir nada nuevo.
+   */
+  _registrarFalloUnaVez(providerId, operacion, error, codigo) {
+    const clave = `${providerId}:${operacion}`;
+    const previo = this._fallosRegistrados.get(clave);
+    const ahora = Date.now();
+    if (previo && previo.codigo === codigo && ahora - previo.cuando < 60000) return;
+    this._fallosRegistrados.set(clave, { codigo, cuando: ahora });
+    registrarFalloDeProveedor(providerId, operacion, error, codigo);
   }
 
   getAllProviders() {

@@ -168,10 +168,11 @@ function descubrirEjecutables(nombre, contexto) {
 }
 
 /** Carpetas donde las herramientas habituales guardan GGUF. */
-function carpetasDeModelos({ env, platform }) {
+function carpetasDeModelos({ env, platform, carpetasPropias = [] }) {
   const rutas = rutasDe(platform);
   const home = carpetaPersonal(env, platform);
-  const carpetas = [];
+  // Primero lo que MIKA5 descargó: ahí la procedencia y la integridad constan.
+  const carpetas = carpetasPropias.filter(Boolean).map(dir => ({ origen: 'MIKA5', dir }));
   const anadir = (origen, ...partes) => {
     if (partes.every(Boolean)) carpetas.push({ origen, dir: rutas.join(...partes) });
   };

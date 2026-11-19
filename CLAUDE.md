@@ -167,6 +167,29 @@ Each discovered model carries a compatibility verdict for the engine (`compatibl
 from what happened when the engine loaded it. `unverified` means nobody checked — it is
 not "probably fine". Incompatible models are not offered.
 
+Starting an engine. `llama-server` is always given `--host`, `--port`, `-c` and `-np 1`:
+its default port changes between builds (8080, 9931) and without `-c` it reserves the
+model's maximum context, which exhausts an integrated GPU. The adapter declares launch
+variants from most to least demanding (`{ctx:16384}`, `{ctx:8192}`, `{ctx:8192, cpu}`); if
+the process exits before the model is served, the next variant is tried, and the one that
+worked is stored per model. stderr is kept (bounded) to classify the exit:
+`ENGINE_OUT_OF_MEMORY`, `ENGINE_MODEL_UNSUPPORTED` (not retried) or `ENGINE_EXITED`. Only
+the last two mark a model incompatible. A load deadline withdraws an engine that never
+finishes loading, so the interface never waits forever. A 503 is never treated as ready.
+
+BitNet's engine is the `llama-server` built by bitnet.cpp. It is recognised by living
+inside a bitnet.cpp checkout (`run_inference_server.py` in an ancestor), not by its name.
+
+`src/main/model-download.js` downloads only what an adapter's catalogue declares
+(repository, exact revision, file, size, SHA-256). The renderer sends a catalogue id,
+never a URL. The file goes to `<userData>/models` through a `.part` file and is kept only
+if size and SHA-256 match. One download at a time, with progress and cancel, behind a
+native confirmation dialog.
+
+Measured on Windows with the real winget `llama-server` and a GGUF Ollama had already
+downloaded: ready in about 11 s and a chat answered. Not measured: a real bitnet.cpp
+engine, a real catalogue download, Linux and macOS.
+
 ## Update notice
 
 `src/main/update-check.js` only informs. It asks the public releases repository for the

@@ -110,6 +110,21 @@ function identidadDeEjecutable(fs, ruta) {
   }
 }
 
+/**
+ * Por qué se cerró el motor, a partir de lo último que escribió. Sólo se
+ * reconocen los casos que cambian lo que el usuario puede hacer.
+ */
+function clasificarSalida(salida) {
+  const texto = String(salida || '');
+  if (/out\s*of\s*(device\s*)?memory|OutOfDeviceMemory|failed to allocate|bad_alloc|not enough memory/i.test(texto)) {
+    return 'ENGINE_OUT_OF_MEMORY';
+  }
+  if (/unknown (model )?architecture|unsupported model|unknown pre-tokenizer|invalid magic|not a valid gguf/i.test(texto)) {
+    return 'ENGINE_MODEL_UNSUPPORTED';
+  }
+  return 'ENGINE_EXITED';
+}
+
 /** ¿La aprobación guardada corresponde exactamente a este fichero? */
 function aprobacionVigente(aprobacion, identidad) {
   return Boolean(aprobacion && identidad
@@ -128,7 +143,8 @@ class GestorDeMotores {
     net = require('net'),
     env = process.env,
     platform = process.platform,
-    plazoDeArranqueMs = 120000
+    plazoDeArranqueMs = 120000,
+    plazoDeCargaMs = 15 * 60 * 1000
   } = {}) {
     this._spawn = spawn;
     this._fs = fs;
@@ -138,6 +154,8 @@ class GestorDeMotores {
     this._plazoDeArranqueMs = plazoDeArranqueMs;
     this._motores = new Map();
     this._identidades = new Map();
+    this._descubiertos = new Map();
+    this._plazoDeCargaMs = plazoDeCargaMs;
   }
 
   /** El arranque automático se puede apagar entero, p. ej. en las suites. */
@@ -147,13 +165,16 @@ class GestorDeMotores {
 
   estado(providerId) {
     const motor = this._motores.get(providerId);
-    if (!motor) return { state: ESTADO_MOTOR.IDLE, owned: false, errorCode: null, model: null };
+    if (!motor) return { state: ESTADO_MOTOR.IDLE, owned: false, errorCode: null, model: null, variant: null, ready: false };
     return {
       state: motor.state,
       owned: motor.state === ESTADO_MOTOR.STARTING || motor.state === ESTADO_MOTOR.RUNNING,
       errorCode: motor.errorCode || null,
       // Con qué modelo arrancó: es lo que permite saber si hay que cambiarlo.
-      model: motor.model || null
+      model: motor.model || null,
+      // Con qué variante de arranque (contexto, sólo CPU) está o estuvo.
+      variant: Number.isInteger(motor.variante) ? motor.variante : null,
+      ready: motor.listo === true
     };
   }
 
@@ -163,7 +184,9 @@ class GestorDeMotores {
     const contexto = { fs: this._fs, platform: this._platform };
     if (config.executable) {
       try {
-        return validarRutaDeMotor('executable', config.executable, spec, contexto);
+        const elegida = validarRutaDeMotor('executable', config.executable, spec, contexto);
+        if (typeof spec.aceptaEjecutable === 'function' && !spec.aceptaEjecutable(elegida, contexto)) return null;
+        return elegida;
       } catch (_) {
         return null;
       }
@@ -192,16 +215,32 @@ class GestorDeMotores {
   }
 
   /** Todos los ejecutables de este motor que hay en el equipo. */
-  descubrir(spec) {
+  descubrir(spec, { fresca = false } = {}) {
     if (!spec || !EJECUTABLES_PERMITIDOS.includes(spec.ejecutable)) return [];
-    return descubrirEjecutables(spec.ejecutable, { fs: this._fs, env: this._env, platform: this._platform });
+    // Recorrer el PATH y las carpetas de instalación es trabajo de disco
+    // síncrono, y la interfaz pregunta cada pocos segundos mientras un motor
+    // arranca: se reutiliza unos segundos en vez de repetirlo en cada consulta.
+    const ahora = Date.now();
+    let encontrados = this._descubiertos.get(spec.ejecutable);
+    if (fresca || !encontrados || ahora - encontrados.cuando > 15000) {
+      encontrados = {
+        cuando: ahora,
+        rutas: descubrirEjecutables(spec.ejecutable, { fs: this._fs, env: this._env, platform: this._platform })
+      };
+      this._descubiertos.set(spec.ejecutable, encontrados);
+    }
+    // Llamarse `llama-server` no hace de un programa el motor de un proveedor:
+    // el adaptador puede exigir algo más para reconocerlo como suyo.
+    return typeof spec.aceptaEjecutable === 'function'
+      ? encontrados.rutas.filter(ruta => spec.aceptaEjecutable(ruta, { fs: this._fs, platform: this._platform }))
+      : encontrados.rutas;
   }
 
   /**
    * Qué haría falta para arrancar, sin arrancar nada. Devuelve el plan o el
    * código estable de lo que falta.
    */
-  diagnosticar(spec, config = {}, { fresca = false } = {}) {
+  diagnosticar(spec, config = {}, { fresca = false, variante = 0 } = {}) {
     if (!spec) return { ok: false, errorCode: 'ENGINE_NOT_MANAGED' };
     if (!this.arranqueHabilitado) return { ok: false, errorCode: 'ENGINE_AUTOSTART_DISABLED' };
     if (typeof spec.arrancable === 'function' && !spec.arrancable({ env: this._env, platform: this._platform })) {
@@ -248,12 +287,16 @@ class GestorDeMotores {
       }
     }
 
-    const args = spec.argumentos({ host, port, model, hf, alias: config.modelId || null });
+    const variantes = Array.isArray(spec.variantes) && spec.variantes.length ? spec.variantes : [{}];
+    const args = spec.argumentos({
+      host, port, model, hf, alias: config.modelId || null,
+      ...variantes[Math.min(Math.max(variante, 0), variantes.length - 1)]
+    });
     if (!Array.isArray(args) || args.some(arg => typeof arg !== 'string')) {
       return { ok: false, errorCode: 'ENGINE_ENDPOINT_INVALID' };
     }
     // Se arranca la ruta REAL aprobada, no un enlace que puede cambiar después.
-    return { ok: true, ejecutable: identidad.path, args, host, port, model: model || hf };
+    return { ok: true, ejecutable: identidad.path, args, host, port, model: model || hf, variantes: variantes.length };
   }
 
   /** ¿Hay algo aceptando conexiones en ese puerto? */
@@ -277,13 +320,13 @@ class GestorDeMotores {
    * Arranca el motor de un proveedor. Idempotente: dos llamadas simultáneas
    * comparten el mismo arranque, y un motor vivo no se duplica.
    */
-  iniciar(providerId, spec, config = {}, { sinPlazo = false } = {}) {
+  iniciar(providerId, spec, config = {}, { sinPlazo = false, variante = 0 } = {}) {
     const actual = this._motores.get(providerId);
     if (actual && (actual.state === ESTADO_MOTOR.STARTING || actual.state === ESTADO_MOTOR.RUNNING)) {
       return actual.arranque || Promise.resolve(this.estado(providerId));
     }
 
-    const plan = this.diagnosticar(spec, config, { fresca: true });
+    const plan = this.diagnosticar(spec, config, { fresca: true, variante });
     if (!plan.ok) {
       this._motores.set(providerId, { state: ESTADO_MOTOR.FAILED, errorCode: plan.errorCode });
       return Promise.resolve(this.estado(providerId));
@@ -293,18 +336,26 @@ class GestorDeMotores {
     // segunda llamada, llegada durante la comprobación del puerto, arranque
     // otro proceso.
     const motor = {
-      state: ESTADO_MOTOR.STARTING, errorCode: null, child: null, timer: null, arranque: null, model: plan.model
+      state: ESTADO_MOTOR.STARTING, errorCode: null, child: null, timer: null, timerCarga: null,
+      arranque: null, model: plan.model, variante, listo: false, salida: ''
     };
     this._motores.set(providerId, motor);
-    motor.arranque = this._arrancar(providerId, motor, plan, sinPlazo).finally(() => { motor.arranque = null; });
+    const contexto = { spec, config, sinPlazo };
+    motor.arranque = this._arrancar(providerId, motor, plan, contexto).finally(() => { motor.arranque = null; });
     return motor.arranque;
   }
 
-  async _arrancar(providerId, motor, plan, sinPlazo) {
+  _limpiarTemporizadores(motor) {
+    if (motor.timer) clearTimeout(motor.timer);
+    if (motor.timerCarga) clearTimeout(motor.timerCarga);
+    motor.timer = null;
+    motor.timerCarga = null;
+  }
+
+  async _arrancar(providerId, motor, plan, contexto) {
     const fallar = (codigo) => {
       if (this._motores.get(providerId) !== motor) return;
-      if (motor.timer) clearTimeout(motor.timer);
-      motor.timer = null;
+      this._limpiarTemporizadores(motor);
       motor.state = ESTADO_MOTOR.FAILED;
       motor.errorCode = codigo;
     };
@@ -313,40 +364,73 @@ class GestorDeMotores {
       fallar('ENGINE_PORT_IN_USE');
       return this.estado(providerId);
     }
+    this._lanzar(providerId, motor, plan, contexto, fallar);
+    return this.estado(providerId);
+  }
 
+  _lanzar(providerId, motor, plan, contexto, fallar) {
     let child;
     try {
+      // La salida de errores se conserva —acotada— para poder decir POR QUÉ
+      // se cerró el motor. Sin ella, quedarse sin memoria gráfica y un modelo
+      // incompatible eran el mismo «se cerró al iniciar».
       child = this._spawn(plan.ejecutable, plan.args, {
         shell: false,
         windowsHide: true,
         detached: false,
-        stdio: 'ignore'
+        stdio: ['ignore', 'ignore', 'pipe']
       });
     } catch (_) {
       fallar('ENGINE_SPAWN_FAILED');
-      return this.estado(providerId);
+      return;
     }
     motor.child = child;
+    motor.salida = '';
+    if (child.stderr && typeof child.stderr.on === 'function') {
+      child.stderr.on('data', (parte) => { motor.salida = (motor.salida + String(parte)).slice(-6000); });
+    }
     child.once('error', () => fallar('ENGINE_SPAWN_FAILED'));
     child.once('exit', () => {
       motor.child = null;
       // Una parada pedida por MIKA5 no es un fallo.
-      if (motor.detenido) return;
-      fallar('ENGINE_EXITED');
+      if (motor.detenido || this._motores.get(providerId) !== motor) return;
+      const motivo = clasificarSalida(motor.salida);
+      // El motor se cerró antes de servir el modelo. Antes de rendirse se
+      // prueba la siguiente forma de arrancarlo —menos contexto, sólo CPU—:
+      // el fallo más común es que la tarjeta gráfica no tiene memoria, no que
+      // el modelo no sirva. Un modelo que el motor no entiende no se reintenta.
+      const siguiente = motor.variante + 1;
+      if (!motor.listo && motivo !== 'ENGINE_MODEL_UNSUPPORTED' && siguiente < plan.variantes) {
+        const otro = this.diagnosticar(contexto.spec, contexto.config, { variante: siguiente });
+        if (otro.ok) {
+          this._limpiarTemporizadores(motor);
+          motor.variante = siguiente;
+          motor.state = ESTADO_MOTOR.STARTING;
+          this._lanzar(providerId, motor, otro, contexto, fallar);
+          return;
+        }
+      }
+      fallar(motivo);
     });
 
-    // Si nadie confirma que el servidor contesta, el proceso se da por
-    // fallido y se retira: es de MIKA5, así que puede hacerlo. Una descarga
-    // autorizada no tiene plazo: puede durar lo que duren varios gigas.
-    if (sinPlazo) return this.estado(providerId);
+    if (contexto.sinPlazo) return;
+    // Si nadie confirma que el servidor contesta, el proceso se da por fallido
+    // y se retira: es de MIKA5, así que puede hacerlo.
     motor.timer = setTimeout(() => {
       if (motor.state !== ESTADO_MOTOR.STARTING) return;
       this._matar(motor);
       fallar('ENGINE_START_TIMEOUT');
     }, this._plazoDeArranqueMs);
-    if (typeof motor.timer.unref === 'function') motor.timer.unref();
-
-    return this.estado(providerId);
+    // Y un techo para la carga del modelo: sin él, un modelo que nunca termina
+    // de cargar dejaba a la interfaz esperando para siempre.
+    motor.timerCarga = setTimeout(() => {
+      if (motor.listo) return;
+      this._matar(motor);
+      fallar('ENGINE_START_TIMEOUT');
+    }, this._plazoDeCargaMs);
+    for (const t of [motor.timer, motor.timerCarga]) {
+      if (t && typeof t.unref === 'function') t.unref();
+    }
   }
 
   /**
@@ -364,6 +448,16 @@ class GestorDeMotores {
     } else if (motor.state === ESTADO_MOTOR.FAILED) {
       this._motores.delete(providerId);
     }
+  }
+
+  /** El modelo está cargado y el servidor sirve: ya no hay nada que reintentar. */
+  marcarListo(providerId) {
+    const motor = this._motores.get(providerId);
+    if (!motor || motor.listo || !motor.child) return;
+    this.marcarVivo(providerId);
+    motor.listo = true;
+    if (motor.timerCarga) clearTimeout(motor.timerCarga);
+    motor.timerCarga = null;
   }
 
   /** Olvida un fallo para permitir un reintento pedido por el usuario. */
@@ -400,7 +494,7 @@ class GestorDeMotores {
     const motor = this._motores.get(providerId);
     this._motores.delete(providerId);
     if (!motor) return Promise.resolve();
-    if (motor.timer) clearTimeout(motor.timer);
+    this._limpiarTemporizadores(motor);
     const child = motor.child;
     if (!child) return Promise.resolve();
     return new Promise((resolve) => {
@@ -472,7 +566,7 @@ class GestorDeMotores {
   /** Detiene únicamente los procesos que este gestor arrancó. */
   detenerTodos() {
     for (const [providerId, motor] of this._motores) {
-      if (motor.timer) clearTimeout(motor.timer);
+      this._limpiarTemporizadores(motor);
       this._matar(motor);
       this._motores.delete(providerId);
     }
@@ -486,5 +580,6 @@ module.exports = {
   nombreLogico,
   validarRutaDeMotor,
   identidadDeEjecutable,
-  aprobacionVigente
+  aprobacionVigente,
+  clasificarSalida
 };

@@ -22,6 +22,20 @@ const cargaMs = Number(process.env.FAKE_LLAMA_LOAD_MS || 0);
 if (!host || !Number.isInteger(port) || !modelo) process.exit(2);
 if (process.env.FAKE_LLAMA_EXIT_IMMEDIATELY === '1') process.exit(3);
 
+// Fallos de arranque que el servidor real da en equipos con poca memoria
+// gráfica, con el mismo texto en su salida de errores.
+const contexto = Number(valorDe('-c') || 0);
+const soloCpu = valorDe('-ngl') === '0';
+const techo = Number(process.env.FAKE_LLAMA_FAIL_CTX_ABOVE || 0);
+if ((techo && contexto > techo) || (process.env.FAKE_LLAMA_REQUIRE_CPU === '1' && !soloCpu)) {
+  process.stderr.write('ggml_vulkan: vk::Device::allocateMemory: ErrorOutOfDeviceMemory\n');
+  process.exit(1);
+}
+if (process.env.FAKE_LLAMA_UNSUPPORTED === '1') {
+  process.stderr.write("error loading model architecture: unknown model architecture: 'rara'\n");
+  process.exit(1);
+}
+
 const listoDesde = Date.now() + cargaMs;
 const servidor = http.createServer((req, res) => {
   const json = (status, cuerpo) => {
