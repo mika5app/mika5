@@ -532,6 +532,8 @@ console.log('\n=== 10 bis. loadRuntime() sólo puebla el selector con canAttempt
           id, innerHTML: '', textContent: '', disabled: false, hijos: [],
           dataset: {}, style: {}, className: '', title: undefined,
           appendChild(h) { this.hijos.push(h); },
+          // Vaciar el nodo, como hace el DOM de verdad.
+          replaceChildren() { this.hijos.length = 0; },
           removeAttribute() { this.title = undefined; }
         });
       }

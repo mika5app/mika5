@@ -965,7 +965,7 @@ function syncModelDropdown() {
     providerPrivacy = options.find(option => option.value === selectedVal)?.dataset.source === 'cloud' ? 'cloud' : 'private';
     updatePrivacyUI();
   }
-  optionsContainer.innerHTML = "";
+  optionsContainer.replaceChildren();
   options.forEach(opt => {
     const div = document.createElement("div");
     const source = opt.dataset.source || 'local';
@@ -1814,7 +1814,7 @@ function handleDocExtractionError(docErr, fileName) {
 function renderAttachmentPreview() {
   const container = el("attachmentPreview");
   if (!container) return;
-  container.innerHTML = "";
+  container.replaceChildren();
   // Las imágenes rechazadas se muestran junto a los adjuntos reales, marcadas
   // como NO adjuntadas. Que desaparezcan sin rastro es lo que hacía creer al
   // usuario que la imagen había viajado.
@@ -2647,7 +2647,7 @@ function renderEngineModal(engine) {
   renderEngineCatalog(engine);
   // Con varios motores instalados se elige entre los encontrados.
   if (lista) {
-    lista.innerHTML = '';
+    lista.replaceChildren();
     lista.style.display = encontrados.length > 1 ? '' : 'none';
     for (const ruta of encontrados) {
       const opcion = document.createElement('option');
@@ -2746,7 +2746,7 @@ function renderEngineCatalog(engine) {
   const pendientes = ((engine && engine.catalog) || []).filter(m => !m.installed);
   const descargando = engine?.download?.state === 'downloading';
   seccion.style.display = engine?.executable && pendientes.length && !descargando ? '' : 'none';
-  lista.innerHTML = '';
+  lista.replaceChildren();
   for (const m of pendientes) {
     const opcion = document.createElement('option');
     opcion.value = m.id;
@@ -2988,7 +2988,7 @@ async function loadRuntime() {
   const moreActionsTrigger = el("btnMoreActions");
   if (moreActionsTrigger) moreActionsTrigger.dataset.providerState = uiState;
 
-  el("modelSelect").innerHTML = "";
+  el("modelSelect").replaceChildren();
   // Se puebla con `canAttempt`, no con `ready`: un catálogo declarado por el
   // adaptador basta para ofrecer los modelos, aunque nadie haya verificado que
   // el proveedor responda. Lo que no se hace es llamar «listo» a eso.
@@ -3686,10 +3686,10 @@ function applyProjectVisual(node, visual, { interactive = false } = {}) {
 async function loadProjects() {
   const projects = await withTimeout(Store.listProjects(), 8000, 'cargar proyectos');
   const list = el("projectList");
-  list.innerHTML = "";
+  list.replaceChildren();
 
   // Sort: Quick Chat first, then by created_at desc
-  const sorted = [...projects].sort((a, b) => {
+  const sorted = projects.toSorted((a, b) => {
     if (a.id === QUICK_CHAT_ID) return -1;
     if (b.id === QUICK_CHAT_ID) return 1;
     return (b.created_at || 0) - (a.created_at || 0);
@@ -3754,7 +3754,7 @@ async function loadProjects() {
         if (!yes) return;
         try {
           await Store.deleteProject(p.id);
-          if (activeProjectId === p.id) { activeProjectId = null; activeChatId = null; el("chat").innerHTML = ""; }
+          if (activeProjectId === p.id) { activeProjectId = null; activeChatId = null; el("chat").replaceChildren(); }
           await loadProjects();
           showToast(t('toast.projectDeleted'), "success");
         } catch (_) { showToast(t('toast.errorDelete'), "error"); }
@@ -3853,7 +3853,7 @@ async function selectProject(projectId, name) {
 
     const chatEl = el("chat");
     if (chatEl) {
-      chatEl.innerHTML = "";
+      chatEl.replaceChildren();
     }
 
     el("activeTitle").textContent = name || "Proyecto";
@@ -3903,7 +3903,7 @@ async function selectProject(projectId, name) {
         if (e.name === 'AbortError') throw e;
         console.error('[selectProject] Error creating chat:', e);
         if (chatEl) {
-          chatEl.innerHTML = "";
+          chatEl.replaceChildren();
           renderEmptyState(chatEl, 'no-chat');
         }
       }
@@ -3971,7 +3971,7 @@ async function refreshChats() {
   const list = document.getElementById("chatList");
   if (!list) return;
 
-  list.innerHTML = "";
+  list.replaceChildren();
   if (!activeProjectId) return;
 
   const chats = await withTimeout(Store.listChats(activeProjectId), 8000, 'cargar lista de chats');
@@ -4101,7 +4101,7 @@ async function refreshChats() {
 
         if (activeChatId === c.id) {
           activeChatId = null;
-          el("chat").innerHTML = "";
+          el("chat").replaceChildren();
           el("input").disabled = true;
           el("btnSend").disabled = true;
           const saveBtn = el("btnSaveChatDoc");
@@ -4137,7 +4137,7 @@ async function refreshChats() {
             if (res && res.ok && res.id) await openChat(res.id);
             else {
               activeChatId = null;
-              el("chat").innerHTML = "";
+              el("chat").replaceChildren();
               el("input").disabled = true;
               el("btnSend").disabled = true;
               el("btnSaveChatDoc").disabled = true;
@@ -4184,7 +4184,7 @@ async function openChatInternal(chatId, signal) {
   chatOldestLoadedOffset = 0;
 
   const chatEl = el("chat");
-  if (chatEl) chatEl.innerHTML = "";
+  if (chatEl) chatEl.replaceChildren();
 
   try {
     await refreshChats();
@@ -4295,7 +4295,7 @@ async function openChatInternal(chatId, signal) {
     console.error("[openChat] ERROR:", error);
     showToast("Error al cargar el chat", "error");
     if (chatEl) {
-      chatEl.innerHTML = "";
+      chatEl.replaceChildren();
       const loadError = document.createElement("div");
       loadError.className = "empty-chat-hint";
       loadError.textContent = t('chat.loadError');
@@ -4470,7 +4470,7 @@ function renderMessagesSafe(messages, signal, showLoadMore) {
     return;
   }
 
-  chatEl.innerHTML = "";
+  chatEl.replaceChildren();
 
   if (!Array.isArray(messages) || messages.length === 0) {
     // Orden contractual: 1) pintar 2) habilitar 3) enfocar 4) recalcular envío.
@@ -4603,7 +4603,7 @@ async function saveProjectContext() {
 async function renderKnowledgeList() {
   const list = el("knowledgeList");
   if (!list) return;
-  list.innerHTML = "";
+  list.replaceChildren();
   if (!activeProjectId) {
     list.innerHTML = '<div class="context-hint">Selecciona un proyecto para gestionar la base de conocimiento.</div>';
     return;
@@ -5407,7 +5407,6 @@ async function appendControlledIntentResponse(
     chatId: context.chatId, content: assistantText, model, renderedMsgId: controlledAssistantId
   });
   el("input").value = "";
-  el("input").style.height = 'auto';
   chatAttachments = [];
   renderAttachmentPreview();
   updateSendButtonState();
@@ -5724,7 +5723,6 @@ async function handlePendingVisualActionReply(text) {
   activeRequestId = requestContext.requestId;
   appendMsg({ role: 'user', content: text, attachments: pendingAttachments });
   el("input").value = "";
-  el("input").style.height = 'auto';
   isGenerating = true;
   appendGeneratingPlaceholder();
   try {
@@ -6013,7 +6011,6 @@ async function send() {
           appendMsg({ role: 'user', content: userPrompt, attachments: generativeAttachments });
         }
         el("input").value = "";
-        el("input").style.height = 'auto';
         chatAttachments = [];
         renderAttachmentPreview();
         isGenerating = true;
@@ -6341,7 +6338,6 @@ async function send() {
     // C) Solo tras persistir: efectos visibles y llamada al proveedor.
     activeRequestId = requestContext.requestId;
     el("input").value = "";
-    el("input").style.height = 'auto';
     chatAttachments = [];
     renderAttachmentPreview();
     clearReplyTo();
@@ -6861,8 +6857,8 @@ async function loadModelsForCurrentProvider() {
   const select = el('modelSelect');
   if (!modelOptions || !select) return;
 
-  modelOptions.innerHTML = '';
-  select.innerHTML = '';
+  modelOptions.replaceChildren();
+  select.replaceChildren();
 
   let res;
   try {
@@ -7198,10 +7194,18 @@ function wireSessionActions() {
   checkForUpdatesOnStartup().catch(e => console.warn('checkForUpdatesOnStartup:', e));
 }
 
+// Con un método de entrada (chino, japonés, coreano) Enter CONFIRMA el
+// carácter que se está componiendo: no es «enviar». Sin esta comprobación el
+// mensaje salía a medias. `keyCode 229` cubre los motores que entregan esa
+// tecla con `isComposing` ya a falso.
+function confirmaComposicion(e) {
+  return e.isComposing === true || e.keyCode === 229;
+}
+
 function wire() {
   el("btnCreateProject").onclick = createProject;
   const projInput = el("projectName");
-  if (projInput) projInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); createProject(); } });
+  if (projInput) projInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); if (confirmaComposicion(e)) return; createProject(); } });
 
   wireMoreActionsMenu();
   wireSessionActions();
@@ -7250,6 +7254,7 @@ function wire() {
       if (e.key === "Escape") closeChatSearch();
       if (e.key === "Enter") {
         e.preventDefault();
+        if (confirmaComposicion(e)) return;
         navigateSearch(e.shiftKey ? searchCurrentIdx - 1 : searchCurrentIdx + 1);
       }
     });
@@ -7403,12 +7408,9 @@ function wire() {
 
   el("input").addEventListener("input", () => {
     updateSendButtonState();
-    // Auto-grow textarea
-    const inp = el("input");
-    if (inp) {
-      inp.style.height = 'auto';
-      inp.style.height = Math.min(inp.scrollHeight, 200) + 'px';
-    }
+    // El cuadro crece solo con su contenido: `field-sizing: content` en
+    // `.input-textarea`. Antes se medía `scrollHeight` en cada tecla, lo que
+    // obligaba a recalcular el diseño dos veces por pulsación.
   });
 
   // Clipboard paste: support pasting images
@@ -7458,6 +7460,7 @@ function wire() {
   el("input").addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+      if (confirmaComposicion(e)) return;
       if (!isGenerating) send();
     }
   });
@@ -7668,7 +7671,7 @@ async function loadAlibabaConfig() {
   }
   generateAlibabaEndpoint();
   const simpleModelSelect = el('alibabaModelSelect');
-  simpleModelSelect.innerHTML = '';
+  simpleModelSelect.replaceChildren();
   for (const model of alibabaConfig.models || []) {
     if (!['chat', 'vision'].includes(model.taskType || 'chat')) continue;
     const option = document.createElement('option');
@@ -7715,7 +7718,7 @@ function capabilitySummary(capabilities) {
 function renderAlibabaModels() {
   const list = el('alibabaModelsList');
   if (!list) return;
-  list.innerHTML = '';
+  list.replaceChildren();
   const groups = [
     ['chat', 'Chat'],
     ['vision', 'Vision'],
@@ -7869,7 +7872,7 @@ function populateAlibabaGenerationModels() {
   const imageSelect = el('alibabaImageModelSelect');
   const videoList = el('alibabaVideoModels');
   if (imageSelect) {
-    imageSelect.innerHTML = '';
+    imageSelect.replaceChildren();
     for (const model of (alibabaConfig?.models || []).filter(item => item.taskType === 'image-generation')) {
       const option = document.createElement('option');
       option.value = model.id;
@@ -7917,7 +7920,7 @@ async function generateAlibabaImage() {
   try {
     const response = await sendAIImage(generationPayload);
     if (results) {
-      results.innerHTML = '';
+      results.replaceChildren();
       for (const url of response.images || []) {
         const img = document.createElement('img');
         img.src = url;

@@ -1031,7 +1031,10 @@
             color: var(--text-main);
             resize: none;
             outline: none;
-            min-height: 40px;
+            /* Crece con lo que se escribe, hasta max-height, sin JavaScript.
+               El mínimo son las dos líneas que antes fijaba rows="2". */
+            field-sizing: content;
+            min-height: calc(2lh + 2 * var(--spacing-sm));
             max-height: 200px;
             line-height: 1.5;
             font-size: 15px;
