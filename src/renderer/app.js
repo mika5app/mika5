@@ -185,7 +185,7 @@ function sanitizeMessageForClipboard(content) {
 function sanitizeRemoteErrorMessage(message) {
   let sanitized = String(message || '');
   sanitized = sanitized
-    .replace(/Error invoking remote method ['"]ai:(?:generate-image|chat)['"]:\s*/gi, '')
+    .replace(/Error invoking remote method ['"]ai:(?:generate-image|chat)['"]:\s*(?:Error:\s*)?/gi, '')
     .replace(/TypeError:\s*fetch failed/gi, '')
     .replace(/\b(?:UND_ERR_CONNECT_TIMEOUT|ConnectTimeoutError|UND_ERR_HEADERS_TIMEOUT|UND_ERR_BODY_TIMEOUT)\b/gi, '')
     .replace(/attempted addresses?:[\s\S]*/gi, '')
@@ -5910,6 +5910,9 @@ async function send() {
         text: routingInstruction,
         providerId: originProviderId,
         chatId: originChatId,
+        // Un documento adjunto en este turno: «analízalo» habla de él, no de
+        // una imagen que hubiera antes en el chat.
+        hasTextAttachments: textAttachments.length > 0,
         attachments: imageAttachments.map(attachment => ({
           type: 'image',
           mediaType: attachment.mediaType,
@@ -6370,6 +6373,11 @@ async function send() {
       const out = await sendAIChat(payload);
       if (wasCanceled) throw new Error('Canceled');
       if (!out || !out.message) throw new Error('Respuesta vacía');
+      // La respuesta sale de notas tomadas tramo a tramo, no del texto entero
+      // de una vez: el usuario tiene que saberlo.
+      if (Number(out.readInParts) > 1 && shouldRenderRequestOutput(requestContext, currentRequestView())) {
+        showToast(t('toast.readInParts', { n: out.readInParts }), 'info');
+      }
       let answer = safeAssistantContent(out.message.content);
       let answerModel = model;
       let terminalImageRef = null;
@@ -8031,6 +8039,17 @@ async function saveApiKey(provider) {
   }
 
   // Listen for knowledge indexing completion from main process
+  // Un documento largo en un motor con la ventana pequeña se lee por partes:
+  // varios minutos en los que «Generando…» no decía nada.
+  window.mika5?.ai?.onChatProgress?.((avance) => {
+    if (!avance || avance.requestId !== activeRequestId || !(avance.parts > 0)) return;
+    const placeholder = document.getElementById('msg-generating-placeholder');
+    if (!placeholder) return;
+    placeholder.textContent = avance.answering
+      ? t('chat.readingPartsAnswering', { n: avance.parts })
+      : t('chat.readingParts', { i: avance.part, n: avance.parts });
+  });
+
   if (window.mika5?.onKnowledgeIndexComplete) {
     window.mika5.onKnowledgeIndexComplete((data) => {
       renderKnowledgeList();

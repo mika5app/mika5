@@ -1387,6 +1387,23 @@ class AIProviderManager {
     if (effectiveIntent === 'vision-analysis' && !visualContext.hasVisualContext) {
       effectiveIntent = 'normal-chat';
     }
+    // Lo mismo cuando la única imagen es una ANTERIOR del chat. Un artículo
+    // («el», «la») basta para que el contexto visual recupere esa imagen, y
+    // «analiza el documento en la base de conocimiento» acababa enviándola: en
+    // un proveedor sin visión el mensaje ni salía («no procesa imágenes») y en
+    // uno con visión se analizaba una foto vieja en vez del documento. Una
+    // imagen del historial sólo se reutiliza si el usuario habla de algo
+    // visual; no si habla de un documento, si acaba de adjuntar uno, o si el
+    // proveedor no ve imágenes. La adjunta en este turno no se toca.
+    if (effectiveIntent === 'vision-analysis' && visualContext.source !== 'current-attachment') {
+      const texto = detailed.normalizedText;
+      const hablaDeAlgoVisual = /\b(imagen|imagenes|foto|fotos|fotografia|captura|capturas|pantalla|pantallazo|screenshot|logo|logotipo|dibujo|ilustracion|grafico|grafica|diagrama|picture|image|photo)\b/.test(texto);
+      const hablaDeUnDocumento = /\b(documento|documentos|archivo|archivos|fichero|ficheros|pdf|docx|word|excel|texto|contrato|informe|reporte|base de conocimiento|document|file)\b/.test(texto);
+      if (!hablaDeAlgoVisual
+        && (hablaDeUnDocumento || params?.hasTextAttachments === true || !providerSupportsVisionRouting(providerId))) {
+        effectiveIntent = 'normal-chat';
+      }
+    }
     const capabilities = getProviderVisualCapabilities(providerId);
     if (!capabilities.imageGeneration
       && ['image-edit', 'image-variation', 'ambiguous-visual', 'image-ambiguous'].includes(effectiveIntent)) {

@@ -627,6 +627,45 @@ assert.equal(attached[2].content[0].text, 'segundo');
     rutasComprobadas += 1;
   }
 
+  // Un chat donde hubo una imagen. Hablar de un documento no la reutiliza:
+  // se enviaba la imagen antigua, y un proveedor sin visión ni dejaba salir
+  // el mensaje. Informe de campo con BitNet: «Analiza el documento en la base
+  // de conocimiento».
+  {
+    const anterior = { type: 'image', mediaType: 'image/png', base64: 'aW1hZ2Vu', name: 'vieja.png', chatId: 'c', updatedAt: 1 };
+    const conHistorial = (extra) => gestorDeRutas.routeIntent({
+      chatId: 'c', attachments: [], currentModel: 'm', lastUserImage: anterior, lastUploadedImage: anterior, ...extra
+    });
+    for (const providerId of registroDeProveedores.ids()) {
+      for (const text of ['Analiza el documento en la base de conocimiento', 'analiza el archivo que subí', 'explica el contrato', 'lee el pdf y resume la parte de pagos']) {
+        const ruta = conHistorial({ text, providerId });
+        assert.equal(ruta.intent, 'normal-chat', `${providerId} / «${text}» con una imagen antigua en el chat: es chat normal`);
+        assert.equal(ruta.action, 'chat');
+        assert(!ruta.visualContext?.imageRef || ruta.intent === 'normal-chat');
+        rutasComprobadas += 1;
+      }
+      // Con un documento adjunto en este turno, «analízala» habla del documento.
+      const conAdjunto = conHistorial({ text: 'analiza la información', providerId, hasTextAttachments: true });
+      assert.equal(conAdjunto.intent, 'normal-chat', `${providerId}: con un documento adjunto no se reutiliza la imagen antigua`);
+      // Hablar de la imagen anterior sigue reutilizándola donde hay visión.
+      const deLaImagen = conHistorial({ text: 'describe la imagen anterior', providerId });
+      assert.equal(deLaImagen.intent, 'vision-analysis', `${providerId}: «describe la imagen anterior» sigue siendo análisis de imagen`);
+      rutasComprobadas += 2;
+    }
+    // Un proveedor que no ve imágenes no arrastra una del historial por un artículo.
+    for (const providerId of ['bitnet', 'llamacpp']) {
+      const ruta = conHistorial({ text: 'explica la idea principal', providerId });
+      assert.equal(ruta.intent, 'normal-chat', `${providerId}: sin visión, una frase corriente no reutiliza la imagen antigua`);
+      rutasComprobadas += 1;
+    }
+    // Y la imagen adjunta en este turno no se toca, aunque se hable de un documento.
+    const adjuntaAhora = gestorDeRutas.routeIntent({
+      text: 'analiza el documento de la foto', providerId: 'openai', chatId: 'c', attachments: adjunto, currentModel: 'm'
+    });
+    assert.equal(adjuntaAhora.intent, 'vision-analysis', 'una imagen adjunta en este turno se analiza');
+    rutasComprobadas += 1;
+  }
+
   // Alibaba sí edita: su camino no cambia.
   const edicion = gestorDeRutas.routeIntent({
     text: 'moderniza este logotipo', providerId: 'alibaba', chatId: 'c', attachments: adjunto, currentModel: 'm'

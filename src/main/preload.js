@@ -49,6 +49,9 @@ contextBridge.exposeInMainWorld("mika5", {
     updateProviderModel: (provider, modelId, model) => ipcRenderer.invoke('ai:update-provider-model', provider, modelId, model),
     deleteProviderModel: (provider, modelId) => ipcRenderer.invoke('ai:delete-provider-model', provider, modelId),
     chat: (params) => ipcRenderer.invoke('ai:chat', params),
+    onChatProgress: (callback) => {
+      ipcRenderer.on('ai:chat-progress', (_event, data) => callback(data));
+    },
     generateImage: (params) => ipcRenderer.invoke('ai:generate-image', params),
     routeIntent: (params) => ipcRenderer.invoke('ai:route-intent', params),
     listModels: () => ipcRenderer.invoke('ai:list-models'),

@@ -567,7 +567,7 @@ ipcMain.handle('ai:save-provider-config', (_e, provider, config) => aiManager.sa
 ipcMain.handle('ai:add-provider-model', (_e, provider, model) => aiManager.addProviderModel(provider, model));
 ipcMain.handle('ai:update-provider-model', (_e, provider, modelId, model) => aiManager.updateProviderModel(provider, modelId, model));
 ipcMain.handle('ai:delete-provider-model', (_e, provider, modelId) => aiManager.deleteProviderModel(provider, modelId));
-async function runAIRequest(method, params = {}) {
+async function runAIRequest(method, params = {}, sender = null) {
   if (!params || typeof params !== 'object' || !params.providerId
     || typeof params.model !== 'string' || !params.model.trim()
     || !aiManager.getAllProviders().some(provider => provider.id === params.providerId)) {
@@ -577,10 +577,22 @@ async function runAIRequest(method, params = {}) {
   try {
     const resolved = await resolveRequestPrivacy(params.providerId, params.model, { signal: controller.signal });
     assertRequestConsent(params, resolved.privacy);
-    return await aiManager[method]({ ...params, signal: controller.signal });
+    return await aiManager[method]({
+      ...params,
+      signal: controller.signal,
+      // Avance de una respuesta que lleva varias peticiones (un documento
+      // largo leído por partes). Sólo números: nada del contenido.
+      onProgress: (avance) => {
+        if (!sender || sender.isDestroyed()) return;
+        sender.send('ai:chat-progress', {
+          requestId: params.requestId,
+          part: Number(avance?.part) || 0, parts: Number(avance?.parts) || 0, answering: avance?.answering === true
+        });
+      }
+    });
   } finally { aiRequests.finish(params.requestId); }
 }
-ipcMain.handle('ai:chat', (_e, params) => runAIRequest('chat', params));
+ipcMain.handle('ai:chat', (e, params) => runAIRequest('chat', params, e.sender));
 ipcMain.handle('ai:generate-image', (_e, params) => runAIRequest('generateImage', params));
 ipcMain.handle('ai:resolve-privacy', (_e, params = {}) => resolveRequestPrivacy(params.providerId, params.model));
 ipcMain.handle('ai:route-intent', (_e, params) => aiManager.routeIntent(params));

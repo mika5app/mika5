@@ -246,8 +246,19 @@ not fit in the window it cuts from the middle without saying so. So the adapter 
 `engine.contexto`; `getCapabilities()` exposes it as `contextBudget`, the renderer picks
 fewer document fragments and less history for that provider (it can only lower the general
 budget), and before sending, the adapter asks the engine itself (`/tokenize`, `/props`) and
-refuses with `PROVIDER_CONTEXT_EXCEEDED` what still does not fit. The answer is capped to
-what is left of the window. A provider without `contexto` is untouched.
+reads in parts what still does not fit: the longest message is split at paragraph
+boundaries, the model takes notes on each part for the user's request, and the final answer
+is given from all the notes (`leerPorPartes` in `providers/llama-server.js`). The whole text
+is read, but through notes, so detail is lost; the result carries `readInParts`, the
+renderer says so, and `ai:chat-progress` (request id and numbers only) drives "part 2 of 4".
+More than eight parts is refused with `PROVIDER_CONTEXT_EXCEEDED`. The answer is capped to
+768 tokens and to what is left of the window. A provider without `contexto` is untouched.
+Measured with the real engine: a 21,883-character document in two parts, 3.5 minutes.
+
+A previous image in a chat is reused for "analyse…" only when the user talks about
+something visual. Talking about a document, attaching one in that turn, or using a provider
+without vision makes it a normal chat: before, "analyse the document in the knowledge base"
+dragged an old image into the request and a provider without vision refused to send it.
 
 BitNet has no installer and no prebuilt binaries. `comprobarRequisitos()` reports which
 build tools are present (Git, Python, CMake, Clang, including the ones Visual Studio

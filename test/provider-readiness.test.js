@@ -1166,6 +1166,21 @@ async function main() {
   check(codigosDeMotor.length >= 10 && codigosDeMotor.every(c =>
     bloqueEs.includes(`'provider.error.${c}'`) && bloqueEn.includes(`'provider.error.${c}'`)),
     `los ${codigosDeMotor.length} códigos de motor tienen mensaje comprensible en los dos idiomas`);
+  for (const clave of ['chat.readingParts', 'chat.readingPartsAnswering', 'toast.readInParts']) {
+    check(bloqueEs.includes(`'${clave}'`) && bloqueEn.includes(`'${clave}'`), `${clave} tiene texto en los dos idiomas`);
+  }
+  {
+    const principal = fs.readFileSync(path.join(__dirname, '..', 'src', 'main', 'main.js'), 'utf8');
+    const puente = fs.readFileSync(path.join(__dirname, '..', 'src', 'main', 'preload.js'), 'utf8');
+    const interfaz = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'app.js'), 'utf8');
+    const aviso = principal.slice(principal.indexOf("sender.send('ai:chat-progress'"), principal.indexOf("sender.send('ai:chat-progress'") + 260);
+    check(/requestId: params\.requestId/.test(aviso) && /part: Number\(/.test(aviso) && /parts: Number\(/.test(aviso)
+      && !/content|message|text/i.test(aviso),
+      'el aviso de avance lleva el id de la petición y números, nada del contenido');
+    check(/onChatProgress:/.test(puente) && /ipcRenderer\.on\('ai:chat-progress'/.test(puente)
+      && /avance\.requestId !== activeRequestId/.test(interfaz),
+      'la interfaz sólo muestra el avance de la petición que está en curso');
+  }
   for (const estado of [READINESS.STARTING, READINESS.LOADING_MODEL]) {
     check(bloqueEs.includes(`'provider.readiness.${estado}'`) && bloqueEn.includes(`'provider.readiness.${estado}'`),
       `el estado ${estado} tiene etiqueta en los dos idiomas`);
@@ -1207,26 +1222,75 @@ async function main() {
         'BitNet declara su ventana de 4 096 tokens; llama.cpp no declara ninguna');
 
       await bitnet.chat({ model: 'm', messages: charla(4000) });
-      // 4000 caracteres + «user: » = 1002 tokens, más 16 de plantilla.
-      check(vistos.length === 1 && vistos[0].max_tokens === 4096 - 1018,
-        `BitNet: la respuesta se limita a lo que queda de ventana (${vistos[0] && vistos[0].max_tokens} tokens)`);
+      check(vistos.length === 1 && vistos[0].max_tokens === 768,
+        `BitNet: un texto que cabe se envía tal cual, con la respuesta acotada (${vistos[0] && vistos[0].max_tokens} tokens)`);
+      // 13400 caracteres + «user: » = 3352 tokens, más 16 de plantilla: quedan 728.
+      vistos.length = 0;
+      await bitnet.chat({ model: 'm', messages: charla(13400) });
+      check(vistos.length === 1 && vistos[0].max_tokens === 4096 - 3368,
+        `y con la ventana casi llena, a lo que queda de ella (${vistos[0] && vistos[0].max_tokens} tokens)`);
 
+      // Un documento que no cabe se lee ENTERO, por partes: una petición de
+      // notas por cada tramo y una final con todas las notas.
+      const parrafos = Array.from({ length: 150 }, (_, n) => `Párrafo ${n + 1}. ${'texto '.repeat(15)}fin ${n + 1}.`);
+      const documento = parrafos.join('\n\n');
+      const avances = [];
+      vistos.length = 0;
+      let leido = await bitnet.chat({
+        model: 'm', onProgress: (a) => avances.push(a),
+        messages: [{ role: 'system', content: 'Eres breve.' }, { role: 'user', content: `resume\n\n--- Documento.docx ---\n${documento}` }]
+      });
+      const tramos = vistos.slice(0, -1);
+      const ultima = vistos.at(-1);
+      const tokensDe = (peticion) => Math.ceil(peticion.messages.map(m => `${m.role}: ${m.content}`).join('\n').length / 4) + 8 * peticion.messages.length + 8;
+      check(documento.length > 15000 && leido.readInParts === tramos.length && tramos.length >= 2 && tramos.length <= 8,
+        `BitNet: un documento de ${documento.length} caracteres que no cabe se lee en ${tramos.length} partes`);
+      check(tramos.every((peticion, n) => peticion.messages[1].content.startsWith(`Petición: resume\n\nParte ${n + 1} de ${tramos.length}:\n`)),
+        'cada parte lleva la petición del usuario y dice qué parte es');
+      const reunido = tramos.map((peticion) => peticion.messages[1].content.split(/Parte \d+ de \d+:\n/)[1]).join('');
+      check(reunido === `--- Documento.docx ---\n${documento}`,
+        'las partes, juntas, son el documento completo: no se pierde ni se repite nada');
+      check(tramos.every(peticion => /\n\n$|\n$|\. $/.test(peticion.messages[1].content) || peticion === tramos.at(-1)),
+        'los cortes caen en un límite de párrafo, no en mitad de una palabra');
+      check(vistos.every(peticion => tokensDe(peticion) + peticion.max_tokens <= 4096),
+        'ninguna petición, con su respuesta, pasa de la ventana');
+      check(ultima.messages[0].content === 'Eres breve.' && ultima.messages[1].content.startsWith('resume\n\n[El texto es largo y se leyó completo')
+        && tramos.every((_, n) => ultima.messages[1].content.includes(`Parte ${n + 1} de ${tramos.length}:\nok`)),
+        'la respuesta final recibe la conversación, la petición y las notas de todas las partes');
+      check(avances.length === tramos.length + 1 && avances[0].part === 1 && avances[0].parts === tramos.length && avances.at(-1).answering === true,
+        'se avisa del avance parte a parte');
+      check(leido.message.content === 'ok' && leido.provider === 'bitnet', 'y se devuelve una respuesta normal, marcada como leída por partes');
+
+      // El texto largo puede estar en un turno anterior: la petición es la última.
+      vistos.length = 0;
+      leido = await bitnet.chat({ model: 'm', messages: [
+        { role: 'user', content: `resume\n\n--- Documento.docx ---\n${documento}` },
+        { role: 'assistant', content: 'Resumen anterior.' },
+        { role: 'user', content: '¿qué dice de los pagos?' }
+      ] });
+      check(leido.readInParts >= 2 && vistos[0].messages[1].content.startsWith('Petición: ¿qué dice de los pagos?\n\nParte 1 de ')
+        && vistos.at(-1).messages.at(-1).content === '¿qué dice de los pagos?',
+        'una pregunta posterior vuelve a leer el documento buscando lo que ahora se pregunta');
+
+      // Demasiado largo incluso por partes: se rechaza con el mensaje, sin enviar nada.
+      vistos.length = 0;
       let error = null;
-      try { await bitnet.chat({ model: 'm', messages: charla(15000) }); } catch (e) { error = e; }
-      check(error && error.code === 'PROVIDER_CONTEXT_EXCEEDED' && vistos.length === 1
+      try { await bitnet.chat({ model: 'm', messages: charla(200000) }); } catch (e) { error = e; }
+      check(error && error.code === 'PROVIDER_CONTEXT_EXCEEDED' && vistos.length === 0
         && /no cabe en la ventana/.test(error.message) && /base de conocimiento/.test(error.message),
-        'BitNet: un texto que no cabe se rechaza con un mensaje que dice qué hacer, y no llega al motor');
+        'BitNet: un texto que ni por partes es razonable se rechaza con un mensaje que dice qué hacer, y no llega al motor');
 
       // El motor arrancó con la variante de menos contexto: manda su ventana real.
       ventanaDelServidor = 2048;
-      error = null;
-      try { await bitnet.chat({ model: 'm', messages: charla(7000) }); } catch (e) { error = e; }
-      check(error && error.code === 'PROVIDER_CONTEXT_EXCEEDED' && vistos.length === 1,
+      vistos.length = 0;
+      leido = await bitnet.chat({ model: 'm', messages: charla(7000) });
+      check(leido.readInParts >= 2 && vistos.every(peticion => tokensDe(peticion) + peticion.max_tokens <= 2048),
         'BitNet: la ventana que cuenta es la del servidor en marcha, no sólo la declarada');
       ventanaDelServidor = 4096;
+      vistos.length = 0;
 
       await llamacpp.chat({ model: 'm', messages: charla(15000) });
-      check(vistos.length === 2 && vistos[1].max_tokens === 4096,
+      check(vistos.length === 1 && vistos[0].max_tokens === 4096 && vistos[0].messages[0].content.length === 15000,
         'llama.cpp: sin ventana declarada nada cambia; mismo tope de respuesta de siempre');
 
       cortar = true;
