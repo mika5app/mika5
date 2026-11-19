@@ -35,7 +35,9 @@ const adaptadorLocal = {
     unidadesDelSistema: ['/etc/systemd/system/ollama.service'],
     baseUrl: () => resolverBaseOllama(process.env.MIKA5_OLLAMA_BASE),
     arrancable: ({ env }) => !env.MIKA5_OLLAMA_BASE && ollamaHostEsElPorDefecto(env.OLLAMA_HOST),
-    argumentos: () => ['serve']
+    argumentos: () => ['serve'],
+    paquete: { winget: 'Ollama.Ollama', brew: 'ollama' },
+    guia: 'https://ollama.com/download'
   },
 
   async chat({ model, messages, images, signal }) {

@@ -869,6 +869,16 @@ const READINESS_ACTION = Object.freeze({
   RETRY: 'retry'
 });
 
+/**
+ * Lo que MIKA5 puede afirmar de un modelo frente a un motor. `unverified` no
+ * es un «probablemente sí»: es que nadie lo ha comprobado.
+ */
+const COMPATIBILITY = Object.freeze({
+  COMPATIBLE: 'compatible',
+  INCOMPATIBLE: 'incompatible',
+  UNVERIFIED: 'unverified'
+});
+
 /** Repositorio de Hugging Face: `usuario/modelo`, con cuantización opcional. */
 const HF_REPO_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,95}\/[A-Za-z0-9][A-Za-z0-9._-]{0,95}(?::[A-Za-z0-9._-]{1,40})?$/;
 
@@ -1627,6 +1637,12 @@ class AIProviderManager {
           if (typeof leido.executable === 'string') guardado.executable = leido.executable;
           if (typeof leido.model === 'string') guardado.model = leido.model;
           if (typeof leido.modelId === 'string') guardado.modelId = leido.modelId;
+          if (leido.verified && typeof leido.verified === 'object' && !Array.isArray(leido.verified)) {
+            guardado.verified = {};
+            for (const [ruta, veredicto] of Object.entries(leido.verified)) {
+              if (Object.values(COMPATIBILITY).includes(veredicto)) guardado.verified[ruta] = veredicto;
+            }
+          }
           if (leido.approval && typeof leido.approval.path === 'string'
             && /^[0-9a-f]{64}$/.test(String(leido.approval.sha256))) {
             guardado.approval = { path: leido.approval.path, sha256: leido.approval.sha256 };
@@ -1665,6 +1681,9 @@ class AIProviderManager {
       // mano, el del propio fichero.
       config.modelId = modelId
         || validada.split(/[\\/]/).pop().replace(/\.gguf$/i, '');
+      // Un fichero que el usuario elige a mano vuelve a intentarse aunque
+      // antes fallara: puede que el fallo no fuera del modelo.
+      if (!modelId && config.verified) delete config.verified[validada];
     }
     this._guardarEngineConfig(providerId, config);
     return this.describeEngine(providerId);
@@ -1692,14 +1711,36 @@ class AIProviderManager {
     return modelos;
   }
 
-  /** Modelos que puede ofrecer un motor: los descubiertos más el elegido a mano. */
+  /**
+   * Modelos que puede ofrecer un motor: los descubiertos más el elegido a
+   * mano, cada uno con su veredicto de compatibilidad. Los que se sabe que no
+   * sirven para este motor no se ofrecen.
+   */
   _modelosDeMotor(providerId, opciones) {
+    const spec = this._engineSpec(providerId);
     const config = this.getEngineConfig(providerId);
     const modelos = this.discoverEngineModels(opciones).map(m => ({ ...m }));
     if (config.model && config.modelId && !modelos.some(m => m.path === config.model)) {
-      modelos.unshift({ id: config.modelId, path: config.model, source: 'manual', size: 0 });
+      modelos.unshift({ id: config.modelId, path: config.model, source: 'manual', size: 0, architecture: null });
     }
-    return modelos;
+    const comprobado = config.verified || {};
+    return modelos
+      .map(m => ({
+        ...m,
+        // Manda la evidencia: lo que pasó al cargarlo en este equipo. Si no la
+        // hay, lo que el propio fichero declara. Nunca una suposición.
+        compatibility: comprobado[m.path] || (spec && spec.compatibilidad ? spec.compatibilidad(m) : COMPATIBILITY.UNVERIFIED)
+      }))
+      .filter(m => m.compatibility !== COMPATIBILITY.INCOMPATIBLE);
+  }
+
+  /** Apunta lo que pasó al cargar un modelo: es la única prueba real. */
+  _registrarCompatibilidad(providerId, ruta, veredicto) {
+    if (!ruta) return;
+    const config = this.getEngineConfig(providerId);
+    if (config.verified && config.verified[ruta] === veredicto) return;
+    config.verified = { ...(config.verified || {}), [ruta]: veredicto };
+    this._guardarEngineConfig(providerId, config);
   }
 
   /** Lo que la pantalla de configuración del motor necesita enseñar. */
@@ -1721,7 +1762,10 @@ class AIProviderManager {
       executableApproved: Boolean(this.engineIdentity(providerId)?.approved),
       model: config.modelId || null,
       // Al renderer sólo va el nombre y el origen: la ruta se queda aquí.
-      models: modelos.map(m => ({ id: m.id, source: m.source, size: m.size })),
+      models: modelos.map(m => ({ id: m.id, source: m.source, size: m.size, compatibility: m.compatibility })),
+      // Sistema detectado: decide qué instalador se ofrece.
+      platform: this.motores._platform,
+      arch: process.arch,
       canInstall: Boolean(instalacion),
       installer: instalacion ? instalacion.gestor : null,
       guideUrl: spec.guia || null,
@@ -1903,6 +1947,16 @@ class AIProviderManager {
     };
     let preparacion = resolverReadiness(disp, motor);
 
+    // Evidencia de compatibilidad: un modelo que el motor propio cargó y sirve
+    // es compatible; uno con el que el motor se cerró al arrancar no lo es.
+    if (spec.tipo === 'managed' && estado.model && estado.model === config.model) {
+      if (estado.owned && disp.reachable === true && disp.httpStatus !== 503 && disp.ready) {
+        this._registrarCompatibilidad(providerId, estado.model, COMPATIBILITY.COMPATIBLE);
+      } else if (estado.state === ESTADO_MOTOR.FAILED && estado.errorCode === 'ENGINE_EXITED') {
+        this._registrarCompatibilidad(providerId, estado.model, COMPATIBILITY.INCOMPATIBLE);
+      }
+    }
+
     // Un motor gestionable ofrece los modelos que hay en el equipo, esté o no
     // en marcha: elegir uno es lo que lo arranca. Un servidor que lanzó el
     // usuario es distinto: tiene cargado su modelo y MIKA5 no puede cambiarlo,
@@ -1913,7 +1967,7 @@ class AIProviderManager {
       if (modelos.length) {
         disp.models = modelos.map(m => ({
           name: m.id, size: m.size, digest: m.id, sizeFormatted: m.size ? formatBytes(m.size) : '',
-          description: m.source
+          description: m.source, compatibility: m.compatibility
         }));
         disp.modelsAvailable = modelos.length;
         // Siempre se puede elegir: también tras un fallo, porque la salida de
@@ -1980,6 +2034,7 @@ module.exports = {
   READINESS_ACTION,
   resolverReadiness,
   HF_REPO_RE,
+  COMPATIBILITY,
   probeOllamaVision,
   getProviderContract,
   resolveVisionSupport,

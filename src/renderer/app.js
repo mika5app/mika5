@@ -2365,6 +2365,8 @@ async function runProviderAction(accion = providerReadiness && providerReadiness
       el('btnPull')?.click();
       break;
     case 'install-engine':
+      await showEngineModal();
+      break;
     case 'start-service':
     case 'retry':
       await loadRuntime();
@@ -2426,6 +2428,10 @@ function renderEngineModal(engine) {
   const disponibles = (engine && engine.models) || [];
 
   if (ejecutable) ejecutable.textContent = engine?.executable || t('engine.executable.none');
+  const sistema = el('engineSystem');
+  if (sistema) sistema.textContent = engine?.platform ? `${t('engine.system')} ${engine.platform} ${engine.arch || ''}`.trim() : '';
+  const seccionModelos = el('engineModelsSection');
+  if (seccionModelos) seccionModelos.style.display = engine?.requiresModel ? '' : 'none';
   // Con varios motores instalados se elige entre los encontrados.
   if (lista) {
     lista.innerHTML = '';
@@ -2640,6 +2646,7 @@ async function loadRuntime() {
         speed,
         description,
         taskType: raw.taskType || 'chat',
+        compatibility: raw.compatibility,
         supportsVision: raw.supportsVision === true
       };
     };
@@ -2682,6 +2689,8 @@ async function loadRuntime() {
         if (m.size) opt.dataset.size = String(m.size);
         if (m.sizeFormatted) opt.dataset.sizeFormatted = m.sizeFormatted;
         if (m.capabilities && Array.isArray(m.capabilities)) opt.dataset.caps = m.capabilities.join(' • ');
+        // Modelo de un motor local: se dice si está comprobado que carga o no.
+        if (m.compatibility) opt.dataset.caps = t(`engine.compat.${m.compatibility}`);
         if (m.speed) opt.dataset.speed = m.speed;
         if (m.description) opt.dataset.description = m.description;
         if (m.supportsVision) opt.dataset.vision = '1';

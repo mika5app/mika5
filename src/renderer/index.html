@@ -2554,16 +2554,19 @@
             </div>
             <div class="modal-body">
                 <p class="hint" data-i18n="engine.intro">MIKA5 busca el motor y los modelos que ya tienes. Elige el modelo en el selector de modelos y el motor se inicia solo.</p>
-                <label data-i18n="engine.executable.label">Programa (llama-server):</label>
+                <p id="engineSystem" class="hint"></p>
+                <label data-i18n="engine.executable.label">Programa del motor:</label>
                 <p id="engineExecutablePath" class="hint" style="word-break:break-all;"></p>
                 <select id="engineExecutableSelect" style="width:100%;display:none;" onchange="selectEngineExecutable(this.value)" aria-label="Programa"></select>
                 <button id="engineApproveButton" class="btn-primary" type="button" style="display:none;" onclick="approveEngine()" data-i18n="engine.approve">Autorizar este programa…</button>
                 <button id="engineInstallButton" class="btn-primary" type="button" style="display:none;" onclick="installEngineFromModal()" data-i18n="engine.install">Instalar motor…</button>
                 <button id="engineGuideButton" class="btn-icon" type="button" style="display:none;" onclick="openEngineGuide()" data-i18n="engine.guide">Cómo instalarlo</button>
                 <button class="btn-icon" type="button" onclick="chooseEngineFile('executable')" data-i18n="engine.executable.choose">Elegir programa…</button>
-                <label data-i18n="engine.model.label">Modelos (GGUF):</label>
-                <p id="engineModelsInfo" class="hint"></p>
-                <button class="btn-icon" type="button" onclick="chooseEngineFile('model')" data-i18n="engine.model.choose">Elegir otro archivo…</button>
+                <div id="engineModelsSection">
+                    <label data-i18n="engine.model.label">Modelos (GGUF):</label>
+                    <p id="engineModelsInfo" class="hint"></p>
+                    <button class="btn-icon" type="button" onclick="chooseEngineFile('model')" data-i18n="engine.model.choose">Elegir otro archivo…</button>
+                </div>
                 <div id="engineDownloadSection" style="display:none;">
                     <label for="engineDownloadInput" data-i18n="engine.download.label">Descargar de Hugging Face:</label>
                     <input type="text" id="engineDownloadInput" placeholder="usuario/modelo-GGUF" autocomplete="off" spellcheck="false" />

@@ -608,8 +608,11 @@ async function main() {
       check(r.readiness === READINESS.ERROR && r.engine.errorCode === 'ENGINE_EXITED' && r.action === READINESS_ACTION.START_ENGINE,
         'un motor que no logra cargar queda en ERROR con acción de reintento');
       await m.getReadiness('llamacpp', { autoStart: true });
-      await m.getReadiness('llamacpp', { autoStart: true });
+      const trasFallo = await m.getReadiness('llamacpp', { autoStart: true });
       check(lanzados === 1, 'el sondeo de la interfaz no relanza en bucle un motor que falló');
+      check(m.getEngineConfig('llamacpp').verified[modelo] === 'incompatible'
+        && !trasFallo.models.some(x => x.name === 'prueba'),
+        'un modelo con el que el motor se cerró queda como incompatible y deja de ofrecerse');
       await m.startEngine('llamacpp');
       check(lanzados === 2, 'el reintento sólo ocurre cuando el usuario lo pide');
     } finally {
@@ -634,16 +637,27 @@ async function main() {
       return ruta;
     };
     const GGUF = Buffer.concat([Buffer.from('GGUF', 'latin1'), Buffer.alloc(64)]);
+    // GGUF mínimo con la clave `general.architecture`, como la escribe un
+    // conversor real: versión, contadores y un par clave/valor de tipo cadena.
+    const ggufDe = (arquitectura) => {
+      const u32 = (n) => { const b = Buffer.alloc(4); b.writeUInt32LE(n); return b; };
+      const u64 = (n) => { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(n)); return b; };
+      const clave = Buffer.from('general.architecture', 'latin1');
+      const valor = Buffer.from(arquitectura, 'utf8');
+      return Buffer.concat([Buffer.from('GGUF', 'latin1'), u32(3), u64(0), u64(1),
+        u64(clave.length), clave, u32(8), u64(valor.length), valor, Buffer.alloc(32)]);
+    };
     const exeNombre = esWin ? 'llama-server.exe' : 'llama-server';
     const exeA = escribir(path.join('bin', exeNombre), '');
     const exeB = escribir(path.join('llama.cpp', 'build', 'bin', exeNombre), '');
-    const enHf = escribir(path.join('.cache', 'huggingface', 'hub', 'models--org--repo', 'snapshots', 'abc', 'qwen-q4.gguf'), GGUF);
+    const enHf = escribir(path.join('.cache', 'huggingface', 'hub', 'models--org--repo', 'snapshots', 'abc', 'qwen-q4.gguf'), ggufDe('qwen2'));
     escribir(path.join('.cache', 'huggingface', 'hub', 'models--org--repo', 'snapshots', 'abc', 'mmproj-qwen.gguf'), GGUF);
     escribir(path.join('.cache', 'huggingface', 'hub', 'falso.gguf'), 'esto no es un modelo');
-    escribir(path.join('.lmstudio', 'models', 'pub', 'phi', 'phi-3.gguf'), GGUF);
-    const enBitnet = escribir(path.join('BitNet', 'models', 'BitNet-b1.58-2B-4T', 'ggml-model-i2_s.gguf'), GGUF);
+    escribir(path.join('.lmstudio', 'models', 'pub', 'phi', 'phi-3.gguf'), ggufDe('phi3'));
+    escribir(path.join('.lmstudio', 'models', 'pub', 'raro', 'sin-metadatos.gguf'), GGUF);
+    const enBitnet = escribir(path.join('BitNet', 'models', 'BitNet-b1.58-2B-4T', 'ggml-model-i2_s.gguf'), ggufDe('bitnet-b1.58'));
     const digest = 'a'.repeat(64);
-    const blob = escribir(path.join('.ollama', 'models', 'blobs', `sha256-${digest}`), GGUF);
+    const blob = escribir(path.join('.ollama', 'models', 'blobs', `sha256-${digest}`), ggufDe('llama'));
     escribir(path.join('.ollama', 'models', 'manifests', 'registry.ollama.ai', 'library', 'llama3', 'latest'),
       JSON.stringify({ layers: [{ mediaType: 'application/vnd.ollama.image.model', digest: `sha256:${digest}` }] }));
     escribir(path.join('.ollama', 'models', 'manifests', 'registry.ollama.ai', 'library', 'nube', 'cloud'),
@@ -663,6 +677,26 @@ async function main() {
       check(!ids.some(i => /mmproj|falso|nube/.test(i)),
         'ni proyectores, ni ficheros sin cabecera GGUF, ni modelos cloud de Ollama se listan');
       check(modelos.every(x => path.isAbsolute(x.path) && x.size > 0), 'cada modelo lleva su ruta absoluta y su tamaño');
+      const arquitecturaDe = (id) => modelos.find(x => x.id === id).architecture;
+      check(arquitecturaDe('ggml-model-i2_s') === 'bitnet-b1.58' && arquitecturaDe('ollama/llama3:latest') === 'llama'
+        && arquitecturaDe('sin-metadatos') === null,
+        'de cada GGUF se lee la arquitectura que declara, y null si no declara ninguna');
+
+      // Compatibilidad: BitNet no ofrece lo que no es de BitNet.
+      {
+        const { COMPATIBILITY } = require('../src/main/ai-providers');
+        const soloLectura = new AIProviderManager(baseFalsa(), {
+          motores: new GestorDeMotores({ spawn: () => { throw new Error('no'); }, env, platform: process.platform })
+        });
+        const deBitnet = soloLectura._modelosDeMotor('bitnet');
+        check(deBitnet.map(x => `${x.id}=${x.compatibility}`).sort().join() === 'ggml-model-i2_s=compatible,sin-metadatos=unverified',
+          `BitNet ofrece sólo su modelo y lo que no se puede descartar (${deBitnet.map(x => x.id).join(', ')})`);
+        check(!deBitnet.some(x => x.source === 'Ollama' || /qwen|phi/.test(x.id)),
+          'los GGUF de Ollama y de otras arquitecturas no se presentan como compatibles con BitNet');
+        const deLlama = soloLectura._modelosDeMotor('llamacpp');
+        check(deLlama.length === modelos.length && deLlama.every(x => x.compatibility === COMPATIBILITY.UNVERIFIED),
+          'llama.cpp los ofrece todos como «sin verificar»: de un fichero ajeno no afirma nada');
+      }
 
       // El gestor entero sobre ese disco: elegir modelo arranca, cambiar reinicia.
       const puerto = await puertoLibre();
@@ -720,6 +754,9 @@ async function main() {
           'con el motor en marcha el selector sigue ofreciendo todos los modelos');
 
         await m.selectEngineModel('llamacpp', 'qwen-q4');
+        check(listo.models.find(x => x.name === 'qwen-q4').compatibility === 'compatible'
+          && listo.models.filter(x => x.compatibility === 'compatible').length === 1,
+          'un modelo que el motor cargó y sirve pasa a «compatible»: es la única prueba real');
         check(lanzados.length === 1, 'volver a elegir el mismo modelo no reinicia el motor');
         await m.selectEngineModel('llamacpp', 'ggml-model-i2_s');
         check(lanzados.length === 2 && lanzados[1].args[1] === enBitnet,

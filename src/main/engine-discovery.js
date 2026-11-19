@@ -63,6 +63,39 @@ function esGguf(fs, ruta) {
 }
 
 /**
+ * Arquitectura que declara un GGUF en sus metadatos (`general.architecture`),
+ * o null si no se puede leer. Es lo único que se mira: no se interpreta el
+ * fichero entero, sólo sus primeros bytes, donde va esa clave.
+ */
+function arquitecturaGguf(fs, ruta) {
+  let fd = null;
+  try {
+    fd = fs.openSync(ruta, 'r');
+    const cabecera = Buffer.alloc(65536);
+    const leidos = fs.readSync(fd, cabecera, 0, cabecera.length, 0);
+    const datos = cabecera.subarray(0, leidos);
+    if (datos.subarray(0, 4).toString('latin1') !== 'GGUF') return null;
+    const clave = Buffer.from('general.architecture', 'latin1');
+    const en = datos.indexOf(clave);
+    if (en < 0) return null;
+    // Tras la clave: tipo (uint32, 8 = cadena), longitud (uint64) y el texto.
+    let p = en + clave.length;
+    if (p + 12 > datos.length || datos.readUInt32LE(p) !== 8) return null;
+    const largo = Number(datos.readBigUInt64LE(p + 4));
+    p += 12;
+    if (!(largo > 0 && largo <= 64) || p + largo > datos.length) return null;
+    const valor = datos.subarray(p, p + largo).toString('utf8');
+    return /^[\w.\-]+$/.test(valor) ? valor.toLowerCase() : null;
+  } catch (_) {
+    return null;
+  } finally {
+    if (fd !== null) {
+      try { fs.closeSync(fd); } catch (_) {}
+    }
+  }
+}
+
+/**
  * Directorios donde puede estar el ejecutable de un motor, por orden de
  * preferencia: el PATH, las ubicaciones de los instaladores oficiales y las
  * carpetas de compilación habituales bajo la carpeta personal.
@@ -248,9 +281,9 @@ function descubrirModelos(contexto) {
     ids.add(id);
     let size = 0;
     try { size = fs.statSync(crudo.path).size; } catch (_) {}
-    modelos.push({ id, path: crudo.path, source: crudo.origen, size });
+    modelos.push({ id, path: crudo.path, source: crudo.origen, size, architecture: arquitecturaGguf(fs, crudo.path) });
   }
   return modelos.sort((a, b) => a.id.localeCompare(b.id));
 }
 
-module.exports = { LIMITES, esGguf, descubrirEjecutables, descubrirModelos };
+module.exports = { LIMITES, esGguf, arquitecturaGguf, descubrirEjecutables, descubrirModelos };

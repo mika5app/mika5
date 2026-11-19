@@ -21,7 +21,7 @@ const { createAbortContext } = require('../provider-runtime');
 // cambia entre ellos es el id, la etiqueta, el puerto por defecto y cómo se
 // arranca el servidor; duplicar el cliente HTTP haría que los dos divergieran
 // en silencio la primera vez que se corrigiera uno solo.
-function crearAdaptadorServidorLlama({ providerId, name, etiqueta, baseUrl, comoIniciar, paquete, descargaHf, guia }) {
+function crearAdaptadorServidorLlama({ providerId, name, etiqueta, baseUrl, comoIniciar, paquete, descargaHf, guia, compatibilidad }) {
   const adaptador = {
     name,
     privacy: 'private',
@@ -42,6 +42,8 @@ function crearAdaptadorServidorLlama({ providerId, name, etiqueta, baseUrl, como
       // y página oficial de instalación para cuando no.
       paquete: paquete || null,
       guia: guia || null,
+      // Qué puede decirse de un GGUF sin cargarlo, a partir de lo que declara.
+      compatibilidad: compatibilidad || (() => 'unverified'),
       // `-hf` hace que el propio servidor descargue un GGUF de Hugging Face a
       // su caché. Sólo se usa tras autorizarlo el usuario.
       descargaHf: descargaHf === true,

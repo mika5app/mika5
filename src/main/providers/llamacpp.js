@@ -18,7 +18,11 @@ const adaptadorLlamacpp = crearAdaptadorServidorLlama({
   comoIniciar: 'llama-server -m modelo.gguf --port 8080',
   paquete: { winget: 'ggml.llamacpp', brew: 'llama.cpp' },
   guia: 'https://github.com/ggml-org/llama.cpp/blob/master/docs/install.md',
-  descargaHf: true
+  descargaHf: true,
+  // llama.cpp carga muchas arquitecturas, pero no todas ni en todas sus
+  // versiones: de un fichero ajeno no se afirma nada. Lo único con evidencia es
+  // lo que el propio llama-server descargó a su caché.
+  compatibilidad: ({ source }) => (source === 'llama.cpp' ? 'compatible' : 'unverified')
 });
 
 module.exports = { adaptadorLlamacpp };
