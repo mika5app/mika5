@@ -156,6 +156,27 @@ Not verified: a real `llama-server` or bitnet.cpp binary. `test/provider-readine
 drives the real manager and adapters against `test/helpers/fake-llama-server.js`, a child
 process that speaks the same protocol including the 503 while loading.
 
+An engine executable is never spawned without the user's approval. `ai:approve-engine`
+shows a native dialog with the real path, size and SHA-256; the approval is stored with
+that identity and `diagnosticar()` recomputes the hash right before spawning, so a
+replaced file or a retargeted link is not executed. A discovered or hand-picked
+executable has no approval until the user gives it.
+
+Each discovered model carries a compatibility verdict for the engine (`compatible`,
+`incompatible`, `unverified`), from the architecture the GGUF declares and, above that,
+from what happened when the engine loaded it. `unverified` means nobody checked — it is
+not "probably fine". Incompatible models are not offered.
+
+## Update notice
+
+`src/main/update-check.js` only informs. It asks the public releases repository for the
+latest stable release, compares `x.y.z` numerically, and accepts a result only if the tag
+is a version and the link points at the official repository. It sends no user data. The
+request happens when the user presses "Check for a new version", or when MIKA5 opens if
+they turned that on (`updates.autoCheck`, off by default). There is no `electron-updater`
+and nothing is downloaded or installed: builds are not signed, so an automatic install
+could not verify the package.
+
 ## Cancellation
 
 `src/main/request-registry.js` keeps one `AbortController` per request id

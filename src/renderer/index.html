@@ -2400,6 +2400,12 @@
                                 <span id="appVersionValue" class="more-actions-row-label">—</span>
                             </div>
 
+                            <button class="btn-icon more-actions-item" type="button" id="btnCheckUpdates" role="menuitem"
+                                    onclick="checkForUpdates(true)" aria-label="Buscar versión nueva">
+                                <span aria-hidden="true">⬆️</span>
+                                <span class="more-actions-item-label" id="btnCheckUpdatesLabel" data-i18n="update.check">Buscar versión nueva</span>
+                            </button>
+
                             <button class="btn-icon more-actions-item" type="button" id="btnQuitApp" role="menuitem"
                                     aria-label="Salir de MIKA5">
                                 <span aria-hidden="true">🚪</span>
@@ -2546,6 +2552,35 @@
     <script src="./app.js"></script>
 
     <!-- Modal API Key -->
+    <div id="updateModal" class="modal" style="display: none;" onclick="if(event.target===this)closeUpdateModal()">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="updateModalTitle" data-i18n="update.title">Versión de MIKA5</h3>
+                <button onclick="closeUpdateModal()" class="btn-icon" aria-label="Cerrar">×</button>
+            </div>
+            <div class="modal-body">
+                <p id="updateStatus" aria-live="polite"></p>
+                <p class="hint"><span data-i18n="update.installed">Instalada:</span> <strong id="updateInstalled">—</strong></p>
+                <p class="hint"><span data-i18n="update.latest">Disponible:</span> <strong id="updateLatest">—</strong></p>
+                <pre id="updateNotes" class="hint" style="white-space:pre-wrap;max-height:220px;overflow:auto;display:none;"></pre>
+                <button id="updateOpenButton" class="btn-primary" type="button" style="display:none;" onclick="openUpdatePage()" data-i18n="update.open">Abrir la página oficial de descarga</button>
+                <p class="hint" data-i18n="update.howto">MIKA5 no instala nada por su cuenta. Descarga el paquete desde la página oficial e instálalo: tus conversaciones, documentos, preferencias y claves se conservan.</p>
+                <label style="display:flex;gap:8px;align-items:center;">
+                    <input type="checkbox" id="updateAutoCheck" onchange="setUpdateAutoCheck(this.checked)" />
+                    <span data-i18n="update.auto">Avisarme al abrir MIKA5 si hay una versión nueva</span>
+                </label>
+                <p class="hint" data-i18n="update.privacy">Para saberlo, MIKA5 consulta la última versión publicada en GitHub. No envía ningún dato tuyo.</p>
+                <hr style="border:none;border-top:1px solid var(--border-subtle);margin:14px 0;">
+                <p class="hint" data-i18n="about.license">MIKA5 Community es software libre bajo la licencia AGPL-3.0. Puedes usarlo, estudiarlo, modificarlo y compartirlo.</p>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <button class="btn-icon" type="button" onclick="openProjectLink('source')" data-i18n="about.source">Código fuente</button>
+                    <button class="btn-icon" type="button" onclick="openProjectLink('issues')" data-i18n="about.issues">Informar de un problema</button>
+                    <button class="btn-icon" type="button" onclick="openProjectLink('license')" data-i18n="about.licenseLink">Licencia</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="engineModal" class="modal" style="display: none;" onclick="if(event.target===this)closeEngineModal()">
         <div class="modal-content">
             <div class="modal-header">

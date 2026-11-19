@@ -94,6 +94,7 @@ contextBridge.exposeInMainWorld("mika5", {
   printToPDF: (payload) => ipcRenderer.invoke("app:printToPDF", payload),
   app: {
     quit: () => ipcRenderer.invoke("app:quit"),
-    getVersion: () => ipcRenderer.invoke("app:getVersion")
+    getVersion: () => ipcRenderer.invoke("app:getVersion"),
+    checkForUpdates: () => ipcRenderer.invoke("app:checkForUpdates")
   }
 });

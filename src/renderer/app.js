@@ -2414,6 +2414,101 @@ async function startLocalEngine() {
   await loadRuntime();
 }
 
+// --- Aviso de versión nueva ---
+// Sólo informa. La consulta sale porque el usuario pulsa «Buscar versión
+// nueva» o porque activó el aviso al abrir; por defecto no sale ninguna.
+const UPDATE_AUTO_KEY = 'updates.autoCheck';
+let updateInfo = null;
+
+function renderUpdateModal(info, buscando = false) {
+  const estado = el('updateStatus');
+  const notas = el('updateNotes');
+  const abrir = el('updateOpenButton');
+  if (el('updateInstalled')) el('updateInstalled').textContent = info?.installed ? `v${info.installed}` : '—';
+  if (el('updateLatest')) el('updateLatest').textContent = info?.ok ? `v${info.latest}` : '—';
+  if (estado) {
+    if (buscando) estado.textContent = t('update.checking');
+    else if (!info?.ok) estado.textContent = t(`update.error.${info?.errorCode || 'UPDATE_SOURCE_UNREACHABLE'}`);
+    else estado.textContent = info.updateAvailable ? t('update.available') : t('update.current');
+  }
+  if (notas) {
+    // Texto plano: las notas vienen de fuera y nunca se interpretan como HTML.
+    notas.textContent = info?.ok && info.updateAvailable ? info.notes : '';
+    notas.style.display = notas.textContent ? '' : 'none';
+  }
+  if (abrir) abrir.style.display = info?.ok && info.updateAvailable ? '' : 'none';
+}
+
+async function checkForUpdates(mostrar) {
+  const modal = el('updateModal');
+  if (mostrar && modal) {
+    modal.style.display = 'flex';
+    renderUpdateModal(updateInfo, true);
+    try {
+      const auto = el('updateAutoCheck');
+      if (auto) auto.checked = (await window.mika5.getAppState(UPDATE_AUTO_KEY)) === '1';
+    } catch (_) {}
+  }
+  try {
+    updateInfo = await window.mika5.app.checkForUpdates();
+  } catch (e) {
+    updateInfo = { ok: false, errorCode: 'UPDATE_SOURCE_UNREACHABLE' };
+  }
+  if (mostrar) {
+    renderUpdateModal(updateInfo);
+  } else if (updateInfo?.ok && updateInfo.updateAvailable) {
+    // Al abrir, con el aviso activado: un aviso pulsable, nunca un diálogo.
+    const aviso = showToast(t('update.toast').replace('{v}', updateInfo.latest), 'info');
+    if (aviso) {
+      aviso.style.cursor = 'pointer';
+      aviso.style.pointerEvents = 'auto';
+      aviso.setAttribute('role', 'button');
+      aviso.addEventListener('click', () => {
+        if (modal) modal.style.display = 'flex';
+        renderUpdateModal(updateInfo);
+      });
+    }
+  }
+  return updateInfo;
+}
+
+// Enlaces del proyecto. Lista cerrada: el renderer no abre una URL arbitraria.
+const PROJECT_LINKS = Object.freeze({
+  source: 'https://github.com/mika5app/mika5-releases/releases',
+  issues: 'https://github.com/mika5app/mika5-releases/issues',
+  license: 'https://github.com/mika5app/mika5-releases/blob/main/LICENSE'
+});
+
+function openProjectLink(cual) {
+  if (PROJECT_LINKS[cual]) window.mika5.openExternal(PROJECT_LINKS[cual]);
+}
+
+function closeUpdateModal() {
+  const modal = el('updateModal');
+  if (modal) modal.style.display = 'none';
+}
+
+function openUpdatePage() {
+  if (updateInfo?.ok && updateInfo.url) window.mika5.openExternal(updateInfo.url);
+}
+
+async function setUpdateAutoCheck(activo) {
+  try {
+    await window.mika5.setAppState(UPDATE_AUTO_KEY, activo ? '1' : '');
+  } catch (_) {}
+}
+
+// Sólo si el usuario lo activó. Sin esa decisión, abrir MIKA5 no hace ninguna
+// petición para buscar versiones.
+async function checkForUpdatesOnStartup() {
+  try {
+    if ((await window.mika5.getAppState(UPDATE_AUTO_KEY)) !== '1') return;
+  } catch (_) {
+    return;
+  }
+  await checkForUpdates(false);
+}
+
 // --- Motor local (llama.cpp, BitNet) ---
 function renderEngineModal(engine) {
   const ejecutable = el('engineExecutablePath');
@@ -6770,6 +6865,8 @@ function wireSessionActions() {
   }
   renderSessionLabels();
   renderInstalledVersion().catch(e => console.warn('renderInstalledVersion:', e));
+  // Sólo consulta si el usuario activó el aviso; por defecto no sale nada.
+  checkForUpdatesOnStartup().catch(e => console.warn('checkForUpdatesOnStartup:', e));
 }
 
 function wire() {

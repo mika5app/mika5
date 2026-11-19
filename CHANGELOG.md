@@ -12,6 +12,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Provider readiness. Every provider now reports the same states (available, needs setup, starting, loading model, ready, unavailable, error) with a suggested action. llama.cpp and BitNet can be started by MIKA5 once the executable and a GGUF model are chosen; Ollama is started with `ollama serve` when it is installed and stopped. Engines started by MIKA5 stop when it quits; servers started by the user are reused and left alone. Nothing is downloaded or installed without confirmation.
 - Local engine discovery. MIKA5 finds `llama-server` and the GGUF models already on the machine, including the ones Ollama downloaded, and lists them in the model selector; picking a model starts the engine. Installing llama.cpp through winget or Homebrew and downloading a model from Hugging Face are offered behind a native confirmation dialog.
 
+- New-version notice. "Check for a new version" compares the installed version with the latest stable release published in the public releases repository and shows the release notes and the official download link. It only informs: nothing is downloaded or installed. Checking when MIKA5 opens is off unless you turn it on, and the request carries none of your data.
+- Links to the source, the issue tracker and the license inside the application, and `THIRD_PARTY_NOTICES.md` with the licenses of the bundled dependencies.
+- An executable for a local engine is only run after you approve it. The approval is tied to the file's real path and SHA-256, so a replaced binary is not executed.
+- Discovered models carry a compatibility verdict per engine (compatible, incompatible, unverified). BitNet no longer lists models from Ollama or other architectures.
+
+### Changed
+- Conversations no longer stop at a message count. The 25-message warning, the save dialog at 30 and the trim at 40 are gone; what is sent to the model is bounded by the context budget, and the full history stays in the database.
+- `CONTRIBUTING.md` now describes how to report issues and send changes while the development repository is not public.
+
+### Fixed
+- The header showed "Ollama (Local)" for llama.cpp and BitNet. It now shows the selected provider, and the Ollama model library is only offered with Ollama.
+- Asking to analyse and change an image no longer makes the model report an internal "describe-only-do-not-edit" restriction. The model receives your message unchanged, and MIKA5 says when the provider can analyse images but not edit them.
+
 ## [0.3.1] - 2026-11-07
 
 ### Changed

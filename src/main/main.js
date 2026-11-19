@@ -420,6 +420,15 @@ ipcMain.handle("app:getVersion", () => ({
   packaged: app.isPackaged
 }));
 
+// Aviso de nueva versión. Es un canal aparte de `app:getVersion` a propósito:
+// la versión instalada se conoce siempre; la disponible sólo existe cuando
+// alguien la ha consultado, y la consulta es una petición saliente que ocurre
+// porque el usuario la pide o porque activó el aviso. Sólo informa: MIKA5 no
+// descarga ni instala actualizaciones.
+ipcMain.handle("app:checkForUpdates", () => require("./update-check").consultarActualizacion({
+  versionInstalada: require("../../package.json").version
+}));
+
 ipcMain.handle("app:saveFile", async (_, { defaultName, filters, content, encoding }) => {
   // Security: limit file size to 50MB
   const MAX_SIZE = 50 * 1024 * 1024;
