@@ -35,9 +35,14 @@ for (const doc of ['README.md', 'COMMUNITY.md', 'CONTRIBUTING.md', 'BUILDING.md'
   assert(fs.existsSync(path.join(raiz, doc)), `${doc} existe`);
 }
 const contribuir = fs.readFileSync(path.join(raiz, 'CONTRIBUTING.md'), 'utf8');
-assert(contribuir.includes('https://github.com/mika5app/mika5-releases/issues'),
+// El repositorio de código es público desde noviembre de 2026: las incidencias
+// del código van ahí, y contribuir es hacer un fork de ESE repositorio. Antes
+// esta prueba exigía lo contrario, porque el fork que se describía era de un
+// repositorio que no existía en público.
+assert(contribuir.includes('https://github.com/mika5app/mika5/issues'),
   'CONTRIBUTING.md dice dónde abrir incidencias');
-assert(!/github\.com\/<your-username>\/MIKA5\.git/.test(contribuir),
-  'CONTRIBUTING.md no describe un fork de un repositorio que no es público');
+assert(/git clone https:\/\/github\.com\/<your-username>\/mika5\.git/.test(contribuir)
+  && !/github\.com\/<your-username>\/MIKA5\.git/.test(contribuir),
+  'CONTRIBUTING.md describe el fork del repositorio público, con su nombre real');
 
 console.log(`Third-party notices tests passed (${produccion.length} dependencias de producción)`);

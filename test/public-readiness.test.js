@@ -139,6 +139,58 @@ console.log('\n=== 4b. Protecciones preparadas para cuando el repositorio sea pu
   check(!/<<|\$\(|`n/.test(ordenes.join('\n')), 'ninguna orden depende de sintaxis que PowerShell no entienda igual que bash');
 }
 
+console.log('\n=== 4c. Credenciales: ni en el arbol ni al alcance de un commit descuidado ===');
+{
+  // Una clave de Buttondown estuvo escrita en el JavaScript de la landing
+  // (abril a junio de 2026) y sigue en la historia y en dos tags. Lo que se
+  // puede garantizar desde aqui es que no vuelva: el formulario usa el punto
+  // de alta publico, que no lleva clave, y nada bajo web/ envia cabeceras de
+  // autorizacion.
+  const web = fs.readdirSync(path.join(ROOT, 'web'), { recursive: true })
+    .filter(f => /\.(html|js)$/.test(String(f))).map(f => path.join('web', String(f)));
+  const conClave = web.filter(f => /BUTTONDOWN_API_KEY|['"]Authorization['"]\s*:|Bearer\s+['"`]|Token\s+['"`]\s*\+/.test(leer(f)));
+  check(web.length >= 4 && conClave.length === 0,
+    `ninguna pagina ni script de la web lleva una clave o una cabecera de autorizacion (${conClave.join(', ') || 'ninguno'})`);
+  const altas = [...leer('web/landing.html').matchAll(/action="(https:\/\/buttondown\.com\/[^"]+)"/g)].map(m => m[1]);
+  check(altas.length === 1 && /^https:\/\/buttondown\.com\/api\/emails\/embed-subscribe\/[a-z0-9-]+$/.test(altas[0]),
+    'el formulario de la lista de espera usa el alta publica de Buttondown, sin clave');
+  // UUID o cadena larga asignada a algo que se llama clave, token o secreto.
+  const sospechosos = [];
+  (function recorrer(dir) {
+    for (const nombre of fs.readdirSync(dir)) {
+      if (['.git', 'node_modules', 'dist', 'vendor', 'package-lock.json'].includes(nombre)) continue;
+      const ruta = path.join(dir, nombre);
+      const st = fs.statSync(ruta);
+      if (st.isDirectory()) { recorrer(ruta); continue; }
+      if (st.size > 2 * 1024 * 1024 || !/\.(js|json|html|yml|yaml|sh|env|txt)$/.test(nombre) || /\.test\.js$/.test(nombre)) continue;
+      const texto = fs.readFileSync(ruta, 'utf8');
+      if (/\b[A-Za-z_]*(API_?KEY|TOKEN|SECRET|PASSWORD)[A-Za-z_]*\s*[:=]\s*['"](?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[A-Za-z0-9_\-]{32,})['"]/i.test(texto)) {
+        sospechosos.push(path.relative(ROOT, ruta));
+      }
+    }
+  })(ROOT);
+  check(sospechosos.length === 0, `ningun fichero asigna un valor literal a una clave, token o secreto (${sospechosos.join(', ') || 'ninguno'})`);
+
+  const ignorados = leer('.gitignore').split('\n').map(l => l.trim());
+  check(ignorados.includes('.env') && ignorados.includes('.env.*') && ignorados.includes('!.env.example')
+    && ignorados.indexOf('!.env.example') > ignorados.indexOf('.env.*'),
+    '.gitignore protege .env y sus variantes, y deja pasar .env.example');
+}
+
+console.log('\n=== 4d. El repositorio es publico y lo dice ===');
+{
+  const contribuir = leer('CONTRIBUTING.md');
+  check(!/not public yet|is not public|private repository/i.test(contribuir)
+    && contribuir.includes('https://github.com/mika5app/mika5') && /pull request against `main`/.test(contribuir),
+    'CONTRIBUTING.md ya no dice que el repositorio es privado: explica fork y pull request');
+  check(/never have access to the project's secrets/.test(contribuir) && /\.env\.example/.test(contribuir),
+    'y avisa de como se tratan los secretos y la configuracion local');
+  check(leer('COMMUNITY.md').includes('https://github.com/mika5app/mika5\n')
+    && /Future paid functionality may be offered separately/.test(leer('COMMUNITY.md'))
+    && /remains licensed under the AGPL-3\.0/.test(leer('COMMUNITY.md')),
+    'COMMUNITY.md enlaza el codigo publico y conserva la descripcion de Community AGPL y lo comercial aparte');
+}
+
 console.log('\n=== 5. Nada personal en lo que se publica ===');
 const ignorar = new Set(['.git', 'node_modules', 'dist', 'vendor', 'package-lock.json']);
 const personales = [];

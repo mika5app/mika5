@@ -39,6 +39,10 @@ license. See `TRADEMARK.md`.
 
 ## Source and releases
 
+The source code is developed in public at
+
+https://github.com/mika5app/mika5
+
 Official Community installers and corresponding source archives are published
 through the public MIKA5 releases repository:
 
