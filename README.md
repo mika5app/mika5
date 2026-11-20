@@ -105,4 +105,4 @@ The existing `deploy-landing.yml` deploys `web/` on updates to `main`. Release d
 
 ## License
 
-MIKA5 Community is licensed under [AGPL-3.0](LICENSE). Distributed releases include corresponding source and build instructions. Trademark rights are separate; see [TRADEMARK.md](TRADEMARK.md). Future Pro/Cloud editions and services are not included in Community.
+MIKA5 Community is licensed under [AGPL-3.0](LICENSE). See also the [privacy policy](PRIVACY.md) and the [code signing policy](CODE_SIGNING_POLICY.md); builds are not code-signed yet. Distributed releases include corresponding source and build instructions. Trademark rights are separate; see [TRADEMARK.md](TRADEMARK.md). Future Pro/Cloud editions and services are not included in Community.

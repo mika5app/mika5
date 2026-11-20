@@ -568,3 +568,9 @@ console.log(`\n${'='.repeat(40)}`);
 require('./canonical-workflow.test');
 console.log(`CI gates tests passed (${passed} comprobaciones)`);
 console.log(`${'='.repeat(40)}`);
+
+// Lo que el repositorio promete en publico (licencia, privacidad, politica de
+// firma, secretos fuera del alcance de los pull requests) se comprueba desde
+// aqui y no con un script propio: tocar package.json dispara el empaquetado de
+// los cuatro productores, y esto no cambia ningun binario.
+require('./public-readiness.test.js');
