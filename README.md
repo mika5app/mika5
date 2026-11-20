@@ -1,15 +1,25 @@
 # MIKA5 — Sovereign AI Desktop Platform
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.3.1-green.svg)](https://github.com/mika5app/mika5-releases/releases/tag/v0.3.1)
+[![Version](https://img.shields.io/badge/version-0.3.2-green.svg)](https://github.com/mika5app/mika5-releases/releases/tag/v0.3.2)
 
-MIKA5 Community 0.3.1 is a desktop application for local and optional cloud AI, with projects, conversations, attachments and a local SQLite knowledge base.
+MIKA5 Community 0.3.2 is a desktop application for local and optional cloud AI, with projects, conversations, attachments and a local SQLite knowledge base.
 
-- [Download Community 0.3.1](https://github.com/mika5app/mika5-releases/releases/tag/v0.3.1)
+- [Download Community 0.3.2](https://github.com/mika5app/mika5-releases/releases/tag/v0.3.2)
 - [Website](https://mika5.xyz/) · [Model guide](https://mika5.xyz/models.html) · [Technical white paper](https://mika5.xyz/whitepaper.html)
 - [Build from source](BUILDING.md) · [Community and license](COMMUNITY.md)
 
-## What's new in 0.3.1
+## What's new in 0.3.2
+
+- BitNet (bitnet.cpp) joins Ollama and llama.cpp as an experimental local runtime.
+- MIKA5 finds `llama-server` and the GGUF models already on the machine, including the ones Ollama downloaded, and starts the engine when you pick a model. An engine executable runs only after you approve it, and nothing is downloaded or installed without confirmation.
+- Every provider reports the same readiness states (needs setup, starting, loading model, ready, error) with a suggested action. A local engine is ready only after one real answer.
+- Long documents: every fragment in scope is searched for the words of the question, instead of sending only the first ones.
+- Conversations no longer stop at a message count; what is sent is bounded by the model's context.
+- "Check for a new version" compares with the latest published release. It only informs; nothing is downloaded or installed.
+- Fixed: ordinary messages blocked in conversations with an image, attached documents dropped by "analyse…", and a wrong provider name and model library for llama.cpp and BitNet.
+
+## What 0.3.1 introduced
 
 - Stable provider registry and adapters, clearer availability and model selection, and request cancellation.
 - Consent bound to the selected provider, model, request and outgoing data. Ollama supports both local and cloud models, with cloud privacy notices and consent.

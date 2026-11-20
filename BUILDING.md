@@ -19,9 +19,9 @@ Public users should download the corresponding source archive from:
 
 https://github.com/mika5app/mika5-releases/releases
 
-For version 0.3.1, use:
+For version 0.3.2, use:
 
-`MIKA5-0.3.1-source.tar.gz`
+`MIKA5-0.3.2-source.tar.gz`
 
 Maintainers with repository access may instead clone the development repository
 and check out the exact release tag:
@@ -29,7 +29,7 @@ and check out the exact release tag:
 ```bash
 git clone https://github.com/mika5app/mika5.git
 cd mika5
-git checkout v0.3.1
+git checkout v0.3.2
 ```
 
 ## Install dependencies
@@ -68,8 +68,8 @@ npm run build:win -- --publish never
 Expected outputs:
 
 ```text
-dist/MIKA5-Setup-0.3.1-win-x64.exe
-dist/MIKA5-Portable-0.3.1-win-x64.exe
+dist/MIKA5-Setup-0.3.2-win-x64.exe
+dist/MIKA5-Portable-0.3.2-win-x64.exe
 ```
 
 ## Build macOS
@@ -143,7 +143,7 @@ review and platform validation.
 ## Windows installation and upgrade QA
 
 The Windows producer runs `scripts/ci/verify-windows-installation.js` against the
-published 0.3.0 installer and the newly built 0.3.1 installer. The baseline is
+published 0.3.0 installer and the newly built installer. The baseline is
 pinned by SHA-256. Tests cover real installation, normal startup/shutdown,
 registration, upgrade, restart, SQLite integrity and preservation of synthetic
 AppData records and knowledge files. Results are saved as the separate
