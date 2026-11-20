@@ -1050,6 +1050,40 @@ const sinEstado = puntosRoadmap.filter(k => !ESTADOS_EN.test(wp.en.get(k) || '')
 check(sinEstado.length === 0, `todo punto del roadmap lleva estado (${sinEstado.join(', ') || 'ninguno sin etiqueta'})`);
 check(puntosRoadmap.length >= 19, `el roadmap clasifica ${puntosRoadmap.length} elementos`);
 
+// --- Tailwind compilado, no el Play CDN ---
+// El CDN descargaba un compilador y construia los estilos en el navegador de
+// cada visitante: unos segundos de primer contenido en movil. web/tailwind.css
+// es la misma version con el mismo tema, y tiene que estar al dia con las
+// paginas, o una clase nueva saldria sin estilo en produccion.
+console.log('\n=== Tailwind compilado ===');
+{
+  const { execFileSync } = require('child_process');
+  const os = require('os');
+  const paquete = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  check(paquete.devDependencies.tailwindcss === '3.4.17',
+    `tailwindcss fijado a la version exacta que servia el CDN (${paquete.devDependencies.tailwindcss})`);
+  for (const pagina of [...PAGINAS_AUDITADAS, 'es/index.html', 'es/models.html', 'es/whitepaper.html']) {
+    const html = leer(pagina);
+    const cabeza = html.slice(0, html.indexOf('</head>'));
+    check(!/cdn\.tailwindcss\.com/.test(html), `${pagina}: no carga el Play CDN de Tailwind`);
+    // Despues de los estilos propios, donde el CDN insertaba los suyos: mismo orden de cascada.
+    check(/<\/style>\s*(?:<!--[\s\S]*?-->\s*)?<link rel="stylesheet" href="\/tailwind\.css">\s*$/.test(cabeza),
+      `${pagina}: enlaza /tailwind.css despues de sus estilos propios`);
+  }
+  const cli = path.join(ROOT, 'node_modules', 'tailwindcss', 'lib', 'cli.js');
+  check(fs.existsSync(cli), 'tailwindcss esta instalado (npm ci instala las devDependencies)');
+  const temporal = fs.mkdtempSync(path.join(os.tmpdir(), 'mika5-tailwind-'));
+  try {
+    const salida = path.join(temporal, 'tailwind.css');
+    execFileSync(process.execPath, [cli, '-c', 'tailwind.web.config.js', '-o', salida, '--minify'], { cwd: ROOT, stdio: 'pipe' });
+    const enRepo = fs.readFileSync(path.join(WEB, 'tailwind.css'), 'utf8').replace(/\r\n?/g, '\n');
+    check(fs.readFileSync(salida, 'utf8') === enRepo,
+      'web/tailwind.css esta al dia con las paginas (npm run build:web-css)');
+  } finally {
+    fs.rmSync(temporal, { recursive: true, force: true });
+  }
+}
+
 console.log(`\n${'='.repeat(46)}`);
 console.log(`Website i18n tests passed (${passed} comprobaciones)`);
 console.log(`${'='.repeat(46)}`);
