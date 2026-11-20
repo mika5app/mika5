@@ -219,12 +219,28 @@ jobs:
           [[ ${#DEBS[@]} == 1 && ${#APPS[@]} == 1 ]]
           TEMP="$(mktemp -d "$RUNNER_TEMP/mika5-linux.XXXXXX")"
           PID=''
+          # `wait` only waits for the group leader. Electron's helpers (zygote,
+          # GPU, crashpad) keep writing to the profile while they shut down, and
+          # crashpad may leave the group, so `rm -rf` raced them and failed with
+          # "Directory not empty" after every check had passed. Each of them
+          # carries the profile path on its command line: stop those, wait until
+          # none is left, then remove the directory. It still fails if it cannot.
           cleanup() {
             if [[ -n "$PID" ]]; then
               kill -- "-$PID" 2>/dev/null || :
               wait "$PID" 2>/dev/null || :
             fi
-            rm -rf -- "$TEMP"
+            pkill -TERM -f -- "$TEMP" 2>/dev/null || :
+            for ((j=0; j<20; j++)); do
+              pgrep -f -- "$TEMP" >/dev/null || break
+              sleep 0.5
+            done
+            pkill -KILL -f -- "$TEMP" 2>/dev/null || :
+            for ((j=0; j<10; j++)); do
+              rm -rf -- "$TEMP" 2>/dev/null && break
+              sleep 1
+            done
+            [[ ! -e "$TEMP" ]]
           }
           trap cleanup EXIT
           dpkg-deb -x "${DEBS[0]}" "$TEMP/deb"
