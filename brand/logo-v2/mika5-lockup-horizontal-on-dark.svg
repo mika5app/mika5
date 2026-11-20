@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 749.63 256" fill="none" role="img">
+  <title>MIKA5 lockup (white wordmark)</title>
+  <desc>MIKA5 symbol and white wordmark, for use on dark backgrounds.</desc>
+  <g fill="none" stroke="#7C3AED" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="40" y="50" width="176" height="130" rx="20"/>
+    <path d="M66 150 V80 L108 132 L150 80 C150 110 166 126 186 116"/>
+  </g>
+  <circle cx="186" cy="116" r="11.5" fill="#22D3EE"/>
+  <path fill="#7C3AED" fill-rule="evenodd" d="M29 191h198a9 9 0 0 1 9 9v6a9 9 0 0 1-9 9H29a9 9 0 0 1-9-9v-6a9 9 0 0 1 9-9zm79 8h40a3.5 3.5 0 0 1 0 7h-40a3.5 3.5 0 0 1 0-7z"/>
+<g fill="#FFFFFF" transform="translate(268.000 183.000) scale(0.154286 -0.154286)">
+  <path transform="translate(0 0)" d="M66 0V700H311L432 90H450L571 700H816V0H688V603H670L550 0H332L212 603H194V0Z"/>
+  <path transform="translate(900 0)" d="M66 0V700H198V0Z"/>
+  <path transform="translate(1172 0)" d="M66 0V700H198V422H216L443 700H612L320 355L622 0H448L216 284H198V0Z"/>
+  <path transform="translate(1776 0)" d="M18 0 202 700H432L616 0H480L442 154H192L154 0ZM223 276H411L326 617H308Z"/>
+  <path transform="translate(2418 0)" d="M303 -14Q221 -14 161.5 15.0Q102 44 70.0 97.0Q38 150 38 220V230H168V221Q168 171 201.5 135.5Q235 100 301 100Q367 100 402.5 135.5Q438 171 438 228V238Q438 294 402.5 327.0Q367 360 314 360Q271 360 248.5 343.0Q226 326 215 308H60V700H538V584H188V413H206Q220 432 252.5 449.0Q285 466 341 466Q403 466 454.0 440.0Q505 414 535.5 363.5Q566 313 566 239V227Q566 116 496.0 51.0Q426 -14 303 -14Z"/>
+</g>
+</svg>
