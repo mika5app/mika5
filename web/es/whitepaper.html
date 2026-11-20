@@ -38,36 +38,50 @@
 
     <!-- Structured Data -->
     <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
     {
-      "@context": "https://schema.org",
-      "@graph": [
+      "@type": "TechArticle",
+      "headline": "MIKA5: arquitectura de IA local-first",
+      "description": "White paper técnico de MIKA5 Community v0.3.1: arquitectura Electron, almacenamiento SQLite local, motor RAG local, adaptadores cloud opcionales con consentimiento explícito, diseño de seguridad y distribución AGPL-3.0.",
+      "url": "https://mika5.xyz/es/whitepaper.html",
+      "author": {
+        "@id": "https://mika5.xyz/#org"
+      },
+      "publisher": {
+        "@id": "https://mika5.xyz/#org"
+      },
+      "inLanguage": "es",
+      "mainEntityOfPage": "https://mika5.xyz/es/whitepaper.html",
+      "about": [
+        "Local-first AI",
+        "Local AI models",
+        "RAG engine",
+        "Privacy-first architecture",
+        "Ollama",
+        "SQLite"
+      ]
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
         {
-          "@type": "TechArticle",
-          "headline": "MIKA5: local-first AI architecture",
-          "description": "Technical white paper for MIKA5 Community v0.3.1: Electron architecture, local SQLite storage, local RAG engine, optional cloud adapters with explicit consent, security design and AGPL-3.0 distribution.",
-          "url": "https://mika5.xyz/whitepaper.html",
-          "author": { "@id": "https://mika5.xyz/#org" },
-          "publisher": { "@id": "https://mika5.xyz/#org" },
-          "inLanguage": "en",
-          "mainEntityOfPage": "https://mika5.xyz/whitepaper.html",
-          "about": [
-            "Local-first AI",
-            "Local AI models",
-            "RAG engine",
-            "Privacy-first architecture",
-            "Ollama",
-            "SQLite"
-          ]
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Inicio",
+          "item": "https://mika5.xyz/es/"
         },
         {
-          "@type": "BreadcrumbList",
-          "itemListElement": [
-            { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://mika5.xyz/" },
-            { "@type": "ListItem", "position": 2, "name": "White Paper", "item": "https://mika5.xyz/whitepaper.html" }
-          ]
+          "@type": "ListItem",
+          "position": 2,
+          "name": "White Paper",
+          "item": "https://mika5.xyz/es/whitepaper.html"
         }
       ]
     }
+  ]
+}
     </script>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1114,6 +1128,5 @@ document.addEventListener('DOMContentLoaded', function() {
   if (idioma) idioma.addEventListener('click', toggleLang);
 });
 </script>
-<script src="../chat-widget.js" defer></script>
 </body>
 </html>

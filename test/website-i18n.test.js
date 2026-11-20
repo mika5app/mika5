@@ -654,6 +654,89 @@ for (const pagina of ['landing.html', 'es/index.html']) {
 check(fs.existsSync(path.join(ROOT, 'CODE_SIGNING_POLICY.md')) && fs.existsSync(path.join(ROOT, 'PRIVACY.md')),
   'los dos documentos enlazados existen en la raiz del repositorio');
 
+// --- Auditoria SEO/AEO: lo que leen buscadores y motores de respuesta ---
+// Un rastreador no ejecuta el conmutador de idioma: lee el HTML tal cual.
+console.log('\n=== Metadatos y datos estructurados que lee un rastreador ===');
+{
+  const ldDe = (html) => JSON.parse(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/.exec(html)[1]);
+  const nodo = (ld, tipo) => (ld['@graph'] || [ld]).find(n => n['@type'] === tipo);
+  const atributo = (html, patron) => (patron.exec(html) || [])[1];
+
+  // La cabecera inglesa dice lo mismo que el diccionario inglés; antes decía
+  // "No cloud" y "runs 100% on your computer" con proveedores cloud opcionales.
+  for (const [campo, patron] of [
+    ['description', /<meta name="description" content="([^"]*)">/],
+    ['ogDescription', /<meta property="og:description" content="([^"]*)">/],
+    ['twitterDescription', /<meta name="twitter:description" content="([^"]*)">/]
+  ]) {
+    check(atributo(landing, patron) === en.get(`landing.meta.${campo}`),
+      `landing.html: ${campo} estatico igual al del diccionario ingles`);
+  }
+  const cabecera = landing.slice(0, landing.indexOf('</head>'));
+  check(!/no cloud|100% on your computer|runs entirely on your machine/i.test(cabecera),
+    'la cabecera de la landing no niega los proveedores cloud opcionales');
+
+  const ld = ldDe(landing);
+  const app = nodo(ld, 'SoftwareApplication');
+  check(app.name === 'MIKA5 Community' && app.description === en.get('landing.meta.description'),
+    'SoftwareApplication se llama MIKA5 Community y describe lo mismo que la meta');
+  check(nodo(ld, 'Organization').sameAs.includes('https://github.com/mika5app/mika5'),
+    'Organization enlaza el repositorio del codigo en sameAs');
+  check(!nodo(ld, 'BreadcrumbList'), 'la portada no declara migas: no tiene padre');
+
+  // FAQ visible y FAQ de los datos estructurados: las mismas preguntas.
+  const visibles = [...landing.matchAll(/data-i18n="faq\.(q\d+)">([^<]*)</g)];
+  const faq = nodo(ld, 'FAQPage').mainEntity;
+  check(visibles.length === 7 && faq.length === 7
+    && faq.every((p, i) => p.name === en.get(`faq.${visibles[i][1]}`)),
+    `el FAQ visible y el de schema tienen las mismas 7 preguntas (${visibles.length}/${faq.length})`);
+  for (const clave of ['faq.q6', 'faq.a6', 'faq.q7', 'faq.a7']) {
+    check(en.has(clave) && es.has(clave) && en.get(clave) !== es.get(clave), `${clave} presente y traducida`);
+  }
+  check(/SmartScreen/.test(en.get('faq.a6')) && /Open Anyway/.test(en.get('faq.a6')),
+    'faq.a6 explica el aviso de Windows y el de macOS');
+
+  // /es/: el schema generado esta en espanol y apunta a las paginas en espanol.
+  for (const [pagina, prefijo] of [['es/index.html', 'landing'], ['es/models.html', 'models'], ['es/whitepaper.html', 'whitepaper']]) {
+    const html = leer(pagina);
+    const datos = ldDe(html);
+    const json = JSON.stringify(datos);
+    check(!/"inLanguage":"en"/.test(json), `${pagina}: ningun nodo declara inLanguage "en"`);
+    const migas = nodo(datos, 'BreadcrumbList');
+    if (migas) {
+      check(migas.itemListElement.every(m => m.item.startsWith('https://mika5.xyz/es/'))
+        && migas.itemListElement[0].name === 'Inicio',
+        `${pagina}: las migas estan en espanol y apuntan a /es/`);
+    }
+    const articulo = nodo(datos, 'Article') || nodo(datos, 'TechArticle');
+    if (articulo) {
+      check(articulo.inLanguage === 'es' && articulo.url.startsWith('https://mika5.xyz/es/'),
+        `${pagina}: el articulo declara es y su URL en espanol`);
+    }
+    const appEs = nodo(datos, 'SoftwareApplication');
+    if (appEs) {
+      check(appEs.description === es.get(`${prefijo}.meta.description`), `${pagina}: SoftwareApplication descrita en espanol`);
+    }
+  }
+
+  // Contraste AA del texto sobre el fondo de la pagina (#0B0F14). El violeta
+  // de marca #7C3AED da 3,37:1: vale para el logo, no para texto.
+  const luminancia = (hex) => {
+    const c = hex.replace('#', '').match(/../g).map(x => parseInt(x, 16) / 255)
+      .map(v => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  };
+  const contraste = (a, b) => {
+    const [x, y] = [luminancia(a), luminancia(b)].sort((m, n) => n - m);
+    return (x + 0.05) / (y + 0.05);
+  };
+  for (const pagina of PAGINAS_AUDITADAS) {
+    const colores = [...new Set([...leer(pagina).matchAll(/\btext-\[(#[0-9A-Fa-f]{6})\]/g)].map(m => m[1]))];
+    const bajos = colores.filter(c => contraste(c, '#0B0F14') < 4.5);
+    check(bajos.length === 0, `${pagina}: todo color de texto llega a 4,5:1 sobre el fondo (${bajos.join(', ') || 'ninguno bajo'})`);
+  }
+}
+
 // llms.txt: lo que enlaza del propio sitio son las URLs del sitemap, ni una mas.
 const llms = fs.readFileSync(path.join(WEB, 'llms.txt'), 'utf8');
 const enlacesPropios = [...llms.matchAll(/\]\((https:\/\/mika5\.xyz\/[^)]*)\)/g)].map(m => m[1]);
@@ -663,30 +746,6 @@ const versionDeLaLanding = /"softwareVersion": "([\d.]+)"/.exec(leer('landing.ht
 check(llms.includes(`MIKA5 Community ${versionDeLaLanding}`) && llms.includes(`/releases/tag/v${versionDeLaLanding}`),
   `llms.txt anuncia la misma version que la landing (${versionDeLaLanding})`);
 
-// El asistente de la landing: lo que escribe el visitante no pasa por el
-// analizador de HTML, y Enter no envia mientras se compone un caracter.
-{
-  const widget = leer('chat-widget.js');
-  const linkify = new Function('document', `${/function linkify\(text\) \{[\s\S]*?\n  \}/.exec(widget)[0]}; return linkify;`);
-  const nodo = (tipo, extra) => ({ tipo, hijos: [], appendChild(h) { this.hijos.push(h); return h; }, ...extra });
-  const doc = {
-    createDocumentFragment: () => nodo('fragmento'),
-    createTextNode: (texto) => nodo('texto', { texto }),
-    createElement: (etiqueta) => nodo(etiqueta)
-  };
-  const partes = linkify(doc)('mira <img src=x onerror=alert(1)> en https://mika5.xyz/a"b y ya').hijos;
-  check(partes.length === 3 && partes[0].tipo === 'texto' && partes[0].texto === 'mira <img src=x onerror=alert(1)> en '
-    && partes[1].tipo === 'a' && partes[1].textContent === 'https://mika5.xyz/a"b' && partes[1].rel === 'noopener'
-    && partes[2].texto === ' y ya',
-    'el asistente pinta el texto escrito como texto y los enlaces como nodos, nunca como HTML');
-  check(!/innerHTML = linkify/.test(widget) && /div\.appendChild\(linkify\(text\)\)/.test(widget),
-    'y ningun mensaje se inserta con innerHTML');
-  check(/e\.preventDefault\(\);\s*\/\/[^\n]*\n\s*if \(e\.isComposing \|\| e\.keyCode === 229\) return;\s*handleSend\(\);/.test(widget),
-    'Enter que confirma una composicion (chino, japones, coreano) no envia el mensaje');
-  check(/@media\(prefers-reduced-motion:no-preference\)\{[^']*mika5-bounce/.test(widget)
-    && !/background:#6B7280;animation:/.test(widget),
-    'las animaciones del asistente solo corren si el sistema no pide reducir el movimiento');
-}
 {
   const landing = leer('landing.html');
   check(!/class="scroll-smooth"/.test(landing)
@@ -1005,12 +1064,12 @@ check(/x86-64/.test(en.get('dl.linux.warning')) && /no ARM build/i.test(en.get('
   'el aviso de Linux acota la arquitectura publicada');
 
 // --- Enlaces de release ---
-const RELEASE = 'https://github.com/mika5app/mika5-releases/releases/download/v0.3.1';
+const RELEASE = 'https://github.com/mika5app/mika5-releases/releases/download/v0.3.2';
 const ENLAZADOS = [
-  'MIKA5-Setup-0.3.1-win-x64.exe', 'MIKA5-Portable-0.3.1-win-x64.exe',
-  'MIKA5-0.3.1-mac-arm64.dmg', 'MIKA5-0.3.1-mac-x64.dmg',
-  'MIKA5-0.3.1-linux-x86_64.AppImage', 'MIKA5-0.3.1-linux-amd64.deb',
-  'MIKA5-0.3.1-linux-x86_64.rpm', 'MIKA5-0.3.1-source.tar.gz',
+  'MIKA5-Setup-0.3.2-win-x64.exe', 'MIKA5-Portable-0.3.2-win-x64.exe',
+  'MIKA5-0.3.2-mac-arm64.dmg', 'MIKA5-0.3.2-mac-x64.dmg',
+  'MIKA5-0.3.2-linux-x86_64.AppImage', 'MIKA5-0.3.2-linux-amd64.deb',
+  'MIKA5-0.3.2-linux-x86_64.rpm', 'MIKA5-0.3.2-source.tar.gz',
   'SHA256SUMS.txt', 'BUILDING.md', 'COMMUNITY.md', 'BUILD-METADATA.json', 'LICENSE'
 ];
 for (const asset of ENLAZADOS) {
@@ -1018,7 +1077,7 @@ for (const asset of ENLAZADOS) {
 }
 check(ENLAZADOS.length === 13, `se enlazan 13 assets de los 15 publicados (${ENLAZADOS.length})`);
 // Los dos ZIP de macOS se dejan publicados pero sin enlace, de forma deliberada.
-for (const zip of ['MIKA5-0.3.1-mac-arm64.zip', 'MIKA5-0.3.1-mac-x64.zip']) {
+for (const zip of ['MIKA5-0.3.2-mac-arm64.zip', 'MIKA5-0.3.2-mac-x64.zip']) {
   check(!landing.includes(zip), `${zip} deliberadamente sin enlace directo`);
 }
 check(/15 assets/.test(en.get('dl.extras.note')) && /15 assets/.test(es.get('dl.extras.note')),
