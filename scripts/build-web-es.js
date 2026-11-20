@@ -153,7 +153,7 @@ function construir(pagina, htmlFuente) {
   // La página vive un nivel más abajo: los recursos compartidos se piden al
   // padre, y «inicio» es la portada en español.
   const subir = (texto) => texto
-    .replace(/\b(href|src)="(icon-64\.png|icon-180\.png|chat-widget\.js)"/g, '$1="../$2"')
+    .replace(/\b(href|src)="(icon-64\.png|icon-180\.png)"/g, '$1="../$2"')
     .replace(/\bhref="\/"/g, 'href="/es/"');
   return subir(cuerpo) + diccionario + subir(resto);
 }
