@@ -9,20 +9,32 @@ Thank you for your interest in contributing to MIKA5! Every contribution -- whet
 - At least one Ollama chat model installed (e.g., `llama`, `qwen`)
 - An embedding model installed (recommended: `nomic-embed-text`)
 
+## Where things live
+
+- **Issues, bug reports and ideas:** https://github.com/mika5app/mika5-releases/issues
+- **Releases, installers, checksums and the source of every release:**
+  https://github.com/mika5app/mika5-releases/releases
+- **License:** AGPL-3.0, see `LICENSE`. Third-party notices are in
+  `THIRD_PARTY_NOTICES.md`.
+
+The development repository is not public yet. Until a public source repository
+or mirror exists, the source you can build and modify is the
+`MIKA5-<version>-source.tar.gz` archive attached to each release, and code
+contributions are sent as patches (see "Sending a change" below).
+
 ## Getting Started
 
 ```bash
-# 1. Fork the repository on GitHub
+# 1. Download MIKA5-<version>-source.tar.gz from the release page and unpack it
+tar -xzf MIKA5-<version>-source.tar.gz
+cd MIKA5-<version>
 
-# 2. Clone your fork
-git clone https://github.com/<your-username>/MIKA5.git
-cd MIKA5
-
-# 3. Install dependencies (also rebuilds native modules for Electron)
+# 2. Install dependencies with the pinned Node (see .nvmrc and BUILDING.md)
 npm install
 
-# 4. Start the app in development mode
+# 3. Run the application and the tests
 npm run dev
+npm test
 ```
 
 ## Branch Naming
@@ -44,9 +56,20 @@ docs: update README setup instructions
 test: add RAG cosine similarity edge cases
 ```
 
-## Pull Request Process
+## Sending a change
 
-1. Describe what your PR changes and why.
+1. Open an issue at https://github.com/mika5app/mika5-releases/issues describing
+   the problem or the proposal, so the change can be discussed first.
+2. Make the change on top of the source archive of the latest release.
+3. Attach the change to the issue as a patch (`git diff` or `git format-patch`
+   output), with the DCO sign-off described below.
+
+When a public source repository is available, changes will be accepted as pull
+requests there and this section will be updated.
+
+## Review
+
+1. Describe what your change does and why.
 2. Reference any related issues (e.g., `Closes #42`).
 3. Make sure tests pass: `npm test`.
 4. Keep PRs focused -- one logical change per PR.

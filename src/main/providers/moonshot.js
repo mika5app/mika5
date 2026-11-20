@@ -9,12 +9,17 @@
 const {
   assertVisionSupported, attachOpenAIImages, normalizeChatResult
 } = require('../provider-capabilities');
-const { probeNoIntentada } = require('../provider-errors');
+const {
+  errorDeRespuesta, probeDeError, probeDeExito, probeDeRespuestaInvalida, probeNoIntentada
+} = require('../provider-errors');
 const { createAbortContext, sanitizeForCloud } = require('../provider-runtime');
 
 // MOONSHOT / Kimi (Cloud)
 const adaptadorMoonshot = {
   name: 'Moonshot AI (Kimi 2.5)',
+  // Catálogo oficial de este proveedor, para que el usuario explore modelos.
+  // Cada proveedor tiene el suyo: ninguno hereda el de otro.
+  libraryUrl: 'https://platform.kimi.ai/docs/models',
   privacy: 'cloud',
   requiresKey: true,
   baseUrl: 'https://api.moonshot.cn/v1',
@@ -78,17 +83,43 @@ const adaptadorMoonshot = {
     }
   },
 
-  async listModels(apiKey) {
-    if (!apiKey) return { models: [] };
+  // El catálogo se pregunta al proveedor: `GET /models`, con la clave del
+  // usuario y contra la MISMA dirección que usa el chat. Antes era una lista
+  // escrita aquí, que ni reflejaba lo que la cuenta puede usar ni se enteraba
+  // de un modelo nuevo. Consultar el catálogo no es una inferencia y no
+  // factura. La clave no se envía a ninguna otra dirección.
+  async listModels(apiKey, _config, options = {}) {
+    if (!apiKey) return { models: [], probe: probeNoIntentada() };
+    const abortContext = createAbortContext(options.signal, 30000, 'Moonshot');
+    let res;
+    try {
+      res = await fetch(`${this.baseUrl}/models`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal: abortContext.signal
+      });
+    } catch (error) {
+      return { models: [], probe: probeDeError(abortContext.normalize(error)) };
+    } finally {
+      abortContext.cleanup();
+    }
+    if (!res.ok) {
+      return { models: [], probe: probeDeError(errorDeRespuesta(res.status, 'Moonshot no devolvió el catálogo')) };
+    }
+    let data;
+    try {
+      data = await res.json();
+    } catch (_) {
+      return { models: [], probe: probeDeRespuestaInvalida({ httpStatus: res.status, authenticated: true }) };
+    }
+    if (!data || !Array.isArray(data.data)) {
+      return { models: [], probe: probeDeRespuestaInvalida({ httpStatus: res.status, authenticated: true }) };
+    }
     return {
-      models: [
-        { name: 'moonshot-v1-128k', size: 0, description: 'Moonshot 128k — contexto ultra largo' },
-        { name: 'moonshot-v1-32k', size: 0, description: 'Moonshot 32k — uso general' },
-        { name: 'moonshot-v1-8k', size: 0, description: 'Moonshot 8k — rápido y económico' },
-        { name: 'kimi-k2', size: 0, description: 'Kimi K2 — razonamiento avanzado (256k ctx)' }
-      ],
-      // Catálogo declarado: sin intento de red, sin evidencia.
-      probe: probeNoIntentada()
+      // El catálogo no informa de capacidades: no se inventa ninguna.
+      models: data.data
+        .filter(m => m && typeof m.id === 'string')
+        .map(m => ({ name: m.id, size: 0, digest: m.id })),
+      probe: probeDeExito({ httpStatus: res.status, authenticated: true })
     };
   }
 };

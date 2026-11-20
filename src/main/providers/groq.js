@@ -17,6 +17,9 @@ const { createAbortContext, sanitizeForCloud } = require('../provider-runtime');
 // GROQ - Cloud (Llama / Mistral family — ultrarrápido)
 const adaptadorGroq = {
   name: 'Groq (Cloud — Llama/Mistral)',
+  // Catálogo oficial de este proveedor, para que el usuario explore modelos.
+  // Cada proveedor tiene el suyo: ninguno hereda el de otro.
+  libraryUrl: 'https://console.groq.com/docs/models',
   privacy: 'cloud',
   requiresKey: true,
   baseUrl: 'https://api.groq.com/openai/v1',

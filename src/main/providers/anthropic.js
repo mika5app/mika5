@@ -9,12 +9,17 @@
 const {
   assertVisionSupported, buildAnthropicImageBlocks, normalizeChatResult, resolveVisionSupport
 } = require('../provider-capabilities');
-const { probeNoIntentada } = require('../provider-errors');
+const {
+  errorDeRespuesta, probeDeError, probeDeExito, probeDeRespuestaInvalida, probeNoIntentada
+} = require('../provider-errors');
 const { createAbortContext, sanitizeForCloud } = require('../provider-runtime');
 
 // ANTHROPIC - Cloud (No privado)
 const adaptadorAnthropic = {
   name: 'Anthropic Claude (Cloud)',
+  // Catálogo oficial de este proveedor, para que el usuario explore modelos.
+  // Cada proveedor tiene el suyo: ninguno hereda el de otro.
+  libraryUrl: 'https://platform.claude.com/docs/en/models/overview',
   privacy: 'cloud',
   requiresKey: true,
   baseUrl: 'https://api.anthropic.com/v1',
@@ -22,7 +27,7 @@ const adaptadorAnthropic = {
 
   async chat({ model, messages, images = [], apiKey, sanitize = true, signal }) {
     if (!apiKey) throw new Error('API Key requerida para Anthropic');
-    const selectedModel = model || 'claude-3-5-haiku-20241022';
+    const selectedModel = model || 'claude-opus-5-5';
     assertVisionSupported({
       providerId: 'anthropic',
       modelId: selectedModel,
@@ -117,25 +122,57 @@ const adaptadorAnthropic = {
     }
   },
 
-  async listModels(apiKey) {
-    if (!apiKey) return { models: [] };
-    // Anthropic no tiene endpoint público de modelos — lista actualizada 2025/2026
-    const catalog = [
-      { name: 'claude-opus-4-5', size: 0, description: 'Claude Opus 4.5 — máxima capacidad' },
-      { name: 'claude-sonnet-4-5-20251001', size: 0, description: 'Claude Sonnet 4.5 — rápido y capaz' },
-      { name: 'claude-3-5-sonnet-20241022', size: 0, description: 'Claude 3.5 Sonnet — equilibrio ideal' },
-      { name: 'claude-3-5-haiku-20241022', size: 0, description: 'Claude 3.5 Haiku — ultra-rápido' },
-      { name: 'claude-3-opus-20240229', size: 0, description: 'Claude 3 Opus — razonamiento profundo' },
-      { name: 'claude-3-haiku-20240307', size: 0, description: 'Claude 3 Haiku — económico y veloz' }
-    ];
+  // El catálogo se pregunta a la Models API (`GET /v1/models`), con la clave
+  // del usuario. Antes era una lista escrita aquí: ofrecía identificadores ya
+  // retirados y no los modelos actuales. Consultar el catálogo no es una
+  // inferencia y no factura. Se pagina con `after_id` mientras haya más.
+  async listModels(apiKey, _config, options = {}) {
+    if (!apiKey) return { models: [], probe: probeNoIntentada() };
+    const abortContext = createAbortContext(options.signal, 30000, 'Claude');
+    const encontrados = [];
+    let httpStatus = 200;
+    try {
+      let despuesDe = null;
+      // Techo de páginas: una respuesta mal formada no puede dejar un bucle.
+      for (let pagina = 0; pagina < 10; pagina += 1) {
+        const url = `${this.baseUrl}/models?limit=100${despuesDe ? `&after_id=${encodeURIComponent(despuesDe)}` : ''}`;
+        const res = await fetch(url, {
+          headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+          signal: abortContext.signal
+        });
+        httpStatus = res.status;
+        if (!res.ok) {
+          return { models: [], probe: probeDeError(errorDeRespuesta(res.status, 'Anthropic no devolvió el catálogo')) };
+        }
+        let data;
+        try {
+          data = await res.json();
+        } catch (_) {
+          return { models: [], probe: probeDeRespuestaInvalida({ httpStatus, authenticated: true }) };
+        }
+        if (!data || !Array.isArray(data.data)) {
+          return { models: [], probe: probeDeRespuestaInvalida({ httpStatus, authenticated: true }) };
+        }
+        encontrados.push(...data.data.filter(m => m && typeof m.id === 'string'));
+        if (data.has_more !== true || typeof data.last_id !== 'string' || !data.last_id) break;
+        despuesDe = data.last_id;
+      }
+    } catch (error) {
+      return { models: [], probe: probeDeError(abortContext.normalize(error)) };
+    } finally {
+      abortContext.cleanup();
+    }
     return {
-      models: catalog.map(model => ({
-        ...model,
-        supportsVision: resolveVisionSupport({ providerId: 'anthropic', modelId: model.name }).supported
+      models: encontrados.map(m => ({
+        name: m.id,
+        size: 0,
+        digest: m.id,
+        description: typeof m.display_name === 'string' ? m.display_name : '',
+        // Misma regla que aplica el chat al adjuntar una imagen: el selector
+        // no promete visión que luego el envío rechace.
+        supportsVision: resolveVisionSupport({ providerId: 'anthropic', modelId: m.id }).supported
       })),
-      // Catálogo declarado en el propio adaptador: no se ha hablado con
-      // ningún servidor, así que no hay evidencia que aportar.
-      probe: probeNoIntentada()
+      probe: probeDeExito({ httpStatus, authenticated: true })
     };
   }
 };

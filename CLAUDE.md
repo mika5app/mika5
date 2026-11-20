@@ -108,6 +108,172 @@ and BitNet never answer each other's probes.
 `assertVisionSupported()` fails closed and returns a specific reason, so the UI can say
 why an image was refused instead of failing generically.
 
+## Provider readiness and local engines
+
+`getReadiness()` in `ai-providers.js` is a view over `getAvailability()`, not a second
+model: the eight `UI_STATE` values still say what happened, and `readiness`
+(`available`, `needs-setup`, `starting`, `loading-model`, `ready`, `unavailable`,
+`error`) plus `action` say where the user stands and what they can do. It is the same
+for a local engine and a remote API.
+
+Local adapters declare their own `engine`; there is no second provider registry.
+`src/main/local-engines.js` only locates an executable, starts it and stops what it
+started:
+
+- the executable name comes from a closed list (`ollama`, `llama-server`); a path the
+  user picks is accepted only if its file name is on that list
+- `spawn` with separate arguments and `shell: false`, loopback only
+- nothing is started if something already listens on the port, so a server the user
+  launched by hand is reused and never duplicated
+- only processes MIKA5 started are stopped, on `will-quit`; switching provider does not
+  stop an engine
+- a failed start is not retried by polling, only by the user
+- nothing is downloaded or installed without a native confirmation dialog
+
+llama.cpp and BitNet are managed engines. `src/main/engine-discovery.js` finds
+`llama-server` (PATH, winget, scoop, Homebrew, `~/<repo>/build/bin`) and GGUF models
+(llama.cpp cache, Hugging Face cache, LM Studio, Jan, a `models` folder in a clone, and
+the blobs Ollama already downloaded). It only reads known folders, with depth and entry
+caps, and validates the GGUF magic bytes instead of trusting the extension. Discovered
+models are offered in the model selector; picking one starts the engine with it, and
+picking another restarts an engine MIKA5 owns. The renderer only sees model names — paths
+stay in the main process, and a model or executable that was not discovered is rejected.
+A manual choice still goes through a native dialog. The choice is stored in `app_state`
+as `engine_<providerId>`. An Ollama blob is not guaranteed to load in llama.cpp: some use
+architectures only Ollama understands, and that is only known when loading.
+
+Installing an engine (`winget`/`brew`, llama.cpp only) and downloading a model
+(`llama-server -hf`, llama.cpp only) each require a native confirmation dialog opened by
+the main process. BitNet has no package, so only its official guide is offered. Ollama is an external service: MIKA5
+reuses it and starts `ollama serve` only when it is installed, stopped, not managed by
+systemd and `OLLAMA_HOST` is unset or points at loopback on 11434. `OLLAMA_HOST` is never
+overridden.
+
+`autoStart` is honoured only for the provider being queried and only when the IPC
+argument is literally `true`. `MIKA5_ENGINE_AUTOSTART=0` turns every automatic start off.
+
+Not verified: a real `llama-server` or bitnet.cpp binary. `test/provider-readiness.test.js`
+drives the real manager and adapters against `test/helpers/fake-llama-server.js`, a child
+process that speaks the same protocol including the 503 while loading.
+
+An engine executable is never spawned without the user's approval. `ai:approve-engine`
+shows a native dialog with the real path, size and SHA-256; the approval is stored with
+that identity and `diagnosticar()` recomputes the hash right before spawning, so a
+replaced file or a retargeted link is not executed. A discovered or hand-picked
+executable has no approval until the user gives it.
+
+Each discovered model carries a compatibility verdict for the engine (`compatible`,
+`incompatible`, `unverified`), from the architecture the GGUF declares and, above that,
+from what happened when the engine loaded it. `unverified` means nobody checked — it is
+not "probably fine". Incompatible models are not offered.
+
+Starting an engine. `llama-server` is always given `--host`, `--port`, `-c` and `-np 1`:
+its default port changes between builds (8080, 9931) and without `-c` it reserves the
+model's maximum context, which exhausts an integrated GPU. The adapter declares launch
+variants from most to least demanding (`{ctx:16384}`, `{ctx:8192}`, `{ctx:8192, cpu}`); if
+the process exits before the model is served, the next variant is tried, and the one that
+worked is stored per model. stderr is kept (bounded) to classify the exit:
+`ENGINE_OUT_OF_MEMORY`, `ENGINE_MODEL_UNSUPPORTED` (not retried) or `ENGINE_EXITED`. Only
+the last two mark a model incompatible. A load deadline withdraws an engine that never
+finishes loading, so the interface never waits forever. A 503 is never treated as ready.
+
+BitNet's engine is the `llama-server` built by bitnet.cpp. It is recognised by living
+inside a bitnet.cpp checkout (`run_inference_server.py` in an ancestor), not by its name.
+
+`src/main/model-download.js` downloads only what an adapter's catalogue declares
+(repository, exact revision, file, size, SHA-256). The renderer sends a catalogue id,
+never a URL. The file goes to `<userData>/models` through a `.part` file and is kept only
+if size and SHA-256 match. One download at a time, with progress and cancel, behind a
+native confirmation dialog.
+
+Measured on Windows with the real winget `llama-server` and a GGUF Ollama had already
+downloaded: ready in about 11 s and a chat answered. Not measured: a real bitnet.cpp
+engine, a real catalogue download, Linux and macOS.
+
+Three identities, never merged. For a managed engine the model id is `<engine> · <model>`
+(`llama.cpp · llama3.2:3b`), `label` is the model name and `source` is where the file came
+from (Ollama, Hugging Face, LM Studio, MIKA5, manual). That id is what is stored with a
+message, so history shows which engine answered. A GGUF from Ollama is not "an Ollama
+model" and is not assumed incompatible because of its origin. `engine.selectedModel` is
+looked up by file path; if that file is no longer offered there is no selected model, and
+the renderer shows "pick a model" instead of the first entry or the last model used with
+another provider.
+
+`engine.status` (`not-installed`, `needs-approval`, `needs-model`, `stopped`, `starting`,
+`loading`, `ready`, `error`) is what the status pill shows for a managed engine. "Offline"
+says nothing about an engine MIKA5 starts on demand. `ready` requires one real inference
+against the engine MIKA5 started (`_probarInferencia`, once per start, non-blocking);
+until it answers the state is `loading`, and if it fails the engine is withdrawn with
+`ENGINE_INFERENCE_FAILED`. Verdicts are versioned (`verdicts`): an `incompatible` stored
+by an older rule is dropped on load, because it was recorded for any exit, including
+running out of memory. Only `ENGINE_MODEL_UNSUPPORTED` marks a model now.
+
+llama-server requests carry `max_tokens: 4096` and `enable_thinking: false`, the same
+limits as the Ollama path. Measured without them: a small reasoning model generated until
+the five-minute timeout.
+
+## Model libraries and catalogues
+
+Each adapter declares `libraryUrl`, the provider's own official page for browsing models.
+The renderer holds no library URL: it opens the one the main process returned for the
+selected provider, so no provider can inherit another's. A test asserts that only Ollama
+links to ollama.com and that the renderer contains no such URL.
+
+Catalogues are asked from the provider, never hardcoded: Ollama `/api/tags`, OpenAI, Groq,
+Moonshot `GET /models`, Anthropic `GET /v1/models` (paginated with `after_id`), llama.cpp
+and BitNet `/v1/models` plus the GGUF files found on disk. Listing is not an inference.
+Moonshot is queried at the same base URL the chat uses; a key is never sent to another
+host. Alibaba keeps its user-configured catalogue: its list-models API needs a workspace
+id and region that MIKA5 does not have. When a catalogue cannot be read the provider shows
+its error; there is no fallback list and no fallback to another provider.
+
+BitNet is experimental. `engine.runtimes` lists prebuilt engines MIKA5 may install
+(exact URL under the public releases, size, SHA-256). One is published: Windows x64, a
+static AVX2 build of bitnet.cpp's `llama-server`, unsigned, so Smart App Control may block
+it and MIKA5 does not work around that. Linux and macOS have none.
+`prepareEngine()` is "Install and start": one native confirmation, then engine and model
+are downloaded through `model-download.js`, verified, approved with the verified hash and
+started. Without a runtime for the system the dialog says so and offers nothing. A local
+bitnet.cpp build is still discovered. Measured with the real engine: it needs its own
+launch arguments, an ASCII-only `--alias` (a non-ASCII one makes `/v1/models` answer 500),
+and it lists the model before it finishes loading, so the readiness probe treats a 503 as
+"still loading". `BUILDING.md` records the build that works on Windows and why.
+
+BitNet's window is 4,096 tokens and its engine has two failure modes MIKA5 has to avoid,
+both measured. With the default batch size it overflows the stack and exits (`0xC00000FD`)
+once the input passes a few hundred tokens, so it is launched with `-b 32`. And what does
+not fit in the window it cuts from the middle without saying so. So the adapter declares
+`engine.contexto`; `getCapabilities()` exposes it as `contextBudget`, the renderer picks
+fewer document fragments and less history for that provider (it can only lower the general
+budget), and before sending, the adapter asks the engine itself (`/tokenize`, `/props`) and
+reads in parts what still does not fit: the longest message is split at paragraph
+boundaries, the model takes notes on each part for the user's request, and the final answer
+is given from all the notes (`leerPorPartes` in `providers/llama-server.js`). The whole text
+is read, but through notes, so detail is lost; the result carries `readInParts`, the
+renderer says so, and `ai:chat-progress` (request id and numbers only) drives "part 2 of 4".
+More than eight parts is refused with `PROVIDER_CONTEXT_EXCEEDED`. The answer is capped to
+768 tokens and to what is left of the window. A provider without `contexto` is untouched.
+Measured with the real engine: a 21,883-character document in two parts, 3.5 minutes.
+
+A previous image in a chat is reused for "analyse…" only when the user talks about
+something visual. Talking about a document, attaching one in that turn, or using a provider
+without vision makes it a normal chat: before, "analyse the document in the knowledge base"
+dragged an old image into the request and a provider without vision refused to send it.
+
+BitNet has no installer and no prebuilt binaries. `comprobarRequisitos()` reports which
+build tools are present (Git, Python, CMake, Clang, including the ones Visual Studio
+installs) without running any of them, and the dialog shows what is missing.
+
+## Update notice
+
+`src/main/update-check.js` only informs. It asks the public releases repository for the
+latest stable release, compares `x.y.z` numerically, and accepts a result only if the tag
+is a version and the link points at the official repository. It sends no user data. The
+request happens when the user presses "Check for a new version", or when MIKA5 opens if
+they turned that on (`updates.autoCheck`, off by default). There is no `electron-updater`
+and nothing is downloaded or installed: builds are not signed, so an automatic install
+could not verify the package.
+
 ## Cancellation
 
 `src/main/request-registry.js` keeps one `AbortController` per request id
@@ -198,6 +364,24 @@ results.
 
 The cache key covers all three scope components (project, chat, whether project-level
 documents are included). Every route that changes indexed content invalidates it.
+
+## Which fragments go with a question
+
+A long document does not fit in the model's context, so the send path picks fragments.
+`src/main/knowledge-retrieval.js` scores every fragment in scope against the words of the
+question (accent-insensitive, numbers never dropped, exact references such as
+"artículo 380" matched with word boundaries) and returns the best ones in document order,
+within the character budget. It is lexical on purpose: it does not depend on an embedding
+model being loaded. If the words find nothing, the renderer falls back to the existing
+embedding search (`rag.query`) over the same scope, and only then to the first fragments.
+
+Scope is applied before ranking: a question never widens what a request may see. Each
+fragment carries `doc_chunks`, and the prompt tells the model when it is seeing part of a
+document, so it does not claim that what it was not shown does not exist.
+
+Not solved: a task that needs the whole of a long document at once (a full summary, a
+complete comparison) still receives only the fragments that fit. Scanned PDFs are OCR'd
+up to 20 pages.
 
 ## Knowledge/RAG scope
 

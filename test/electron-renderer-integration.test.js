@@ -1477,6 +1477,368 @@ async function run() {
     assert(r.soloSystem, `${etiqueta}: nunca viajan como turno de usuario o asistente`);
   }
 
+  // --- Preparación del proveedor: estados de arranque y acción guiada ---
+  // Se ejercita el loadRuntime() y el switchProvider() reales contra un canal
+  // `ai:get-readiness` guionizado. Lo que se valida es la interfaz: que
+  // «iniciando» y «cargando modelo» no se pinten como caída, que el sondeo
+  // llegue solo al estado final y que la acción guiada lleve al sitio correcto.
+  const guionReadiness = [];
+  const peticionesReadiness = [];
+  const baseReadiness = {
+    configured: true, reachable: false, authenticated: null, modelsAvailable: 0, models: [],
+    canAttempt: false, ready: false, uiState: 'offline', errorCode: 'PROVIDER_TRANSPORT_UNREACHABLE', httpStatus: null
+  };
+  ipcMain.handle('ai:get-readiness', (_event, id, opciones) => {
+    peticionesReadiness.push({ id, opciones });
+    const paso = guionReadiness.length > 1 ? guionReadiness.shift() : guionReadiness[0];
+    return { ...baseReadiness, ...paso };
+  });
+  ipcMain.handle('ai:describe-engine', () => ({
+    managed: true, requiresModel: true, executable: null, model: null, canStart: false,
+    errorCode: 'ENGINE_NOT_INSTALLED', state: 'idle', owned: false
+  }));
+  const estadoPildora = () => win.webContents.executeJavaScript(`(() => {
+    const p = document.getElementById('rtStatus');
+    const b = document.getElementById('btnProviderAction');
+    const s = document.getElementById('modelSelect');
+    return {
+      texto: p.textContent, clase: p.className, readiness: p.dataset.providerReadiness,
+      accion: b.style.display === 'none' ? null : b.dataset.action,
+      etiquetaAccion: b.querySelector('.more-actions-item-label').textContent,
+      selector: s.options[0] ? s.options[0].textContent : '', deshabilitado: s.disabled,
+      modelos: Array.from(s.options).map(o => o.value).filter(Boolean)
+    };
+  })()`, true);
+
+  // 1. Motor arrancando → cargando modelo → listo, sin intervención.
+  guionReadiness.push(
+    { readiness: 'starting', action: null, engine: { managed: true, state: 'starting', owned: true, errorCode: null } },
+    { readiness: 'loading-model', action: null, reachable: true, httpStatus: 503, uiState: 'provider-error',
+      errorCode: 'PROVIDER_HTTP_503', engine: { managed: true, state: 'running', owned: true, errorCode: null } },
+    { readiness: 'ready', action: null, reachable: true, uiState: 'connected', errorCode: null, canAttempt: true,
+      ready: true, modelsAvailable: 1, models: [{ name: 'modelo-local' }],
+      engine: { managed: true, state: 'running', owned: true, errorCode: null } }
+  );
+  await win.webContents.executeJavaScript(`(() => { currentProvider = 'llamacpp'; providerPrivacy = 'private'; return loadRuntime(); })()`, true);
+  const arrancando = await estadoPildora();
+  assert.strictEqual(arrancando.readiness, 'starting', 'la píldora refleja que el motor está arrancando');
+  assert(arrancando.clase.includes('status-loading') && !arrancando.clase.includes('status-offline'),
+    'un motor arrancando no se pinta como caído');
+  assert(arrancando.deshabilitado && arrancando.selector && !/127\.0\.0\.1|80\d\d|llama-server/.test(arrancando.selector),
+    'el selector explica la espera sin puertos ni órdenes');
+  assert.strictEqual(arrancando.accion, null, 'mientras arranca no se ofrece ninguna acción');
+  assert.deepStrictEqual(peticionesReadiness[0].opciones, { autoStart: true },
+    'la interfaz pide arranque automático para el proveedor seleccionado');
+  await waitFor(win, `document.getElementById('rtStatus').dataset.providerReadiness === 'ready'`, 15000);
+  const listo = await estadoPildora();
+  assert(listo.clase.includes('status-ok') && !listo.deshabilitado, 'al terminar el arranque el proveedor queda conectado');
+  assert.deepStrictEqual(listo.modelos, ['modelo-local'], 'y el catálogo del motor aparece sin recargar a mano');
+  const trasListo = peticionesReadiness.length;
+  await new Promise(resolve => setTimeout(resolve, 2600));
+  assert.strictEqual(peticionesReadiness.length, trasListo, 'una vez listo, la interfaz deja de sondear');
+
+  // 2. Motor sin configurar: elegir el proveedor abre su configuración.
+  guionReadiness.length = 0;
+  guionReadiness.push({ readiness: 'needs-setup', action: 'configure-engine',
+    engine: { managed: true, state: 'idle', owned: false, errorCode: 'ENGINE_NOT_INSTALLED' } });
+  ipcMain.removeHandler('ai:set-provider');
+  ipcMain.handle('ai:set-provider', (_event, id) => ({ provider: id, privacy: id === 'openai' ? 'cloud' : 'private' }));
+  await win.webContents.executeJavaScript(`switchProvider('bitnet')`, true);
+  const sinMotor = await estadoPildora();
+  assert.strictEqual(sinMotor.accion, 'configure-engine', 'el menú ofrece configurar el motor');
+  assert(sinMotor.etiquetaAccion.length > 0 && sinMotor.selector.length > 0, 'la acción y el selector llevan texto localizado');
+  // Elegir un proveedor sin configurar avisa, pero no abre nada por su cuenta:
+  // un diálogo automático taparía la ventana e impediría elegir otro.
+  const pulsarAviso = accion => win.webContents.executeJavaScript(`(() => {
+    const aviso = document.querySelector('#toast-container [data-provider-action="${accion}"]');
+    if (!aviso) return { existe: false };
+    const abiertos = ['engineModal', 'apiKeyModal'].filter(id => document.getElementById(id).style.display === 'flex');
+    const r = aviso.getBoundingClientRect();
+    const enPunto = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    aviso.click();
+    return { existe: true, texto: aviso.textContent, abiertosAntes: abiertos, pulsable: enPunto === aviso };
+  })()`, true);
+  const avisoMotor = await pulsarAviso('configure-engine');
+  assert(avisoMotor.existe && avisoMotor.texto.length > 0, 'aparece un aviso con la acción pendiente');
+  assert(avisoMotor.pulsable, 'el aviso recibe el clic de verdad, no sólo por código');
+  assert.deepStrictEqual(avisoMotor.abiertosAntes, [], 'ningún diálogo se abre solo al elegir el proveedor');
+  await waitFor(win, `document.getElementById('engineModal').style.display === 'flex'`);
+  const modalMotor = await win.webContents.executeJavaScript(`(() => ({
+    visible: document.getElementById('engineModal').style.display === 'flex',
+    titulo: document.getElementById('engineModalTitle').textContent,
+    iniciar: document.getElementById('engineStartButton').disabled,
+    estado: document.getElementById('engineStatus').textContent
+  }))()`, true);
+  assert(modalMotor.visible && modalMotor.titulo.includes('BitNet'), 'pulsar el aviso abre la configuración del motor del proveedor elegido');
+  assert(modalMotor.iniciar && modalMotor.estado.length > 0, 'sin ejecutable no se puede iniciar, y se dice por qué');
+  await win.webContents.executeJavaScript(`closeEngineModal()`, true);
+
+  // 3. Proveedor cloud sin clave: elegirlo lleva a la clave, no a un selector vacío.
+  guionReadiness.length = 0;
+  guionReadiness.push({ readiness: 'needs-setup', action: 'configure-key', configured: false, reachable: null,
+    uiState: 'configuration-required', errorCode: 'PROVIDER_CREDENTIAL_REQUIRED', engine: null });
+  await win.webContents.executeJavaScript(`switchProvider('openai')`, true);
+  const sinClave = await estadoPildora();
+  assert.strictEqual(sinClave.accion, null, 'la acción de clave no se repite: el menú ya tiene la suya');
+  assert(await win.webContents.executeJavaScript(
+    `document.getElementById('btnConfigApiKey').style.display !== 'none'`, true),
+    'el menú ofrece configurar la clave en su entrada de siempre');
+  const avisoClave = await pulsarAviso('configure-key');
+  assert(avisoClave.existe && avisoClave.abiertosAntes.length === 0, 'el aviso de la clave aparece sin abrir nada solo');
+  await waitFor(win, `document.getElementById('apiKeyModal').style.display === 'flex'`);
+  await win.webContents.executeJavaScript(`closeApiKeyModal()`, true);
+  // --- Rótulo del proveedor: muestra el ELEGIDO, esté o no disponible ---
+  // Informe de campo: al elegir llama.cpp o BitNet la cabecera seguía diciendo
+  // «Ollama (Local)». Se ejercita el switchProvider() real en las cinco
+  // transiciones y se comparan por separado tres cosas que no son la misma: el
+  // proveedor elegido, el que se enseña y el que recibe la petición.
+  const DISPONIBLES = { local: ['llama3.2:3b'], openai: ['gpt-4o'] };
+  const PRIVADOS = new Set(['local', 'llamacpp', 'bitnet']);
+  let ultimoElegido = 'anthropic';
+  // Esta sección mide el rótulo con la disponibilidad sola: se retira el canal
+  // de preparación guionizado por la sección anterior.
+  ipcMain.removeHandler('ai:get-readiness');
+  ipcMain.removeHandler('ai:set-provider');
+  // Cada proveedor trae su propia biblioteca, como hace el proceso principal.
+  const BIBLIOTECA_DE = {
+    local: 'https://ollama.com/library', llamacpp: 'https://huggingface.co/models?library=gguf',
+    bitnet: 'https://github.com/microsoft/BitNet#supported-models', openai: 'https://developers.openai.com/api/docs/models'
+  };
+  ipcMain.handle('ai:set-provider', (_event, id) => {
+    ultimoElegido = id;
+    return { provider: id, privacy: PRIVADOS.has(id) ? 'private' : 'cloud', libraryUrl: BIBLIOTECA_DE[id] || null };
+  });
+  ipcMain.removeHandler('ai:get-availability');
+  // llama.cpp y BitNet contestan «sin conexión»: el motor no está instalado.
+  // Es justo el caso en que el rótulo no puede caer a otro proveedor.
+  ipcMain.handle('ai:get-availability', (_event, id) => {
+    const modelos = DISPONIBLES[id || ultimoElegido] || [];
+    return modelos.length ? {
+      configured: true, reachable: true, authenticated: null, models: modelos.map(name => ({ name })),
+      modelsAvailable: modelos.length, canAttempt: true, ready: true, uiState: 'connected',
+      errorCode: null, httpStatus: null
+    } : {
+      configured: true, reachable: false, authenticated: null, models: [], modelsAvailable: 0,
+      canAttempt: false, ready: false, uiState: 'offline',
+      errorCode: 'PROVIDER_TRANSPORT_UNREACHABLE', httpStatus: null
+    };
+  });
+  const elegir = async id => {
+    await win.webContents.executeJavaScript(`switchProvider(${JSON.stringify(id)})`, true);
+    const abiertasAntes = state.externalUrls.length;
+    // Se pulsa la biblioteca de verdad: lo que cuenta es qué dirección se abre.
+    await win.webContents.executeJavaScript(`document.getElementById('btnPull').click()`, true);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const abierta = state.externalUrls.slice(abiertasAntes);
+    const visto = await leerProveedor();
+    return { ...visto, abierta };
+  };
+  const leerProveedor = () => win.webContents.executeJavaScript(`(() => ({
+      elegido: currentProvider,
+      rotulo: document.getElementById('currentProviderName').textContent,
+      biblioteca: document.getElementById('btnPull').style.display !== 'none',
+      modelo: document.getElementById('modelSelect').value,
+      selectorDeshabilitado: document.getElementById('modelSelect').disabled
+    }))()`, true);
+  const ROTULOS = {
+    local: 'Ollama (Local)', llamacpp: 'llama.cpp (Local)', bitnet: 'BitNet (Local)', openai: 'OpenAI'
+  };
+  // Ollama → llama.cpp → BitNet → Ollama → cloud → local.
+  const recorrido = [];
+  for (const id of ['local', 'llamacpp', 'bitnet', 'local', 'openai', 'local']) {
+    const antes = recorrido.at(-1)?.elegido || 'anthropic';
+    const visto = await elegir(id);
+    recorrido.push(visto);
+    assert.strictEqual(visto.elegido, id, `${antes} → ${id}: el proveedor elegido es ${id}`);
+    assert.strictEqual(visto.rotulo, ROTULOS[id], `${antes} → ${id}: la cabecera muestra «${ROTULOS[id]}»`);
+    assert.strictEqual(visto.biblioteca, true, `${antes} → ${id}: se ofrece una biblioteca de modelos`);
+    assert.deepStrictEqual(visto.abierta, [BIBLIOTECA_DE[id]],
+      `${antes} → ${id}: la biblioteca que se abre es la de ${id}, una sola vez`);
+    if (id !== 'local') {
+      assert(!/ollama\.com/.test(visto.abierta.join()), `${antes} → ${id}: no se abre la biblioteca de Ollama`);
+    }
+    if (DISPONIBLES[id]) {
+      assert.strictEqual(visto.modelo, DISPONIBLES[id][0], `${antes} → ${id}: el modelo es el de ${id}`);
+    } else {
+      assert(visto.selectorDeshabilitado && visto.modelo === '',
+        `${antes} → ${id}: sin motor no hay modelo, y tampoco se hereda el del proveedor anterior`);
+    }
+  }
+  assert(!recorrido.some(v => v.rotulo.includes('Ollama') && v.elegido !== 'local'),
+    'ningún proveedor distinto de Ollama se presenta como Ollama');
+
+  // Con el motor sin instalar no sale ninguna petición, y menos hacia Ollama.
+  await elegir('bitnet');
+  const antesSinMotor = state.chatCalls.length;
+  await win.webContents.executeJavaScript(`(() => {
+    document.getElementById('input').value = 'turno sin motor';
+    chatAttachments = [];
+    window.__sinMotorDone = false;
+    Promise.resolve(send()).catch(() => {}).finally(() => { window.__sinMotorDone = true; });
+  })()`, true);
+  await waitFor(win, `window.__sinMotorDone`);
+  assert(state.chatCalls.slice(antesSinMotor).every(llamada => llamada.providerId === 'bitnet'),
+    'con BitNet elegido y sin motor, ninguna petición se desvía a otro proveedor');
+
+  // De vuelta a Ollama: la petición va a Ollama, con su modelo y las instrucciones.
+  await elegir('local');
+  const turnoLocal = await enviarYConsentir('turno con ollama');
+  assert.strictEqual(`${turnoLocal.providerId}/${turnoLocal.model}`, 'local/llama3.2:3b',
+    'tras volver a Ollama la petición sale por Ollama con su modelo');
+  assert(instruccionesDe(turnoLocal).primeraEsSystem && instruccionesDe(turnoLocal).veces === 1,
+    'las instrucciones del sistema siguen yendo una vez, como system, tras los cambios de proveedor');
+
+
+  // --- Conversaciones largas: 26, 100 y 500 mensajes sin interrupciones ---
+  // Antes un aviso a los 25 y un diálogo a los 30 detenían el envío. Aquí se
+  // envía de verdad con ese historial guardado: si apareciese un diálogo, el
+  // envío no terminaría y la espera vencería.
+  let historialLargo = [];
+  ipcMain.removeHandler('db:listMessages');
+  ipcMain.handle('db:listMessages', () => historialLargo);
+  for (const n of [26, 100, 500]) {
+    historialLargo = Array.from({ length: n }, (_, i) => ({
+      id: i + 1, role: i % 2 === 0 ? 'user' : 'assistant', content: `mensaje ${i} `.padEnd(120, 'x')
+    }));
+    const turno = await enviarYConsentir(`turno tras ${n} mensajes`);
+    const interrupciones = await win.webContents.executeJavaScript(`(() => ({
+      aviso: Boolean(document.querySelector('.context-warning')),
+      dialogos: Array.from(document.querySelectorAll('.modal, [role="dialog"]'))
+        .filter(m => getComputedStyle(m).display !== 'none').map(m => m.id || m.className)
+    }))()`, true);
+    assert.strictEqual(interrupciones.aviso, false, `${n} mensajes: no aparece el aviso de conversación larga`);
+    assert.deepStrictEqual(interrupciones.dialogos, [], `${n} mensajes: ningún diálogo interrumpe el envío`);
+    const conversacion = turno.messages.filter(m => !(m.role === 'system' && m.content.includes(INSTRUCCION)));
+    const enviados = conversacion.reduce((suma, m) => suma + String(m.content).length, 0);
+    assert(enviados <= 32000 + 200, `${n} mensajes: el contexto enviado tiene techo (${enviados} caracteres)`);
+    assert(String(turno.messages.at(-1).content).includes(`turno tras ${n} mensajes`),
+      `${n} mensajes: el mensaje actual siempre se envía`);
+    assert(instruccionesDe(turno).primeraEsSystem && instruccionesDe(turno).veces === 1,
+      `${n} mensajes: las instrucciones del sistema se conservan`);
+    if (n === 26) {
+      assert.strictEqual(conversacion.length, 27, 'con 26 mensajes guardados se envían los 26 y el actual, sin recortar');
+    }
+  }
+
+
+  // --- Motor local: proveedor, modelo, origen y motor efectivo, por separado ---
+  // Informe de campo: con llama.cpp elegido el selector enseñaba
+  // «ollama/glm-ocr:latest» —un modelo que nadie había elegido ni cargado— y el
+  // estado decía «Sin conexión» con el motor simplemente parado.
+  const MOTOR = 'llama.cpp · llama3.2:3b';
+  const modelosDelMotor = [
+    { name: MOTOR, label: 'llama3.2:3b', origin: 'Ollama', compatibility: 'unverified' },
+    { name: 'llama.cpp · qwen3.5:0.8b', label: 'qwen3.5:0.8b', origin: 'Ollama', compatibility: 'unverified' }
+  ];
+  let motorSimulado = { status: 'stopped', selectedModel: null };
+  const eleccionesDeMotor = [];
+  ipcMain.handle('ai:get-readiness', () => ({
+    configured: true, reachable: motorSimulado.status === 'ready', authenticated: null,
+    models: modelosDelMotor, modelsAvailable: modelosDelMotor.length, canAttempt: true,
+    ready: motorSimulado.status === 'ready', uiState: motorSimulado.status === 'ready' ? 'connected' : 'offline',
+    errorCode: motorSimulado.status === 'ready' ? null : 'PROVIDER_TRANSPORT_UNREACHABLE', httpStatus: null,
+    readiness: motorSimulado.status === 'ready' ? 'ready' : 'available', action: null,
+    engine: {
+      managed: true, external: false, owned: motorSimulado.status === 'ready', label: 'llama.cpp',
+      state: motorSimulado.status === 'ready' ? 'running' : 'idle', errorCode: null,
+      status: motorSimulado.status, selectedModel: motorSimulado.selectedModel,
+      modelOrigin: motorSimulado.selectedModel ? 'Ollama' : null
+    }
+  }));
+  ipcMain.handle('ai:select-engine-model', (_event, proveedor, modelo) => {
+    eleccionesDeMotor.push({ proveedor, modelo });
+    motorSimulado = { status: 'ready', selectedModel: modelo };
+    return {};
+  });
+  // El último modelo usado fue uno de Ollama: no puede colarse como elegido.
+  appState.set('lastModel', 'llama3.2:3b');
+  await win.webContents.executeJavaScript(`switchProvider('llamacpp')`, true);
+  const leerMotor = () => win.webContents.executeJavaScript(`(() => {
+    const s = document.getElementById('modelSelect');
+    const p = document.getElementById('rtStatus');
+    return {
+      proveedor: currentProvider, rotulo: document.getElementById('currentProviderName').textContent,
+      valor: s.value, primera: s.options[0].textContent, deshabilitado: s.disabled,
+      opciones: Array.from(s.options).map(o => o.textContent), valores: Array.from(s.options).map(o => o.value),
+      origenes: Array.from(s.options).map(o => o.dataset.description || ''),
+      pildora: p.textContent, estadoMotor: p.dataset.engineStatus, clase: p.className, titulo: p.title || ''
+    };
+  })()`, true);
+  const parado = await leerMotor();
+  assert.strictEqual(parado.rotulo, 'llama.cpp (Local)', 'el proveedor mostrado es llama.cpp');
+  assert.strictEqual(parado.valor, '', 'sin modelo elegido el selector no tiene ninguno seleccionado');
+  assert(!parado.deshabilitado && parado.primera.length > 0 && !parado.valores.includes('llama3.2:3b'),
+    'el selector pide elegir, y no hereda el último modelo usado con Ollama');
+  assert.deepStrictEqual(parado.opciones.slice(1), ['llama3.2:3b', 'qwen3.5:0.8b'],
+    'los modelos se enseñan por su nombre, sin prefijo de proveedor');
+  assert(parado.origenes.slice(1).every(o => o.includes('Ollama')),
+    'el origen del fichero se enseña aparte, como descripción');
+  assert.strictEqual(parado.estadoMotor, 'stopped', 'el estado es el del motor: detenido');
+  assert(!/Sin conexión|Offline/.test(parado.pildora) && !parado.clase.includes('status-offline'),
+    `un motor parado y listo para arrancar no se rotula «sin conexión» (${parado.pildora})`);
+
+  // Elegir un modelo es lo que arranca el motor, con el modelo elegido.
+  await win.webContents.executeJavaScript(`(() => {
+    document.getElementById('modelSelect').value = ${JSON.stringify(MOTOR)};
+    onSelectedModelChanged();
+  })()`, true);
+  await waitFor(win, `document.getElementById('rtStatus').dataset.engineStatus === 'ready'`);
+  const servido = await leerMotor();
+  assert.deepStrictEqual(eleccionesDeMotor, [{ proveedor: 'llamacpp', modelo: MOTOR }],
+    'la elección llega al proceso principal con el proveedor y el modelo elegidos, una vez');
+  assert.strictEqual(servido.valor, MOTOR, 'el selector queda en el modelo que el motor sirve');
+  assert(servido.clase.includes('status-ok') && /llama\.cpp/.test(servido.titulo) && /Ollama/.test(servido.titulo),
+    `listo: se dice qué motor ejecuta y de dónde salió el modelo (${servido.titulo})`);
+
+  historialLargo = [];
+  const guardadosAntes = state.dbAttempts.length;
+  const turnoMotor = await enviarYConsentir('turno con llama.cpp');
+  assert.strictEqual(`${turnoMotor.providerId}|${turnoMotor.model}`, `llamacpp|${MOTOR}`,
+    'la petición sale por llama.cpp con el modelo elegido: ni Ollama ni otro modelo');
+  assert(instruccionesDe(turnoMotor).primeraEsSystem && instruccionesDe(turnoMotor).veces === 1,
+    'las instrucciones del sistema se conservan con el motor local');
+  const guardados = state.dbAttempts.slice(guardadosAntes);
+  assert(guardados.length >= 1 && guardados.every(g => g.model === MOTOR),
+    'los mensajes nuevos se guardan atribuidos a «llama.cpp · modelo», no a un nombre que parezca de Ollama');
+
+
+  // --- Documento adjunto: su texto llega al modelo, pase lo que pase con el routing ---
+  // Informe de campo: «analiza el documento» con un .docx adjunto, y el modelo
+  // contestó «copia y pega el documento aquí». El routing lo tomó por análisis
+  // de imagen y el renderer sustituyó el mensaje por el texto escrito, sin el
+  // documento. Se prueba el peor caso: el routing insiste en que es visual.
+  const MARCA_DOC = 'CLAUSULA-UNICA-7731 las partes acuerdan la entrega en Gijón';
+  const enviarConDocumento = async (texto) => {
+    const antes = state.chatCalls.length;
+    await win.webContents.executeJavaScript(`(() => {
+      document.getElementById('input').value = ${JSON.stringify(texto)};
+      chatAttachments = [{ type: 'text', name: 'Documento.docx', text: ${JSON.stringify(MARCA_DOC + ' '.repeat(10) + 'x'.repeat(2000))} }];
+      window.__docDone = false;
+      send().finally(() => { window.__docDone = true; });
+    })()`, true);
+    await waitFor(win, `window.__docDone || document.getElementById('cloudConsentModal')`);
+    if (await win.webContents.executeJavaScript(`Boolean(document.getElementById('cloudConsentModal'))`, true)) {
+      await win.webContents.executeJavaScript(`document.querySelectorAll('#cloudConsentModal button')[0].click()`, true);
+    }
+    await waitFor(win, `window.__docDone`);
+    assert.strictEqual(state.chatCalls.length, antes + 1, `«${texto}» con documento adjunto llega al proveedor una vez`);
+    return state.chatCalls.at(-1);
+  };
+  const ultimoDeUsuario = llamada => String(llamada.messages.filter(m => m.role === 'user').at(-1).content);
+  for (const intencion of ['normal-chat', 'vision-analysis']) {
+    ipcMain.removeHandler('ai:route-intent');
+    ipcMain.handle('ai:route-intent', (_event, params = {}) => ({
+      action: 'chat', intent: intencion, model: params.currentModel, modelPrompt: params.text,
+      detailed: { intentConflicts: {} }, visualContext: { hasVisualContext: intencion === 'vision-analysis', imageRef: null }
+    }));
+    const llamada = await enviarConDocumento('analiza el documento');
+    const contenido = ultimoDeUsuario(llamada);
+    assert(contenido.includes(MARCA_DOC) && contenido.includes('Documento.docx'),
+      `routing ${intencion}: el texto del documento adjunto llega al modelo`);
+    assert(contenido.includes('analiza el documento'), `routing ${intencion}: y también lo que escribió el usuario`);
+    assert.strictEqual(llamada.providerId, 'llamacpp', `routing ${intencion}: por el proveedor elegido`);
+  }
+
   win.destroy();
 
   console.log('Electron renderer integration tests passed');

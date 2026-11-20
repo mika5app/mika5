@@ -128,6 +128,12 @@ const EN_NPM_TEST = [
   'test:alibaba',
   'test:provider-capabilities',
   'test:provider-availability',
+  'test:provider-readiness',
+  'test:conversation-context',
+  'test:knowledge-retrieval',
+  'test:model-download',
+  'test:update-check',
+  'test:third-party-notices',
   'test:provider-credentials',
   'test:provider-registry',
   'test:request-context',
@@ -152,7 +158,7 @@ for (const suite of EN_NPM_TEST) {
 // Scripts que deben existir, se invoquen desde el gate canónico o a mano.
 const SCRIPTS_REQUERIDOS = [
   'test', 'test:all', 'test:gui', 'test:db', 'test:rag', 'test:vision', 'test:alibaba',
-  'test:provider-capabilities', 'test:provider-availability', 'test:provider-credentials', 'test:provider-registry', 'test:request-context', 'test:provider-cancellation',
+  'test:provider-capabilities', 'test:provider-availability', 'test:provider-readiness', 'test:conversation-context', 'test:knowledge-retrieval', 'test:model-download', 'test:update-check', 'test:third-party-notices', 'test:provider-credentials', 'test:provider-registry', 'test:request-context', 'test:provider-cancellation',
   'test:cloud-consent', 'test:network-security', 'test:knowledge-scope',
   'test:knowledge-cli', 'test:ensure-electron-binary', 'test:ci-gates', 'test:palette', 'test:visual-ui-shell', 'test:visual-ui-conversation', 'test:electron-test-isolation', 'test:visual-ui-polish', 'test:ipc-contracts',
   'test:print-pdf-electron', 'test:electron-renderer',
@@ -568,3 +574,13 @@ console.log(`\n${'='.repeat(40)}`);
 require('./canonical-workflow.test');
 console.log(`CI gates tests passed (${passed} comprobaciones)`);
 console.log(`${'='.repeat(40)}`);
+
+// Lo que el repositorio promete en publico (licencia, privacidad, politica de
+// firma, secretos fuera del alcance de los pull requests) se comprueba desde
+// aqui y no con un script propio: tocar package.json dispara el empaquetado de
+// los cuatro productores, y esto no cambia ningun binario.
+require('./public-readiness.test.js');
+
+// La firma de codigo, preparada y apagada: los verificadores rechazan lo que
+// deben y ningun flujo firma sin verificar. Mismo motivo para vivir aqui.
+require('./signing-readiness.test.js');

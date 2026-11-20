@@ -185,7 +185,7 @@ function sanitizeMessageForClipboard(content) {
 function sanitizeRemoteErrorMessage(message) {
   let sanitized = String(message || '');
   sanitized = sanitized
-    .replace(/Error invoking remote method ['"]ai:(?:generate-image|chat)['"]:\s*/gi, '')
+    .replace(/Error invoking remote method ['"]ai:(?:generate-image|chat)['"]:\s*(?:Error:\s*)?/gi, '')
     .replace(/TypeError:\s*fetch failed/gi, '')
     .replace(/\b(?:UND_ERR_CONNECT_TIMEOUT|ConnectTimeoutError|UND_ERR_HEADERS_TIMEOUT|UND_ERR_BODY_TIMEOUT)\b/gi, '')
     .replace(/attempted addresses?:[\s\S]*/gi, '')
@@ -399,6 +399,23 @@ function discardRejectedImage(id) {
 function onSelectedModelChanged() {
   renderAttachmentPreview();
   updateSendButtonState();
+  iniciarMotorConModeloElegido();
+}
+
+// En un motor gestionable, elegir un modelo es lo que lo pone en marcha: el
+// proceso principal arranca el motor con ese modelo, o lo cambia si ya tenía
+// otro. Con un servidor que lanzó el usuario no hay nada que cambiar y el
+// proceso principal lo rechaza; aquí no es un error que enseñar.
+async function iniciarMotorConModeloElegido() {
+  const motor = providerReadiness && providerReadiness.engine;
+  const modelo = el('modelSelect') ? el('modelSelect').value : '';
+  if (!motor || !motor.managed || !modelo || typeof window.mika5.ai.selectEngineModel !== 'function') return;
+  try {
+    await window.mika5.ai.selectEngineModel(currentProvider, modelo);
+  } catch (_) {
+    return;
+  }
+  await loadRuntime();
 }
 
 /**
@@ -616,17 +633,6 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape') closeImageViewer();
 });
 
-// Sistema de gestión progresiva de contexto
-const CONTEXT_MANAGEMENT = {
-  SOFT_LIMIT: 25,        // Mensajes antes de alerta
-  HARD_LIMIT: 40,        // Máximo mensajes permitidos
-  AUTO_SAVE_TRIGGER: 30, // Sugerir guardar
-  PRESERVE_RATIO: 0.3    // 30% iniciales + 70% recientes
-};
-// Track which chats have already been warned/prompted to avoid repetition
-const _contextWarningShown = new Set(); // chatId -> soft warning already shown
-const _contextSavePrompted = new Set(); // chatId -> save dialog already shown
-
 let conversationHistory = []; // Historial completo
 
 // ============================================
@@ -700,6 +706,8 @@ async function safeViewChange(operation) {
 
 // AI provider state
 let currentProvider = 'local';
+// Catálogo oficial del proveedor elegido. Lo da el proceso principal.
+let providerLibraryUrl = null;
 let providerPrivacy = 'private'; // 'private' | 'cloud'
 
 function formatBytesRenderer(bytes) {
@@ -957,7 +965,7 @@ function syncModelDropdown() {
     providerPrivacy = options.find(option => option.value === selectedVal)?.dataset.source === 'cloud' ? 'cloud' : 'private';
     updatePrivacyUI();
   }
-  optionsContainer.innerHTML = "";
+  optionsContainer.replaceChildren();
   options.forEach(opt => {
     const div = document.createElement("div");
     const source = opt.dataset.source || 'local';
@@ -1806,7 +1814,7 @@ function handleDocExtractionError(docErr, fileName) {
 function renderAttachmentPreview() {
   const container = el("attachmentPreview");
   if (!container) return;
-  container.innerHTML = "";
+  container.replaceChildren();
   // Las imágenes rechazadas se muestran junto a los adjuntos reales, marcadas
   // como NO adjuntadas. Que desaparezcan sin rastro es lo que hacía creer al
   // usuario que la imagen había viajado.
@@ -2190,141 +2198,117 @@ function showToast(message, type = "success") {
     toast.style.opacity = "0";
     setTimeout(() => toast.remove(), 300);
   }, duration);
+  return toast;
 }
 
 function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).substr(2);
 }
 
-async function manageConversationContext(currentMessages) {
-  const totalMessages = currentMessages.length;
-  const chatId = activeChatId || '_none';
-
-  // Soft warning: show once per chat session
-  if (totalMessages >= CONTEXT_MANAGEMENT.SOFT_LIMIT &&
-      totalMessages < CONTEXT_MANAGEMENT.AUTO_SAVE_TRIGGER) {
-    if (!_contextWarningShown.has(chatId)) {
-      _contextWarningShown.add(chatId);
-      showContextWarning(totalMessages);
-    }
-  }
-
-  // Save suggestion: show once per chat session
-  if (totalMessages >= CONTEXT_MANAGEMENT.AUTO_SAVE_TRIGGER &&
-      totalMessages < CONTEXT_MANAGEMENT.HARD_LIMIT) {
-    if (!_contextSavePrompted.has(chatId)) {
-      _contextSavePrompted.add(chatId);
-      await suggestSaveConversation(currentMessages);
-    }
-  }
-
-  // Hard limit: always trim (this is silent, no UI prompt)
-  if (totalMessages >= CONTEXT_MANAGEMENT.HARD_LIMIT) {
-    return smartContextTrim(currentMessages);
-  }
-
-  return currentMessages;
-}
-
-function smartContextTrim(messages) {
-  const preserveCount = Math.floor(CONTEXT_MANAGEMENT.HARD_LIMIT * CONTEXT_MANAGEMENT.PRESERVE_RATIO);
-  const keepCount = CONTEXT_MANAGEMENT.HARD_LIMIT - preserveCount - 1;
-
-  const initialContext = messages.slice(0, preserveCount);
-  const recentContext = messages.slice(-keepCount);
-  const summaryMessage = {
-    role: 'system',
-    content: `[Resumen contextual: ${messages.length - (preserveCount + keepCount)} mensajes anteriores omitidos]`
-  };
-
-  return [...initialContext, summaryMessage, ...recentContext];
-}
-
-function showContextWarning(messageCount) {
-  // Don't duplicate if already visible
-  const existing = document.querySelector('.context-warning');
-  if (existing) return;
-
-  const warningEl = document.createElement('div');
-  warningEl.className = 'context-warning';
-  warningEl.innerHTML = `
-    <div class="context-warning-content">
-      <span class="warning-icon">⚠️</span>
-      <span>Conversación larga (${messageCount} mensajes). Considera guardar.</span>
-      <button type="button" class="btn-small context-warning-save">Guardar</button>
-      <button type="button" class="btn-small context-warning-dismiss" aria-label="Cerrar">×</button>
-    </div>
-  `;
-  const btn = warningEl.querySelector('.context-warning-save');
-  if (btn) btn.addEventListener('click', () => saveCurrentConversation());
-  const dismissBtn = warningEl.querySelector('.context-warning-dismiss');
-  if (dismissBtn) dismissBtn.addEventListener('click', () => {
-    if (warningEl.parentNode) warningEl.parentNode.removeChild(warningEl);
-  });
-
-  const chatContainer = document.querySelector('.chat-area') || document.querySelector('#chat')?.parentElement || document.body;
-  chatContainer.insertBefore(warningEl, chatContainer.firstChild);
-
-  setTimeout(() => {
-    if (warningEl.parentNode) warningEl.parentNode.removeChild(warningEl);
-  }, 15000);
-}
-
-async function suggestSaveConversation(messages) {
-  const yes = await mikaConfirm(
-    'Guardar conversación',
-    `La conversación está creciendo (${messages.length} mensajes). ¿Deseas guardarla para liberar espacio y continuar?`
-  );
-  if (yes) await saveCurrentConversation(messages);
-}
-
-async function saveCurrentConversation(messages = conversationHistory) {
-  const defaultTitle = generateChatDocTitle(messages.filter(m => m.role !== 'system'));
-  const conversationName = await mikaPrompt('Guardar conversación', 'Nombre para guardar esta conversación:', defaultTitle);
-  if (conversationName == null || !conversationName.trim()) return;
-
-  const name = conversationName.trim();
-
-  // Save as Knowledge document in DB instead of localStorage
-  const body = messages.map(m => {
-    const prefix = m.role === 'user' ? '**Usuario:**' : m.role === 'assistant' ? '**Asistente:**' : `**${m.role}:**`;
-    return `${prefix}\n\n${m.content || ''}\n\n---\n\n`;
-  }).join('');
-
-  const content = `# ${name}\n\nFecha: ${new Date().toISOString()}\nMensajes: ${messages.length}\n\n---\n\n${body}`;
-
-  const savePayload = {
-    projectId: activeProjectId || QUICK_CHAT_ID,
-    title: name,
-    content,
-    mimeType: 'text/markdown'
-  };
-  if (activeProjectId === QUICK_CHAT_ID && activeChatId) {
-    savePayload.chatId = activeChatId;
-  }
-
+// Segunda búsqueda, por significado, cuando la de palabras no encontró nada.
+//
+// La primera búsqueda recorre todos los documentos buscando las palabras de la
+// pregunta. Si el usuario pregunta con otras palabras que las del documento
+// —«¿cuándo prescribe una deuda?» frente a «extinción de las obligaciones»—
+// no hay coincidencia, y sin esto se volvía a enviar el principio de los
+// documentos. Aquí se comparan los significados, sobre los mismos documentos y
+// con el mismo alcance. Necesita el modelo de embeddings; si no está o tarda,
+// se sigue con lo que ya había, que no es peor que antes.
+async function completarPorSignificado(chunks, { projectId, chatId, includeProjectScope, pregunta, maxChars }) {
+  if (!Array.isArray(chunks) || !chunks.length || chunks[0].selection === 'relevance') return chunks;
+  const totales = new Map(chunks.map(c => [c.title, c.doc_chunks || 0]));
+  const hayMas = [...totales.values()].reduce((a, b) => a + b, 0) > chunks.length;
+  if (!hayMas || !String(pregunta || '').trim()) return chunks;
   try {
-    const result = await saveDocument(savePayload);
-    if (result?.ok) {
-      showToast(`Conversación "${name}" guardada en Knowledge`, 'success');
-      await renderKnowledgeList();
-    } else {
-      showToast('Error al guardar: ' + (result?.error || 'desconocido'), 'error');
+    const respuesta = await withTimeout(
+      window.mika5.rag.query(projectId, pregunta, 8, { chatId, includeProjectScope }),
+      8000, 'buscar en los documentos'
+    );
+    const hallados = (respuesta && respuesta.ok && respuesta.chunks) || [];
+    if (!hallados.length) return chunks;
+    let usados = 0;
+    const elegidos = [];
+    for (const h of hallados) {
+      const largo = String(h.chunk_text || '').length;
+      if (elegidos.length && usados + largo > maxChars) continue;
+      elegidos.push({
+        title: h.title, chunk_index: h.chunk_index, chunk_text: h.chunk_text,
+        doc_chunks: totales.get(h.title) || 0, selection: 'relevance'
+      });
+      usados += largo;
     }
+    return elegidos.sort((a, b) => String(a.title).localeCompare(String(b.title)) || a.chunk_index - b.chunk_index);
   } catch (e) {
-    showToast('Error al guardar conversación', 'error');
+    console.warn('[KNOWLEDGE] búsqueda por significado no disponible:', e?.message || e);
+    return chunks;
   }
+}
 
-  if (messages.length > 20) {
-    conversationHistory = messages.slice(-10);
+// Presupuesto de contexto que se envía al modelo, en caracteres.
+//
+// La conversación entera vive en SQLite y no tiene límite de mensajes. Lo que
+// sí tiene techo es lo que viaja en cada petición: mandar todo el historial
+// siempre desbordaría la ventana del modelo y encarecería cada turno. Se
+// conservan los mensajes más recientes que caben, y como mínimo los dos
+// últimos intercambios aunque sean largos.
+//
+// Antes había además un límite por NÚMERO de mensajes: aviso a los 25, un
+// diálogo que detenía el envío a los 30 y recorte a los 40. No medía nada
+// real —cuarenta mensajes cortos caben de sobra— e interrumpía conversaciones
+// normales pidiendo guardarlas, cuando guardar no cambiaba nada: el historial
+// se relee de la base de datos en cada envío.
+const MAX_CONTEXT_CHARS_GENERAL = 32000;
+const MIN_RECENT_PAIRS = 2;
+
+// Un motor local con la ventana pequeña declara un presupuesto menor en su
+// contrato (`contextBudget`). Nunca lo amplía: sólo puede bajar el general.
+function presupuestoDeContexto(clave, general) {
+  const propio = Number(providerCapabilities?.contextBudget?.[clave]);
+  return Number.isFinite(propio) && propio > 0 ? Math.min(general, propio) : general;
+}
+
+function trimContextToBudget(messages) {
+  const MAX_CONTEXT_CHARS = presupuestoDeContexto('historyChars', MAX_CONTEXT_CHARS_GENERAL);
+  const totalChars = messages.reduce((sum, m) => sum + (m.content || '').length, 0);
+  if (totalChars <= MAX_CONTEXT_CHARS) return messages;
+
+  let charCount = 0;
+  let cutIndex = messages.length;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    charCount += (messages[i].content || '').length;
+    cutIndex = i;
+    const keptMessages = messages.length - i;
+    if (charCount > MAX_CONTEXT_CHARS && keptMessages >= MIN_RECENT_PAIRS * 2) {
+      cutIndex = i + 1;
+      break;
+    }
   }
+  const trimmed = messages.slice(cutIndex);
+  if (cutIndex > 0) {
+    trimmed.unshift({
+      role: 'system',
+      content: `[Previous ${cutIndex} messages omitted to fit context window.]`
+    });
+  }
+  return trimmed;
 }
 
 // Texto localizado del estado de un proveedor, construido SÓLO a partir del
 // código estable y de los metadatos permitidos. El mensaje técnico del
 // proveedor no cruza el puente: se queda en el log del proceso principal.
 function describirEstadoProveedor(disp) {
-  if (!disp || !disp.errorCode) return '';
+  // Arrancando o cargando el modelo no hay error que contar. Y si lo que
+  // impide usar el proveedor es el motor local, se dice eso: es más útil que
+  // «no se pudo contactar con el servidor».
+  if (!disp) return '';
+  if (disp.readiness === 'starting' || disp.readiness === 'loading-model') return '';
+  const codigoMotor = disp.engine && disp.engine.errorCode;
+  if (codigoMotor) {
+    const claveMotor = `provider.error.${codigoMotor}`;
+    const textoMotor = t(claveMotor);
+    if (textoMotor !== claveMotor) return textoMotor;
+  }
+  if (!disp.errorCode) return '';
   const clave = `provider.error.${disp.errorCode}`;
   const traducido = t(clave);
   if (traducido !== clave) return traducido;
@@ -2336,6 +2320,594 @@ function describirEstadoProveedor(disp) {
     : porEstado;
 }
 
+// Preparación del proveedor activo: la disponibilidad de siempre más en qué
+// punto está el usuario y qué puede hacer. `autoStart` deja que el proceso
+// principal ponga en marcha un motor local parado; sólo se pide para el
+// proveedor seleccionado, nunca para todos.
+//
+// Si la preparación falla se cae a la disponibilidad sola: sin estados de
+// arranque ni acción guiada, pero con el catálogo y el estado reales.
+let providerReadiness = null;
+let readinessPollTimer = null;
+
+// De dónde salió el fichero de un modelo, en palabras.
+function origenDeModelo(origen) {
+  if (!origen) return '';
+  return origen === 'manual' ? t('engine.origin.manual') : origen;
+}
+
+// Texto del motor local, si lo que impide usar el proveedor es el motor.
+function describirMotor(disp) {
+  const codigo = disp && disp.engine && disp.engine.errorCode;
+  if (!codigo) return '';
+  const clave = `provider.error.${codigo}`;
+  const traducido = t(clave);
+  return traducido === clave ? '' : traducido;
+}
+
+// Qué decir en el selector de modelos cuando está vacío.
+function textoSelectorVacio(disp, uiState) {
+  if (esperandoMotor(disp.readiness)) return t(`provider.readinessDetail.${disp.readiness}`);
+  return describirMotor(disp) || t(`provider.selectEmpty.${uiState}`);
+}
+
+async function consultarPreparacion() {
+  if (typeof window.mika5.ai.getReadiness === 'function') {
+    try {
+      return await window.mika5.ai.getReadiness(undefined, { autoStart: true });
+    } catch (e) {
+      console.warn('getReadiness failed:', e?.message || e);
+    }
+  }
+  return window.mika5.ai.getAvailability();
+}
+
+// Arrancando o cargando el modelo: el proveedor está en camino.
+function esperandoMotor(readiness) {
+  return readiness === 'starting' || readiness === 'loading-model';
+}
+
+// Mientras un motor arranca o carga el modelo no hay nada que el usuario
+// pueda hacer salvo esperar, así que la interfaz vuelve a preguntar sola.
+// Un único temporizador, y sólo si el proveedor sigue siendo el mismo.
+let readinessPollDesde = 0;
+let readinessPollEnCurso = false;
+
+function programarSondeoDePreparacion(enEspera) {
+  clearTimeout(readinessPollTimer);
+  readinessPollTimer = null;
+  if (!enEspera) {
+    readinessPollDesde = 0;
+    return;
+  }
+  if (!readinessPollDesde) readinessPollDesde = Date.now();
+  // Cada dos segundos al principio; si la carga se alarga, cada cinco. El
+  // techo de la espera lo pone el proceso principal, que retira un motor que
+  // no termina de cargar: aquí no hay un bucle sin final.
+  const espera = Date.now() - readinessPollDesde < 30000 ? 2000 : 5000;
+  const proveedor = currentProvider;
+  readinessPollTimer = setTimeout(async () => {
+    // Una consulta a la vez: si la anterior no ha vuelto, no se apila otra.
+    if (currentProvider !== proveedor || readinessPollEnCurso) return;
+    readinessPollEnCurso = true;
+    try {
+      await loadRuntime();
+    } finally {
+      readinessPollEnCurso = false;
+    }
+  }, espera);
+}
+
+// Acción guiada del menú. La etiqueta sale del código de acción; si el
+// proveedor está listo, el botón no existe.
+function renderProviderAction(disp) {
+  const boton = el('btnProviderAction');
+  if (!boton) return;
+  const accion = disp && disp.action;
+  const clave = `provider.action.${accion}`;
+  const etiqueta = accion ? t(clave) : clave;
+  // Configurar la clave ya tiene su entrada propia en este menú para los
+  // proveedores cloud: repetirla aquí sólo alargaba el menú.
+  const repetida = accion === 'configure-key' || accion === 'configure-provider';
+  if (!accion || etiqueta === clave || repetida) {
+    boton.style.display = 'none';
+    delete boton.dataset.action;
+    return;
+  }
+  boton.dataset.action = accion;
+  boton.style.display = '';
+  const texto = boton.querySelector('.more-actions-item-label');
+  if (texto) texto.textContent = etiqueta;
+  boton.setAttribute('aria-label', etiqueta);
+  boton.title = etiqueta;
+}
+
+async function runProviderAction(accion = providerReadiness && providerReadiness.action) {
+  switch (accion) {
+    case 'configure-key':
+    case 'configure-provider':
+      showApiKeyModal();
+      break;
+    case 'configure-engine':
+      await showEngineModal();
+      break;
+    case 'approve-engine':
+      await approveEngine();
+      break;
+    case 'start-engine':
+      await startLocalEngine();
+      break;
+    case 'download-model':
+      el('btnPull')?.click();
+      break;
+    case 'install-engine':
+      await showEngineModal();
+      break;
+    case 'start-service':
+    case 'retry':
+      await loadRuntime();
+      break;
+    default:
+  }
+}
+
+const ACCIONES_DE_CONFIGURACION = ['configure-key', 'configure-provider', 'configure-engine', 'approve-engine'];
+
+// La aprobación se pide en un diálogo nativo del proceso principal, con la
+// ruta real y la huella del programa. Aquí sólo se refleja el resultado.
+async function approveEngine() {
+  try {
+    const resultado = await window.mika5.ai.approveEngine(currentProvider);
+    renderEngineModal(resultado?.engine);
+    if (resultado?.errorCode) showToast(t(`provider.error.${resultado.errorCode}`), 'error');
+  } catch (e) {
+    showToast(t('provider.error.ENGINE_APPROVAL_REQUIRED'), 'error');
+  }
+  await loadRuntime();
+}
+
+function guiarPreparacion() {
+  const accion = providerReadiness && providerReadiness.action;
+  if (!providerReadiness || providerReadiness.readiness !== 'needs-setup') return;
+  if (!ACCIONES_DE_CONFIGURACION.includes(accion)) return;
+  const aviso = showToast(t(`provider.setupHint.${accion}`), 'warning');
+  if (!aviso) return;
+  aviso.dataset.providerAction = accion;
+  aviso.setAttribute('role', 'button');
+  aviso.style.cursor = 'pointer';
+  // El contenedor de avisos deja pasar los clics a lo que hay debajo; este
+  // aviso en concreto sí tiene que recibirlos.
+  aviso.style.pointerEvents = 'auto';
+  aviso.addEventListener('click', () => { runProviderAction(accion); });
+}
+
+async function startLocalEngine() {
+  try {
+    await window.mika5.ai.startEngine(currentProvider);
+  } catch (e) {
+    showToast(t('provider.error.ENGINE_SPAWN_FAILED'), 'error');
+  }
+  await loadRuntime();
+}
+
+// --- Aviso de versión nueva ---
+// Sólo informa. La consulta sale porque el usuario pulsa «Buscar versión
+// nueva» o porque activó el aviso al abrir; por defecto no sale ninguna.
+const UPDATE_AUTO_KEY = 'updates.autoCheck';
+let updateInfo = null;
+
+function renderUpdateModal(info, buscando = false) {
+  const estado = el('updateStatus');
+  const notas = el('updateNotes');
+  const abrir = el('updateOpenButton');
+  if (el('updateInstalled')) el('updateInstalled').textContent = info?.installed ? `v${info.installed}` : '—';
+  if (el('updateLatest')) el('updateLatest').textContent = info?.ok ? `v${info.latest}` : '—';
+  if (estado) {
+    if (buscando) estado.textContent = t('update.checking');
+    else if (!info?.ok) estado.textContent = t(`update.error.${info?.errorCode || 'UPDATE_SOURCE_UNREACHABLE'}`);
+    else estado.textContent = info.updateAvailable ? t('update.available') : t('update.current');
+  }
+  if (notas) {
+    // Texto plano: las notas vienen de fuera y nunca se interpretan como HTML.
+    notas.textContent = info?.ok && info.updateAvailable ? info.notes : '';
+    notas.style.display = notas.textContent ? '' : 'none';
+  }
+  if (abrir) abrir.style.display = info?.ok && info.updateAvailable ? '' : 'none';
+}
+
+async function checkForUpdates(mostrar) {
+  const modal = el('updateModal');
+  if (mostrar && modal) {
+    modal.style.display = 'flex';
+    renderUpdateModal(updateInfo, true);
+    try {
+      const auto = el('updateAutoCheck');
+      if (auto) auto.checked = (await window.mika5.getAppState(UPDATE_AUTO_KEY)) === '1';
+    } catch (_) {}
+  }
+  try {
+    updateInfo = await window.mika5.app.checkForUpdates();
+  } catch (e) {
+    updateInfo = { ok: false, errorCode: 'UPDATE_SOURCE_UNREACHABLE' };
+  }
+  if (mostrar) {
+    renderUpdateModal(updateInfo);
+  } else if (updateInfo?.ok && updateInfo.updateAvailable) {
+    // Al abrir, con el aviso activado: un aviso pulsable, nunca un diálogo.
+    const aviso = showToast(t('update.toast').replace('{v}', updateInfo.latest), 'info');
+    if (aviso) {
+      aviso.style.cursor = 'pointer';
+      aviso.style.pointerEvents = 'auto';
+      aviso.setAttribute('role', 'button');
+      aviso.addEventListener('click', () => {
+        if (modal) modal.style.display = 'flex';
+        renderUpdateModal(updateInfo);
+      });
+    }
+  }
+  return updateInfo;
+}
+
+// Enlaces del proyecto. Lista cerrada: el renderer no abre una URL arbitraria.
+const PROJECT_LINKS = Object.freeze({
+  source: 'https://github.com/mika5app/mika5-releases/releases',
+  issues: 'https://github.com/mika5app/mika5-releases/issues',
+  license: 'https://github.com/mika5app/mika5-releases/blob/main/LICENSE'
+});
+
+function openProjectLink(cual) {
+  if (PROJECT_LINKS[cual]) window.mika5.openExternal(PROJECT_LINKS[cual]);
+}
+
+function closeUpdateModal() {
+  const modal = el('updateModal');
+  if (modal) modal.style.display = 'none';
+}
+
+function openUpdatePage() {
+  if (updateInfo?.ok && updateInfo.url) window.mika5.openExternal(updateInfo.url);
+}
+
+async function setUpdateAutoCheck(activo) {
+  try {
+    await window.mika5.setAppState(UPDATE_AUTO_KEY, activo ? '1' : '');
+  } catch (_) {}
+}
+
+// Sólo si el usuario lo activó. Sin esa decisión, abrir MIKA5 no hace ninguna
+// petición para buscar versiones.
+async function checkForUpdatesOnStartup() {
+  try {
+    if ((await window.mika5.getAppState(UPDATE_AUTO_KEY)) !== '1') return;
+  } catch (_) {
+    return;
+  }
+  await checkForUpdates(false);
+}
+
+// --- Motor local (llama.cpp, BitNet) ---
+function renderEngineModal(engine) {
+  const ejecutable = el('engineExecutablePath');
+  const lista = el('engineExecutableSelect');
+  const modelos = el('engineModelsInfo');
+  const estado = el('engineStatus');
+  const iniciar = el('engineStartButton');
+  const instalar = el('engineInstallButton');
+  const guia = el('engineGuideButton');
+  const descarga = el('engineDownloadSection');
+  const encontrados = (engine && engine.executables) || [];
+  const disponibles = (engine && engine.models) || [];
+
+  if (ejecutable) ejecutable.textContent = engine?.executable || t('engine.executable.none');
+  const sistema = el('engineSystem');
+  if (sistema) sistema.textContent = engine?.platform ? `${t('engine.system')} ${engine.platform} ${engine.arch || ''}`.trim() : '';
+  const seccionModelos = el('engineModelsSection');
+  if (seccionModelos) seccionModelos.style.display = engine?.requiresModel ? '' : 'none';
+  const manual = el('engineManualModelSection');
+  if (manual) manual.style.display = engine?.requiresModel ? '' : 'none';
+  // Una frase que diga qué falta, en vez de un panel de rutas.
+  const resumen = el('engineSummary');
+  if (resumen) {
+    let paso = 'engine.step.ready';
+    if (!engine?.executable) {
+      // Lo primero es lo que el usuario puede hacer con un clic. Si MIKA5 no
+      // tiene todavía un motor preparado para este sistema, se dice sin
+      // rodeos; cómo compilarlo queda en la configuración avanzada.
+      if (engine?.setup?.engineAvailable) paso = 'engine.step.oneclick';
+      else if (engine?.canInstall) paso = 'engine.step.install';
+      else paso = engine?.experimental ? 'engine.step.experimental' : 'engine.step.missing';
+    }
+    else if (!engine.executableApproved) paso = 'engine.step.approve';
+    else if (engine.requiresModel && !(engine.models || []).length) paso = 'engine.step.model';
+    resumen.textContent = t(paso).replace('{p}', providerDisplayName(currentProvider).replace(/\s*\(Local\)$/, ''));
+  }
+  // Motor que se compila: se dice qué herramientas hay y cuáles faltan, en vez
+  // de un botón de instalar que no existe.
+  const requisitos = el('engineRequirements');
+  if (requisitos) {
+    const lista = (!engine?.executable && engine?.requirements) || [];
+    requisitos.textContent = lista.length
+      ? `${t('engine.requirements')} ${lista.map(r => `${r.found ? '✓' : '✗'} ${t(`engine.tool.${r.id}`)}`).join(' · ')}`
+      : '';
+    requisitos.style.display = lista.length ? '' : 'none';
+  }
+  const direccion = el('engineEndpoint');
+  if (direccion) {
+    direccion.textContent = engine?.endpoint ? `${t('engine.endpoint')} ${engine.endpoint}` : '';
+  }
+  // «Instalar y comenzar»: un botón para todo lo que falta.
+  const preparar = el('enginePrepareButton');
+  const preparando = engine?.setupStatus?.state === 'running';
+  if (preparar) {
+    const listo = engine?.state === 'running' && engine?.ready;
+    preparar.style.display = engine?.setup?.possible && !listo && !preparando ? '' : 'none';
+    preparar.textContent = t(engine?.setup?.steps?.length ? 'engine.prepare' : 'engine.prepare.start');
+  }
+  renderEngineSetup(engine?.setupStatus);
+  renderEngineCatalog(engine);
+  // Con varios motores instalados se elige entre los encontrados.
+  if (lista) {
+    lista.replaceChildren();
+    lista.style.display = encontrados.length > 1 ? '' : 'none';
+    for (const ruta of encontrados) {
+      const opcion = document.createElement('option');
+      opcion.value = ruta;
+      opcion.textContent = ruta;
+      lista.appendChild(opcion);
+    }
+    if (engine?.executable) lista.value = engine.executable;
+  }
+  const aprobar = el('engineApproveButton');
+  if (aprobar) aprobar.style.display = engine?.executable && !engine?.executableApproved ? '' : 'none';
+  if (instalar) instalar.style.display = !engine?.executable && engine?.canInstall ? '' : 'none';
+  if (guia) {
+    guia.style.display = !engine?.executable && engine?.guideUrl ? '' : 'none';
+    guia.dataset.url = engine?.guideUrl || '';
+  }
+  if (modelos) {
+    modelos.textContent = disponibles.length
+      ? t('engine.models.found').replace('{n}', String(disponibles.length))
+      : t('engine.models.none');
+  }
+  if (descarga) descarga.style.display = engine?.executable && engine?.canDownload ? '' : 'none';
+  if (iniciar) iniciar.disabled = !engine?.canStart;
+  if (estado) {
+    const clave = `provider.error.${engine?.errorCode}`;
+    const texto = engine?.errorCode ? t(clave) : '';
+    estado.textContent = texto && texto !== clave ? texto : (engine?.canStart ? t('engine.ready') : '');
+  }
+}
+
+// Avance de «Instalar y comenzar», en una frase.
+function renderEngineSetup(estado) {
+  const linea = el('engineSetupProgress');
+  if (!linea) return;
+  const enCurso = estado && estado.state === 'running';
+  linea.style.display = enCurso ? '' : 'none';
+  if (!enCurso) return;
+  const avance = estado.total
+    ? ` ${formatBytesRenderer(estado.received)} / ${formatBytesRenderer(estado.total)} (${Math.floor((estado.received / estado.total) * 100)} %)`
+    : '';
+  linea.textContent = t(`engine.setup.${estado.step || 'start'}`) + avance;
+}
+
+let engineSetupTimer = null;
+
+// Sigue la preparación hasta que termina; al acabar, el motor ya está
+// arrancando y el selector de modelos lo refleja.
+function seguirPreparacionDeMotor() {
+  clearTimeout(engineSetupTimer);
+  const proveedor = currentProvider;
+  engineSetupTimer = setTimeout(async () => {
+    let estado;
+    try {
+      estado = await window.mika5.ai.engineSetupStatus(proveedor);
+    } catch (_) {
+      return;
+    }
+    if (estado.state === 'running') {
+      renderEngineSetup(estado);
+      seguirPreparacionDeMotor();
+      return;
+    }
+    if (estado.state === 'failed') showToast(t(`provider.error.${estado.errorCode}`), 'error');
+    if (estado.state === 'done') {
+      showToast(t('engine.setup.done'), 'success');
+      closeEngineModal();
+    } else if (currentProvider === proveedor) {
+      try { renderEngineModal(await window.mika5.ai.describeEngine(proveedor)); } catch (_) {}
+    }
+    if (currentProvider === proveedor) await loadRuntime();
+  }, 1000);
+}
+
+// La autorización se pide en un diálogo nativo del proceso principal, con la
+// lista de lo que se va a descargar y cuánto ocupa.
+async function prepareEngineFromModal() {
+  try {
+    const resultado = await window.mika5.ai.prepareEngine(currentProvider);
+    if (resultado?.canceled) return;
+    if (!resultado?.ok) {
+      showToast(t(`provider.error.${resultado?.errorCode || 'ENGINE_SETUP_UNAVAILABLE'}`), 'error');
+      return;
+    }
+    renderEngineModal(await window.mika5.ai.describeEngine(currentProvider));
+    seguirPreparacionDeMotor();
+  } catch (e) {
+    showToast(t('provider.error.ENGINE_SETUP_UNAVAILABLE'), 'error');
+  }
+}
+
+// Catálogo de modelos recomendados. Sólo se ofrece lo que falta por bajar.
+function renderEngineCatalog(engine) {
+  const seccion = el('engineCatalogSection');
+  const lista = el('engineCatalogSelect');
+  if (!seccion || !lista) return;
+  const pendientes = ((engine && engine.catalog) || []).filter(m => !m.installed);
+  const descargando = engine?.download?.state === 'downloading';
+  seccion.style.display = engine?.executable && pendientes.length && !descargando ? '' : 'none';
+  lista.replaceChildren();
+  for (const m of pendientes) {
+    const opcion = document.createElement('option');
+    opcion.value = m.id;
+    opcion.textContent = `${m.label} — ${formatBytesRenderer(m.size)}`;
+    lista.appendChild(opcion);
+  }
+  renderModelDownload(engine?.download);
+}
+
+let modelDownloadTimer = null;
+
+function renderModelDownload(estado) {
+  const caja = el('engineDownloadProgress');
+  if (!caja) return;
+  const activa = estado?.state === 'downloading';
+  caja.style.display = activa ? '' : 'none';
+  if (!activa) return;
+  const porcentaje = estado.total ? Math.floor((estado.received / estado.total) * 100) : 0;
+  if (el('engineDownloadBar')) el('engineDownloadBar').value = porcentaje;
+  if (el('engineDownloadText')) {
+    el('engineDownloadText').textContent = `${estado.label}: ${formatBytesRenderer(estado.received)} / ${formatBytesRenderer(estado.total)} (${porcentaje} %)`;
+  }
+}
+
+// Sigue una descarga hasta que termina. Un único temporizador; al acabar se
+// refresca el diálogo y el selector de modelos, donde aparece el modelo nuevo.
+function seguirDescargaDeModelo() {
+  clearTimeout(modelDownloadTimer);
+  modelDownloadTimer = setTimeout(async () => {
+    let estado;
+    try {
+      estado = await window.mika5.ai.modelDownloadStatus();
+    } catch (_) {
+      return;
+    }
+    if (estado.state === 'downloading') {
+      renderModelDownload(estado);
+      seguirDescargaDeModelo();
+      return;
+    }
+    if (estado.state === 'done') showToast(t('engine.catalog.done'), 'success');
+    else if (estado.state === 'failed') showToast(t(`provider.error.${estado.errorCode}`), 'error');
+    try {
+      renderEngineModal(await window.mika5.ai.describeEngine(currentProvider));
+    } catch (_) {}
+    await loadRuntime();
+  }, 1000);
+}
+
+async function downloadCatalogModelFromModal() {
+  const id = el('engineCatalogSelect')?.value;
+  if (!id) return;
+  try {
+    const resultado = await window.mika5.ai.downloadCatalogModel(currentProvider, id);
+    if (resultado?.canceled) return;
+    if (!resultado?.ok) {
+      showToast(t(`provider.error.${resultado?.errorCode || 'MODEL_DOWNLOAD_FAILED'}`), 'error');
+      return;
+    }
+    renderEngineModal(await window.mika5.ai.describeEngine(currentProvider));
+    if (!resultado.already) seguirDescargaDeModelo();
+    else await loadRuntime();
+  } catch (e) {
+    showToast(t('provider.error.MODEL_DOWNLOAD_FAILED'), 'error');
+  }
+}
+
+async function cancelModelDownload() {
+  try {
+    await window.mika5.ai.cancelModelDownload();
+  } catch (_) {}
+}
+
+async function selectEngineExecutable(ruta) {
+  try {
+    renderEngineModal(await window.mika5.ai.selectEngineExecutable(currentProvider, ruta));
+    await loadRuntime();
+  } catch (e) {
+    showToast(t('provider.error.ENGINE_EXECUTABLE_NOT_ALLOWED'), 'error');
+  }
+}
+
+// Instalar pide autorización en un diálogo nativo del proceso principal. Aquí
+// sólo se enseña que está en curso y qué pasó.
+async function installEngineFromModal() {
+  const boton = el('engineInstallButton');
+  const estado = el('engineStatus');
+  if (boton) boton.disabled = true;
+  if (estado) estado.textContent = t('engine.install.running');
+  try {
+    const resultado = await window.mika5.ai.installEngine(currentProvider);
+    renderEngineModal(resultado?.engine);
+    if (resultado?.ok) showToast(t('engine.install.done'), 'success');
+    else if (!resultado?.canceled) showToast(t(`provider.error.${resultado?.errorCode || 'ENGINE_INSTALL_FAILED'}`), 'error');
+  } catch (e) {
+    showToast(t('provider.error.ENGINE_INSTALL_FAILED'), 'error');
+  } finally {
+    if (boton) boton.disabled = false;
+  }
+  await loadRuntime();
+}
+
+function openEngineGuide() {
+  const url = el('engineGuideButton')?.dataset.url;
+  if (url) window.mika5.openExternal(url);
+}
+
+async function downloadEngineModelFromModal() {
+  const repo = (el('engineDownloadInput')?.value || '').trim();
+  if (!repo) return;
+  try {
+    const resultado = await window.mika5.ai.downloadEngineModel(currentProvider, repo);
+    if (resultado?.canceled) return;
+    if (resultado?.errorCode) {
+      showToast(t(`provider.error.${resultado.errorCode}`), 'error');
+      return;
+    }
+    closeEngineModal();
+    showToast(t('engine.download.started'), 'success');
+  } catch (e) {
+    showToast(t('provider.error.ENGINE_SPAWN_FAILED'), 'error');
+  }
+  await loadRuntime();
+}
+
+async function showEngineModal() {
+  const modal = el('engineModal');
+  if (!modal) return;
+  const titulo = el('engineModalTitle');
+  if (titulo) titulo.textContent = `${t('engine.title')} — ${providerDisplayName(currentProvider)}`;
+  modal.style.display = 'flex';
+  try {
+    const engine = await window.mika5.ai.describeEngine(currentProvider);
+    renderEngineModal(engine);
+    if (engine?.setupStatus?.state === 'running') seguirPreparacionDeMotor();
+    else if (engine?.download?.state === 'downloading') seguirDescargaDeModelo();
+  } catch (e) {
+    renderEngineModal(null);
+  }
+}
+
+function closeEngineModal() {
+  const modal = el('engineModal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function chooseEngineFile(kind) {
+  try {
+    const resultado = await window.mika5.ai.chooseEngineFile(currentProvider, kind);
+    renderEngineModal(resultado?.engine);
+    if (resultado?.errorCode) showToast(t(`provider.error.${resultado.errorCode}`), 'error');
+  } catch (e) {
+    showToast(t('provider.error.ENGINE_PATH_INVALID'), 'error');
+  }
+}
+
+async function startEngineFromModal() {
+  closeEngineModal();
+  await startLocalEngine();
+}
+
 async function loadRuntime() {
   // Disponibilidad del proveedor activo, con los estados separados. Antes esto
   // era `status()`, que para todo proveedor cloud devolvía `ok: !!apiKey`: la
@@ -2343,7 +2915,7 @@ async function loadRuntime() {
   // deshabilitado, y un runtime sin credencial no podía estar disponible nunca.
   let disp;
   try {
-    disp = await window.mika5.ai.getAvailability();
+    disp = await consultarPreparacion();
   } catch (e) {
     // Si el propio canal falla no se sabe nada del proveedor. Se dice eso, no
     // que esté caído: el error es de la aplicación, no del servidor remoto.
@@ -2360,6 +2932,14 @@ async function loadRuntime() {
   // alguien al otro lado y no que se pueda trabajar, así que tienen estado
   // propio y no se pintan en verde.
   const uiState = disp.uiState || 'unknown';
+  // Arrancando o cargando el modelo: ni conectado ni caído, en camino. Tiene
+  // prioridad sobre el estado de disponibilidad, que durante el arranque dice
+  // «sin conexión» y sería verdad a medias.
+  const readiness = disp.readiness || null;
+  const enEspera = esperandoMotor(readiness);
+  providerReadiness = disp;
+  programarSondeoDePreparacion(enEspera);
+  renderProviderAction(disp);
   const CLASE_POR_ESTADO = {
     'connected': 'status-ok',
     'offline': 'status-offline',
@@ -2370,22 +2950,45 @@ async function loadRuntime() {
     'rate-limited': 'status-degraded',
     'provider-error': 'status-degraded'
   };
-  statusEl.textContent = t(`provider.state.${uiState}`);
-  statusEl.className = `status-pill ${CLASE_POR_ESTADO[uiState] || 'status-unknown'}`;
+  // Un motor local gestionado tiene su propio estado. «Sin conexión» no dice
+  // nada de un motor que está parado esperando a que se elija un modelo, ni
+  // lo distingue de uno que falló o de uno que no está instalado.
+  const estadoMotor = disp.engine && disp.engine.status;
+  const CLASE_POR_MOTOR = {
+    'ready': 'status-ok', 'starting': 'status-loading', 'loading': 'status-loading',
+    'stopped': 'status-unconfigured', 'needs-model': 'status-unconfigured',
+    'needs-approval': 'status-unconfigured', 'not-installed': 'status-unconfigured', 'error': 'status-offline'
+  };
+  if (estadoMotor) {
+    statusEl.textContent = t(`engine.status.${estadoMotor}`);
+    statusEl.className = `status-pill ${CLASE_POR_MOTOR[estadoMotor] || 'status-unknown'}`;
+  } else {
+    statusEl.textContent = enEspera ? t(`provider.readiness.${readiness}`) : t(`provider.state.${uiState}`);
+    statusEl.className = `status-pill ${enEspera ? 'status-loading' : (CLASE_POR_ESTADO[uiState] || 'status-unknown')}`;
+  }
+  statusEl.dataset.engineStatus = estadoMotor || '';
   statusEl.dataset.providerState = uiState;
+  statusEl.dataset.providerReadiness = readiness || '';
   // El tooltip se compone de textos localizados a partir del código, nunca del
   // mensaje del proveedor: un error técnico puede arrastrar rutas, endpoints o
   // fragmentos de credencial, y el título de un elemento es visible y copiable.
   const rotuloError = describirEstadoProveedor(disp);
   if (rotuloError) statusEl.title = rotuloError;
   else statusEl.removeAttribute('title');
+  // Con el motor sirviendo, el rótulo dice qué motor ejecuta el modelo y de
+  // dónde salió el fichero: son cosas distintas y no deben leerse como una.
+  if (estadoMotor === 'ready' && disp.engine.selectedModel) {
+    statusEl.title = t('engine.identity')
+      .replace('{engine}', disp.engine.label || '')
+      .replace('{origin}', origenDeModelo(disp.engine.modelOrigin));
+  }
 
   // El punto del disparador lleva el estado completo, no un booleano: marcar
   // «offline» un proveedor que está sin verificar era decir que está caído.
   const moreActionsTrigger = el("btnMoreActions");
   if (moreActionsTrigger) moreActionsTrigger.dataset.providerState = uiState;
 
-  el("modelSelect").innerHTML = "";
+  el("modelSelect").replaceChildren();
   // Se puebla con `canAttempt`, no con `ready`: un catálogo declarado por el
   // adaptador basta para ofrecer los modelos, aunque nadie haya verificado que
   // el proveedor responda. Lo que no se hace es llamar «listo» a eso.
@@ -2413,7 +3016,11 @@ async function loadRuntime() {
       const sizeFormatted = raw.sizeFormatted || raw.size_human || (size ? formatBytesRenderer(Number(size)) : '');
       const capabilities = raw.capabilities || raw.caps || raw.tags || [];
       const speed = raw.speed || raw.latency || raw.quality || '';
-      const description = raw.description || raw.info || '';
+      // Modelo de un motor local: su procedencia es una descripción, no parte
+      // del nombre.
+      const description = raw.origin
+        ? t('engine.origin').replace('{origin}', origenDeModelo(raw.origin))
+        : (raw.description || raw.info || '');
       return {
         name,
         privacy: raw.privacy,
@@ -2423,6 +3030,8 @@ async function loadRuntime() {
         speed,
         description,
         taskType: raw.taskType || 'chat',
+        label: raw.label,
+        compatibility: raw.compatibility,
         supportsVision: raw.supportsVision === true
       };
     };
@@ -2460,11 +3069,13 @@ async function loadRuntime() {
       for (const m of models) {
         const opt = document.createElement("option");
         opt.value = m.name;
-        opt.textContent = m.name;
+        opt.textContent = m.label || m.name;
         opt.dataset.source = (currentProvider === 'llamacpp' || currentProvider === 'bitnet' || (currentProvider === 'local' && m.privacy !== 'cloud') ? 'local' : 'cloud');
         if (m.size) opt.dataset.size = String(m.size);
         if (m.sizeFormatted) opt.dataset.sizeFormatted = m.sizeFormatted;
         if (m.capabilities && Array.isArray(m.capabilities)) opt.dataset.caps = m.capabilities.join(' • ');
+        // Modelo de un motor local: se dice si está comprobado que carga o no.
+        if (m.compatibility) opt.dataset.caps = t(`engine.compat.${m.compatibility}`);
         if (m.speed) opt.dataset.speed = m.speed;
         if (m.description) opt.dataset.description = m.description;
         if (m.supportsVision) opt.dataset.vision = '1';
@@ -2481,7 +3092,7 @@ async function loadRuntime() {
     // tres situaciones se leían igual, «Proveedor no disponible».
     const opt = document.createElement("option");
     opt.value = "";
-    opt.textContent = t(`provider.selectEmpty.${uiState}`);
+    opt.textContent = textoSelectorVacio(disp, uiState);
     el("modelSelect").appendChild(opt);
     el("modelSelect").disabled = true;
     const pullLocal = el("btnPullLocal");
@@ -2504,13 +3115,29 @@ async function loadRuntime() {
     }
   } catch (_) {}
 
+  // En un motor gestionable manda el modelo con el que arrancó, no el último
+  // que se usó con cualquier proveedor.
+  const modeloDelMotor = disp.engine && disp.engine.selectedModel;
+  if (modeloDelMotor && Array.from(el("modelSelect").options).some(o => o.value === modeloDelMotor)) {
+    el("modelSelect").value = modeloDelMotor;
+  } else if (disp.engine && disp.engine.managed && !disp.engine.external) {
+    // El motor no tiene ningún modelo elegido. No se enseña el primero de la
+    // lista —ni el último que se usó con otro proveedor— como si estuviese
+    // cargado: hasta que el usuario elija uno, el selector lo dice.
+    const sinElegir = document.createElement('option');
+    sinElegir.value = '';
+    sinElegir.textContent = t('engine.pickModel');
+    el("modelSelect").insertBefore(sinElegir, el("modelSelect").firstChild);
+    el("modelSelect").value = '';
+  }
+
   const pullLocal = el("btnPullLocal");
   const pullLibrary = el("btnPull");
   if (pullLocal) {
     pullLocal.disabled = (currentProvider !== 'local');
     pullLocal.style.display = currentProvider === 'alibaba' ? 'none' : '';
   }
-  if (pullLibrary) pullLibrary.style.display = currentProvider === 'alibaba' ? 'none' : '';
+  if (pullLibrary) pullLibrary.style.display = providerLibraryUrl ? '' : 'none';
   syncModelDropdown();
 }
 
@@ -2520,6 +3147,7 @@ async function loadProvider() {
     const provider = await window.mika5.ai.getCurrentProvider();
     if (provider && provider.id) {
       currentProvider = provider.id;
+      providerLibraryUrl = provider.libraryUrl || null;
       if (provider.credentialSessionOnly) showToast('Las claves de proveedores funcionan sólo durante esta sesión: el almacén seguro del sistema no está disponible.', 'warning');
       providerPrivacy = provider.privacy || (provider.privacy === 'private' ? 'private' : 'cloud');
       // El contrato viaja con el proveedor: sin ida y vuelta extra por IPC.
@@ -2822,6 +3450,21 @@ function updatePrivacyUI() {
   const providerLabel = currentProvider === 'local' && providerPrivacy === 'cloud'
     ? 'Ollama Cloud' : providerDisplayName(currentProvider);
 
+  // La biblioteca de modelos es la del proveedor elegido. Depende de cuál
+  // está elegido, no de si responde, así que se decide aquí y no al final de
+  // `loadRuntime()`, que no llega cuando el proveedor no está listo.
+  const biblioteca = el('btnPull');
+  if (biblioteca) {
+    biblioteca.style.display = providerLibraryUrl ? '' : 'none';
+    const rotuloBiblioteca = `${t('library.open')} — ${providerLabel}`;
+    biblioteca.title = rotuloBiblioteca;
+    biblioteca.setAttribute('aria-label', rotuloBiblioteca);
+  }
+  // «Pull» descarga un modelo con Ollama: fuera de Ollama no hace nada, así
+  // que su fila no se enseña.
+  const filaPull = el('btnPullLocal')?.closest?.('.more-actions-row');
+  if (filaPull) filaPull.style.display = currentProvider === 'local' ? '' : 'none';
+
   if (providerPrivacy === 'private') {
     if (indicator) {
       indicator.className = 'privacy-indicator private';
@@ -2829,7 +3472,10 @@ function updatePrivacyUI() {
     }
     renderPrivacyBadge(badge, 'private', t('privacy.private'));
     if (apiKeyBtn) apiKeyBtn.style.display = 'none';
-    if (providerName) providerName.textContent = t('provider.local');
+    // El rótulo es el del proveedor ELEGIDO, no «Ollama» para todo lo que sea
+    // privado: llama.cpp y BitNet también lo son, y enseñar «Ollama (Local)»
+    // con uno de ellos seleccionado decía que la petición iba a otro sitio.
+    if (providerName) providerName.textContent = providerLabel;
     if (inputBanner) inputBanner.classList.remove('visible');
     if (footerEl) footerEl.textContent = t('footer.tagline');
     if (revokeButton) revokeButton.style.display = 'none';
@@ -2942,6 +3588,7 @@ async function switchProvider(providerId) {
   try {
     const result = await window.mika5.ai.setProvider(providerId);
     currentProvider = providerId;
+    providerLibraryUrl = result.libraryUrl || null;
     // El contrato del proveedor anterior no vale para el nuevo.
     await refreshProviderCapabilities();
     // El plan visual pendiente pertenece al proveedor anterior: no se arrastra.
@@ -2950,12 +3597,16 @@ async function switchProvider(providerId) {
 
     updatePrivacyUI();
     await loadRuntime();
-
     if (result.privacy === 'cloud') {
       showToast(t('toast.cloudMode'), 'warning');
     } else {
       showToast(t('toast.privateMode'), 'success');
     }
+    // El usuario acaba de elegir este proveedor: si le falta algo que sólo él
+    // puede aportar, se le dice qué y se le deja a un clic. Es un aviso y no
+    // un diálogo que se abra solo: elegir un proveedor no debe tapar la
+    // ventana ni impedir elegir otro.
+    guiarPreparacion();
   } catch (e) {
     showToast('Error: ' + (e?.message || e), 'error');
   }
@@ -3035,10 +3686,10 @@ function applyProjectVisual(node, visual, { interactive = false } = {}) {
 async function loadProjects() {
   const projects = await withTimeout(Store.listProjects(), 8000, 'cargar proyectos');
   const list = el("projectList");
-  list.innerHTML = "";
+  list.replaceChildren();
 
   // Sort: Quick Chat first, then by created_at desc
-  const sorted = [...projects].sort((a, b) => {
+  const sorted = projects.toSorted((a, b) => {
     if (a.id === QUICK_CHAT_ID) return -1;
     if (b.id === QUICK_CHAT_ID) return 1;
     return (b.created_at || 0) - (a.created_at || 0);
@@ -3103,7 +3754,7 @@ async function loadProjects() {
         if (!yes) return;
         try {
           await Store.deleteProject(p.id);
-          if (activeProjectId === p.id) { activeProjectId = null; activeChatId = null; el("chat").innerHTML = ""; }
+          if (activeProjectId === p.id) { activeProjectId = null; activeChatId = null; el("chat").replaceChildren(); }
           await loadProjects();
           showToast(t('toast.projectDeleted'), "success");
         } catch (_) { showToast(t('toast.errorDelete'), "error"); }
@@ -3202,7 +3853,7 @@ async function selectProject(projectId, name) {
 
     const chatEl = el("chat");
     if (chatEl) {
-      chatEl.innerHTML = "";
+      chatEl.replaceChildren();
     }
 
     el("activeTitle").textContent = name || "Proyecto";
@@ -3252,7 +3903,7 @@ async function selectProject(projectId, name) {
         if (e.name === 'AbortError') throw e;
         console.error('[selectProject] Error creating chat:', e);
         if (chatEl) {
-          chatEl.innerHTML = "";
+          chatEl.replaceChildren();
           renderEmptyState(chatEl, 'no-chat');
         }
       }
@@ -3320,7 +3971,7 @@ async function refreshChats() {
   const list = document.getElementById("chatList");
   if (!list) return;
 
-  list.innerHTML = "";
+  list.replaceChildren();
   if (!activeProjectId) return;
 
   const chats = await withTimeout(Store.listChats(activeProjectId), 8000, 'cargar lista de chats');
@@ -3450,7 +4101,7 @@ async function refreshChats() {
 
         if (activeChatId === c.id) {
           activeChatId = null;
-          el("chat").innerHTML = "";
+          el("chat").replaceChildren();
           el("input").disabled = true;
           el("btnSend").disabled = true;
           const saveBtn = el("btnSaveChatDoc");
@@ -3475,8 +4126,6 @@ async function refreshChats() {
         const wasActive = activeChatId === c.id;
         await Store.deleteChat(c.id);
         // Clean up per-chat tracking state
-        _contextWarningShown.delete(c.id);
-        _contextSavePrompted.delete(c.id);
         chatDrafts.delete(c.id);
         await refreshChats();
         if (wasActive) {
@@ -3488,7 +4137,7 @@ async function refreshChats() {
             if (res && res.ok && res.id) await openChat(res.id);
             else {
               activeChatId = null;
-              el("chat").innerHTML = "";
+              el("chat").replaceChildren();
               el("input").disabled = true;
               el("btnSend").disabled = true;
               el("btnSaveChatDoc").disabled = true;
@@ -3535,7 +4184,7 @@ async function openChatInternal(chatId, signal) {
   chatOldestLoadedOffset = 0;
 
   const chatEl = el("chat");
-  if (chatEl) chatEl.innerHTML = "";
+  if (chatEl) chatEl.replaceChildren();
 
   try {
     await refreshChats();
@@ -3646,7 +4295,7 @@ async function openChatInternal(chatId, signal) {
     console.error("[openChat] ERROR:", error);
     showToast("Error al cargar el chat", "error");
     if (chatEl) {
-      chatEl.innerHTML = "";
+      chatEl.replaceChildren();
       const loadError = document.createElement("div");
       loadError.className = "empty-chat-hint";
       loadError.textContent = t('chat.loadError');
@@ -3821,7 +4470,7 @@ function renderMessagesSafe(messages, signal, showLoadMore) {
     return;
   }
 
-  chatEl.innerHTML = "";
+  chatEl.replaceChildren();
 
   if (!Array.isArray(messages) || messages.length === 0) {
     // Orden contractual: 1) pintar 2) habilitar 3) enfocar 4) recalcular envío.
@@ -3954,7 +4603,7 @@ async function saveProjectContext() {
 async function renderKnowledgeList() {
   const list = el("knowledgeList");
   if (!list) return;
-  list.innerHTML = "";
+  list.replaceChildren();
   if (!activeProjectId) {
     list.innerHTML = '<div class="context-hint">Selecciona un proyecto para gestionar la base de conocimiento.</div>';
     return;
@@ -4758,7 +5407,6 @@ async function appendControlledIntentResponse(
     chatId: context.chatId, content: assistantText, model, renderedMsgId: controlledAssistantId
   });
   el("input").value = "";
-  el("input").style.height = 'auto';
   chatAttachments = [];
   renderAttachmentPreview();
   updateSendButtonState();
@@ -5075,7 +5723,6 @@ async function handlePendingVisualActionReply(text) {
   activeRequestId = requestContext.requestId;
   appendMsg({ role: 'user', content: text, attachments: pendingAttachments });
   el("input").value = "";
-  el("input").style.height = 'auto';
   isGenerating = true;
   appendGeneratingPlaceholder();
   try {
@@ -5255,15 +5902,15 @@ async function send() {
   let resolvedVisualContext = null;
   let activeVisualRoute = null;
   const routingInstruction = extractRoutingInstruction(text);
-  // extractRoutingInstruction devuelve el texto recortado: comparar contra el
-  // texto crudo daría falsos negativos por espacios al inicio o al final.
-  const routingUsesFullText = routingInstruction === text.trim();
   {
     try {
       const route = await window.mika5.ai.routeIntent({
         text: routingInstruction,
         providerId: originProviderId,
         chatId: originChatId,
+        // Un documento adjunto en este turno: «analízalo» habla de él, no de
+        // una imagen que hubiera antes en el chat.
+        hasTextAttachments: textAttachments.length > 0,
         attachments: imageAttachments.map(attachment => ({
           type: 'image',
           mediaType: attachment.mediaType,
@@ -5279,6 +5926,9 @@ async function send() {
         currentModel: model === AUTOMATIC_MODEL_ID ? '' : model
       });
       routedIntent = route.intent;
+      // Aviso de la aplicación, no del modelo: este proveedor analiza imágenes
+      // pero no las edita ni las genera.
+      if (route.imageEditUnavailable) showToast(t('image.editUnavailable'), 'info');
       resolvedVisualContext = route.visualContext;
       activeVisualRoute = route;
       if (route.action === 'error') {
@@ -5361,7 +6011,6 @@ async function send() {
           appendMsg({ role: 'user', content: userPrompt, attachments: generativeAttachments });
         }
         el("input").value = "";
-        el("input").style.height = 'auto';
         chatAttachments = [];
         renderAttachmentPreview();
         isGenerating = true;
@@ -5421,12 +6070,12 @@ async function send() {
         if (!routedImages.length && route.visualContext?.imageRef) {
           routedImages = [route.visualContext.imageRef];
         }
-        // El prompt del plan se deriva de la instrucción de routing: solo puede
-        // reemplazar el contenido cuando no se truncó nada, para que el modelo
-        // siga recibiendo el código o reporte completo.
-        if (routingUsesFullText) {
-          contentToSend = route.modelPrompt || contentToSend;
-        }
+        // El contenido NO se sustituye por el prompt del routing. `contentToSend`
+        // lleva lo que escribió el usuario MÁS el texto de los documentos que
+        // adjuntó; el prompt del routing sólo lleva lo escrito. Sustituirlo
+        // descartaba el documento adjunto antes de enviarlo: con «analiza el
+        // documento» el modelo recibía esas tres palabras y pedía que le
+        // pegasen el documento.
         if (originProviderId === 'alibaba') {
           showToast('Usando qwen3.7-plus para analizar imágenes.', 'info');
         }
@@ -5528,23 +6177,37 @@ async function send() {
       const kChatId = requestContext.chatId || null;
       if (kProjId) {
         // Use cached provider privacy (set by loadProvider) — no IPC needed
-        const maxRagChars = (typeof providerPrivacy !== 'undefined' && providerPrivacy === 'private') ? 12000 : 24000;
+        const maxRagChars = presupuestoDeContexto('knowledgeChars',
+          (typeof providerPrivacy !== 'undefined' && providerPrivacy === 'private') ? 12000 : 24000);
 
         // Server-side truncation: only returns chunks up to maxRagChars
         // Use complete mode for project-level context to avoid round-robin bias
         const mode = isQuickChatScope ? 'selective' : 'complete';
         // Quick Chat no tiene conocimiento de proyecto: sólo el del chat actual.
         const scopeOpts = { includeProjectScope: !isQuickChatScope };
-        const chunks = await window.mika5.rag.listChunksRaw(kProjId, kChatId, maxRagChars, mode, scopeOpts);
+        // La pregunta viaja con la consulta: de un documento largo se traen
+        // los fragmentos que hablan de ella, no los primeros.
+        let chunks = await window.mika5.rag.listChunksRaw(kProjId, kChatId, maxRagChars, mode, scopeOpts, dbContent);
+        chunks = await completarPorSignificado(chunks, {
+          projectId: kProjId, chatId: kChatId, includeProjectScope: scopeOpts.includeProjectScope,
+          pregunta: dbContent, maxChars: maxRagChars
+        });
         if (chunks && chunks.length > 0) {
           const titles = [...new Set(chunks.map(c => c.title))];
           ragDocumentTitles = titles.filter(Boolean);
           knowledgeListContext = `Documentos en la base de conocimiento del proyecto (${titles.length}):\n${titles.map(t => '- ' + t).join('\n')}`;
 
           const contextText = chunks.map(c =>
-            `[Documento: ${c.title || "Sin título"}] (fragmento ${(c.chunk_index || 0) + 1}):\n${c.chunk_text}`
+            `[Documento: ${c.title || "Sin título"}] (fragmento ${(c.chunk_index || 0) + 1}${c.doc_chunks ? ` de ${c.doc_chunks}` : ''}):\n${c.chunk_text}`
           ).join("\n\n---\n\n");
-          ragContext = `El usuario tiene los siguientes documentos cargados en la base de conocimiento de este proyecto. Cuando el usuario pregunte sobre "archivos", "documentos", "contexto del proyecto" o el contenido del proyecto, se refiere a ESTE contenido:\n\n${contextText}\n\nFin de los documentos del proyecto. Basa tu respuesta en este contenido.`;
+          // El modelo recibe una parte de los documentos. Tiene que saberlo, o
+          // concluye que lo que no ve no existe y se lo dice así al usuario.
+          const totalFragmentos = titles.reduce((suma, titulo) =>
+            suma + (chunks.find(c => c.title === titulo)?.doc_chunks || 0), 0);
+          const avisoParcial = totalFragmentos > chunks.length
+            ? `\n\nIMPORTANTE: los documentos son más largos que lo que cabe aquí. Se muestran ${chunks.length} de ${totalFragmentos} fragmentos${chunks[0].selection === 'relevance' ? ', elegidos por su relación con la pregunta' : ''}. Si la respuesta no está en estos fragmentos, no afirmes que el documento no la contiene: di que no aparece en la parte consultada y pide al usuario que reformule o indique el apartado.`
+            : '';
+          ragContext = `El usuario tiene los siguientes documentos cargados en la base de conocimiento de este proyecto. Cuando el usuario pregunte sobre "archivos", "documentos", "contexto del proyecto" o el contenido del proyecto, se refiere a ESTE contenido:\n\n${contextText}\n\nFin de los documentos del proyecto. Basa tu respuesta en este contenido.${avisoParcial}`;
         }
       }
     } catch (chunkErr) {
@@ -5573,40 +6236,13 @@ async function send() {
     baseMessages.push({ role: 'user', content: contentToSend });
     conversationHistory = baseMessages;
 
-    // === Gestión progresiva de contexto (mensajes) ===
-    let managedContext = await manageConversationContext(conversationHistory);
-    if (managedContext !== conversationHistory) conversationHistory = managedContext;
-    let trimmedMessages = managedContext;
-
-    // === Context Window Management (caracteres) ===
-    // Fallback: limitar por tamaño si sigue siendo grande
-    const MAX_CONTEXT_CHARS = 32000;
-    const MIN_RECENT_PAIRS = 2;
-    const totalChars = trimmedMessages.reduce((sum, m) => sum + (m.content || '').length, 0);
-
-    if (totalChars > MAX_CONTEXT_CHARS) {
-      let charCount = 0;
-      let cutIndex = trimmedMessages.length;
-      for (let i = trimmedMessages.length - 1; i >= 0; i--) {
-        charCount += (trimmedMessages[i].content || '').length;
-        cutIndex = i;
-        const keptMessages = trimmedMessages.length - i;
-        if (charCount > MAX_CONTEXT_CHARS && keptMessages >= MIN_RECENT_PAIRS * 2) {
-          cutIndex = i + 1;
-          break;
-        }
-      }
-      trimmedMessages = trimmedMessages.slice(cutIndex);
-      if (cutIndex > 0) {
-        trimmedMessages.unshift({
-          role: 'system',
-          content: `[Previous ${cutIndex} messages omitted to fit context window.]`
-        });
-        console.log(`Context trimmed (chars): ${managedContext.length} → ${trimmedMessages.length} messages`);
-      }
+    // === Contexto enviado al modelo ===
+    // Sin límite por número de mensajes: sólo el presupuesto de contexto.
+    const trimmedMessages = trimContextToBudget(conversationHistory);
+    if (trimmedMessages !== conversationHistory) {
+      console.log(`Context trimmed (chars): ${conversationHistory.length} → ${trimmedMessages.length} messages`);
     }
 
-    // Build ONE combined system message (many models ignore all but the first system message)
     const systemParts = [];
 
     // Part 1: Project/chat instructions
@@ -5702,7 +6338,6 @@ async function send() {
     // C) Solo tras persistir: efectos visibles y llamada al proveedor.
     activeRequestId = requestContext.requestId;
     el("input").value = "";
-    el("input").style.height = 'auto';
     chatAttachments = [];
     renderAttachmentPreview();
     clearReplyTo();
@@ -5734,6 +6369,11 @@ async function send() {
       const out = await sendAIChat(payload);
       if (wasCanceled) throw new Error('Canceled');
       if (!out || !out.message) throw new Error('Respuesta vacía');
+      // La respuesta sale de notas tomadas tramo a tramo, no del texto entero
+      // de una vez: el usuario tiene que saberlo.
+      if (Number(out.readInParts) > 1 && shouldRenderRequestOutput(requestContext, currentRequestView())) {
+        showToast(t('toast.readInParts', { n: out.readInParts }), 'info');
+      }
       let answer = safeAssistantContent(out.message.content);
       let answerModel = model;
       let terminalImageRef = null;
@@ -6217,8 +6857,8 @@ async function loadModelsForCurrentProvider() {
   const select = el('modelSelect');
   if (!modelOptions || !select) return;
 
-  modelOptions.innerHTML = '';
-  select.innerHTML = '';
+  modelOptions.replaceChildren();
+  select.replaceChildren();
 
   let res;
   try {
@@ -6550,12 +7190,22 @@ function wireSessionActions() {
   }
   renderSessionLabels();
   renderInstalledVersion().catch(e => console.warn('renderInstalledVersion:', e));
+  // Sólo consulta si el usuario activó el aviso; por defecto no sale nada.
+  checkForUpdatesOnStartup().catch(e => console.warn('checkForUpdatesOnStartup:', e));
+}
+
+// Con un método de entrada (chino, japonés, coreano) Enter CONFIRMA el
+// carácter que se está componiendo: no es «enviar». Sin esta comprobación el
+// mensaje salía a medias. `keyCode 229` cubre los motores que entregan esa
+// tecla con `isComposing` ya a falso.
+function confirmaComposicion(e) {
+  return e.isComposing === true || e.keyCode === 229;
 }
 
 function wire() {
   el("btnCreateProject").onclick = createProject;
   const projInput = el("projectName");
-  if (projInput) projInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); createProject(); } });
+  if (projInput) projInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); if (confirmaComposicion(e)) return; createProject(); } });
 
   wireMoreActionsMenu();
   wireSessionActions();
@@ -6604,6 +7254,7 @@ function wire() {
       if (e.key === "Escape") closeChatSearch();
       if (e.key === "Enter") {
         e.preventDefault();
+        if (confirmaComposicion(e)) return;
         navigateSearch(e.shiftKey ? searchCurrentIdx - 1 : searchCurrentIdx + 1);
       }
     });
@@ -6621,7 +7272,10 @@ function wire() {
   const replyCloseBtn = el("replyPreviewClose");
   if (replyCloseBtn) replyCloseBtn.addEventListener("click", clearReplyTo);
   const btnPull = el("btnPull");
-  if (btnPull) btnPull.onclick = () => window.mika5.openExternal("https://ollama.com/library");
+  // La biblioteca que se abre es la del proveedor ELEGIDO. La dirección la
+  // declara cada adaptador en el proceso principal; aquí no hay ninguna
+  // escrita, y por tanto ninguna puede quedarse apuntando a otro proveedor.
+  if (btnPull) btnPull.onclick = () => { if (providerLibraryUrl) window.mika5.openExternal(providerLibraryUrl); };
   const btnPullLocal = el("btnPullLocal");
   if (btnPullLocal) btnPullLocal.onclick = pullModel;
   
@@ -6754,12 +7408,9 @@ function wire() {
 
   el("input").addEventListener("input", () => {
     updateSendButtonState();
-    // Auto-grow textarea
-    const inp = el("input");
-    if (inp) {
-      inp.style.height = 'auto';
-      inp.style.height = Math.min(inp.scrollHeight, 200) + 'px';
-    }
+    // El cuadro crece solo con su contenido: `field-sizing: content` en
+    // `.input-textarea`. Antes se medía `scrollHeight` en cada tecla, lo que
+    // obligaba a recalcular el diseño dos veces por pulsación.
   });
 
   // Clipboard paste: support pasting images
@@ -6809,6 +7460,7 @@ function wire() {
   el("input").addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+      if (confirmaComposicion(e)) return;
       if (!isGenerating) send();
     }
   });
@@ -7019,7 +7671,7 @@ async function loadAlibabaConfig() {
   }
   generateAlibabaEndpoint();
   const simpleModelSelect = el('alibabaModelSelect');
-  simpleModelSelect.innerHTML = '';
+  simpleModelSelect.replaceChildren();
   for (const model of alibabaConfig.models || []) {
     if (!['chat', 'vision'].includes(model.taskType || 'chat')) continue;
     const option = document.createElement('option');
@@ -7066,7 +7718,7 @@ function capabilitySummary(capabilities) {
 function renderAlibabaModels() {
   const list = el('alibabaModelsList');
   if (!list) return;
-  list.innerHTML = '';
+  list.replaceChildren();
   const groups = [
     ['chat', 'Chat'],
     ['vision', 'Vision'],
@@ -7220,7 +7872,7 @@ function populateAlibabaGenerationModels() {
   const imageSelect = el('alibabaImageModelSelect');
   const videoList = el('alibabaVideoModels');
   if (imageSelect) {
-    imageSelect.innerHTML = '';
+    imageSelect.replaceChildren();
     for (const model of (alibabaConfig?.models || []).filter(item => item.taskType === 'image-generation')) {
       const option = document.createElement('option');
       option.value = model.id;
@@ -7268,7 +7920,7 @@ async function generateAlibabaImage() {
   try {
     const response = await sendAIImage(generationPayload);
     if (results) {
-      results.innerHTML = '';
+      results.replaceChildren();
       for (const url of response.images || []) {
         const img = document.createElement('img');
         img.src = url;
@@ -7390,6 +8042,17 @@ async function saveApiKey(provider) {
   }
 
   // Listen for knowledge indexing completion from main process
+  // Un documento largo en un motor con la ventana pequeña se lee por partes:
+  // varios minutos en los que «Generando…» no decía nada.
+  window.mika5?.ai?.onChatProgress?.((avance) => {
+    if (!avance || avance.requestId !== activeRequestId || !(avance.parts > 0)) return;
+    const placeholder = document.getElementById('msg-generating-placeholder');
+    if (!placeholder) return;
+    placeholder.textContent = avance.answering
+      ? t('chat.readingPartsAnswering', { n: avance.parts })
+      : t('chat.readingParts', { i: avance.part, n: avance.parts });
+  });
+
   if (window.mika5?.onKnowledgeIndexComplete) {
     window.mika5.onKnowledgeIndexComplete((data) => {
       renderKnowledgeList();
