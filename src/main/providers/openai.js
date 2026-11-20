@@ -24,6 +24,9 @@ function isChatModel(id) {
 // OPENAI - Cloud (No privado)
 const adaptadorOpenai = {
   name: 'OpenAI (Cloud)',
+  // Catálogo oficial de este proveedor, para que el usuario explore modelos.
+  // Cada proveedor tiene el suyo: ninguno hereda el de otro.
+  libraryUrl: 'https://developers.openai.com/api/docs/models',
   privacy: 'cloud',
   requiresKey: true,
   baseUrl: 'https://api.openai.com/v1',

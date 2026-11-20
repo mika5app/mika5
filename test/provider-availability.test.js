@@ -211,13 +211,14 @@ console.log('\n=== 3. Timeout y abort contra el listModels real de llamacpp ==='
   // `local` está aquí desde que `ollamaApi` acepta señal: antes no podía
   // estarlo porque no hace fetch propio y la señal moría en la frontera del
   // módulo. Su cadena completa se ejercita en test/ollama-cancellation.test.js.
-  const CON_SENAL = ['openai', 'groq', 'llamacpp', 'bitnet', 'local'];
+  // anthropic y moonshot consultan ya su catálogo por red, como los demás.
+  const CON_SENAL = ['openai', 'anthropic', 'groq', 'moonshot', 'llamacpp', 'bitnet', 'local'];
   for (const id of CON_SENAL) {
     const firma = String(PROVIDERS[id].listModels);
     check(/options\s*=\s*\{\}/.test(firma.slice(0, firma.indexOf(')') + 1)),
       `${id}: listModels() acepta un tercer parámetro de opciones`);
   }
-  for (const id of ['anthropic', 'moonshot', 'alibaba']) {
+  for (const id of ['alibaba']) {
     const firma = String(PROVIDERS[id].listModels);
     check(!/options/.test(firma.slice(0, firma.indexOf(')') + 1)),
       `${id}: no se le añade una señal ficticia, porque no hace red`);
@@ -531,6 +532,8 @@ console.log('\n=== 10 bis. loadRuntime() sólo puebla el selector con canAttempt
           id, innerHTML: '', textContent: '', disabled: false, hijos: [],
           dataset: {}, style: {}, className: '', title: undefined,
           appendChild(h) { this.hijos.push(h); },
+          // Vaciar el nodo, como hace el DOM de verdad.
+          replaceChildren() { this.hijos.length = 0; },
           removeAttribute() { this.title = undefined; }
         });
       }
@@ -581,7 +584,13 @@ console.log('\n=== 10 bis. loadRuntime() sólo puebla el selector con canAttempt
         AUTOMATIC_MODEL_ID: '__automatic__',
         formatBytesRenderer: () => '1 GB',
         syncModelDropdown: () => {},
-        describirEstadoProveedor: () => ''
+        describirEstadoProveedor: () => '',
+        // Estado de la preparación del proveedor: `loadRuntime()` lo escribe.
+        providerReadiness: null,
+        readinessPollTimer: null,
+        readinessPollDesde: 0,
+        readinessPollEnCurso: false,
+        providerLibraryUrl: null
       }
     };
   };
@@ -589,7 +598,12 @@ console.log('\n=== 10 bis. loadRuntime() sólo puebla el selector con canAttempt
   const ejecutarLoadRuntime = async (disp) => {
     const { nodos, globales, diccionario } = construirEntorno(disp);
     const nombres = Object.keys(globales);
-    const cuerpo = renderer.slice('loadRuntime');
+    // `loadRuntime()` se apoya en estas funciones del propio renderer. Se
+    // extraen del mismo fichero, igual que ella: son código de producción, no
+    // dobles, así que lo que decide el selector sigue siendo lo real.
+    const AUXILIARES = ['esperandoMotor', 'describirMotor', 'textoSelectorVacio', 'consultarPreparacion',
+      'programarSondeoDePreparacion', 'renderProviderAction'];
+    const cuerpo = [...AUXILIARES, 'loadRuntime'].map(nombre => renderer.slice(nombre)).join('\n');
     const fabrica = new Function(...nombres, `${cuerpo}\nreturn loadRuntime;`);
     await fabrica(...nombres.map(n => globales[n]))();
     const select = nodos.get('modelSelect');
@@ -1157,6 +1171,152 @@ console.log('\n=== 17. llama-server de punta a punta contra HTTP real (llamacpp 
     check(describirError(fallo).errorCode === 'PROVIDER_TRANSPORT_UNREACHABLE',
       `${id}: y se clasifica como transporte inalcanzable`);
   }
+}
+
+// ---------------------------------------------------------------------------
+console.log('\n=== 18. Cada proveedor tiene su propia biblioteca y su propio catálogo ===');
+// ---------------------------------------------------------------------------
+{
+  // Informe de campo: la «Biblioteca de modelos» abría la de Ollama con
+  // cualquier proveedor elegido. La dirección estaba escrita en el renderer.
+  const BIBLIOTECAS = {
+    local: 'https://ollama.com/library',
+    openai: 'https://developers.openai.com/api/docs/models',
+    anthropic: 'https://platform.claude.com/docs/en/models/overview',
+    groq: 'https://console.groq.com/docs/models',
+    moonshot: 'https://platform.kimi.ai/docs/models',
+    alibaba: 'https://www.alibabacloud.com/help/en/model-studio/models',
+    llamacpp: 'https://huggingface.co/models?library=gguf',
+    bitnet: 'https://github.com/microsoft/BitNet#supported-models'
+  };
+  const m = gestor();
+  check(JSON.stringify(Object.keys(PROVIDERS).sort()) === JSON.stringify(Object.keys(BIBLIOTECAS).sort()),
+    'los ocho proveedores declaran biblioteca: ninguno queda sin la suya');
+  for (const [id, url] of Object.entries(BIBLIOTECAS)) {
+    check(PROVIDERS[id].libraryUrl === url, `${id}: su biblioteca es ${url}`);
+    check(new URL(PROVIDERS[id].libraryUrl).protocol === 'https:', `${id}: la biblioteca es HTTPS`);
+  }
+  const hosts = Object.values(PROVIDERS).map(a => new URL(a.libraryUrl).host + new URL(a.libraryUrl).pathname + new URL(a.libraryUrl).hash);
+  check(new Set(hosts).size === hosts.length, 'no hay dos proveedores que compartan biblioteca');
+  check(Object.entries(PROVIDERS).filter(([, a]) => /ollama\.com/.test(a.libraryUrl)).map(([id]) => id).join() === 'local',
+    'sólo Ollama enlaza a la biblioteca de Ollama');
+  for (const p of m.getAllProviders()) {
+    check(p.libraryUrl === BIBLIOTECAS[p.id], `${p.id}: el renderer recibe la biblioteca en la lista de proveedores`);
+  }
+  for (const id of Object.keys(BIBLIOTECAS)) {
+    check(m.setProvider(id).libraryUrl === BIBLIOTECAS[id] && m.getProvider().libraryUrl === BIBLIOTECAS[id],
+      `${id}: al elegirlo, la biblioteca que viaja es la suya`);
+  }
+  const renderer = fs.readFileSync(path.join(__dirname, '../src/renderer/app.js'), 'utf8');
+  const marcado = fs.readFileSync(path.join(__dirname, '../src/renderer/index.html'), 'utf8');
+  check(!/ollama\.com/.test(renderer) && !/ollama\.com\/library/.test(marcado),
+    'el renderer no lleva escrita la biblioteca de Ollama: no puede volver a abrirla para todos');
+  check(/openExternal\(providerLibraryUrl\)/.test(renderer),
+    'la biblioteca que se abre es la que el proceso principal dio para el proveedor elegido');
+
+  // Catálogos que antes eran listas escritas en el código.
+  const peticiones = [];
+  let responder = () => ({ status: 200, cuerpo: { data: [] } });
+  const catalogo = http.createServer((req, res) => {
+    peticiones.push({ url: req.url, metodo: req.method, cabeceras: req.headers });
+    const r = responder(req);
+    res.writeHead(r.status, { 'Content-Type': 'application/json' });
+    res.end(typeof r.crudo === 'string' ? r.crudo : JSON.stringify(r.cuerpo));
+  });
+  await new Promise(resolve => catalogo.listen(0, '127.0.0.1', resolve));
+  const BASE = `http://127.0.0.1:${catalogo.address().port}/v1`;
+  const CLAVE = 'sk-clave-secreta-de-prueba-0001';
+  try {
+    for (const id of ['anthropic', 'moonshot']) {
+      // Sin credencial: ni una petición.
+      peticiones.length = 0;
+      const sin = await conAdaptador(id, { baseUrl: BASE }, () => PROVIDERS[id].listModels(''));
+      check(sin.models.length === 0 && sin.probe.attempted !== true && peticiones.length === 0,
+        `${id} sin credencial: catálogo vacío y ninguna petición`);
+
+      // Con modelos.
+      responder = (req) => (id === 'anthropic'
+        ? (/after_id=claude-b/.test(req.url)
+          ? { status: 200, cuerpo: { data: [{ id: 'claude-c', display_name: 'Claude C' }], has_more: false, last_id: 'claude-c' } }
+          : { status: 200, cuerpo: { data: [{ id: 'claude-opus-5-5', display_name: 'Claude Opus 5.5' }, { id: 'claude-b', display_name: 'B' }], has_more: true, last_id: 'claude-b' } })
+        : { status: 200, cuerpo: { data: [{ id: 'kimi-nuevo' }, { id: 'moonshot-v1-8k' }] } });
+      const con = await conAdaptador(id, { baseUrl: BASE }, () => PROVIDERS[id].listModels(CLAVE));
+      const nombres = con.models.map(x => x.name);
+      check(con.probe.reachable === true && con.probe.authenticated === true,
+        `${id} con credencial válida: catálogo consultado y clave aceptada`);
+      if (id === 'anthropic') {
+        check(JSON.stringify(nombres) === JSON.stringify(['claude-opus-5-5', 'claude-b', 'claude-c']),
+          `anthropic: el catálogo es el que devuelve la Models API, paginado (${nombres.join(', ')})`);
+        check(peticiones.length === 2 && peticiones.every(p => p.metodo === 'GET' && p.url.startsWith('/v1/models?limit=100'))
+          && peticiones[1].url.includes('after_id=claude-b'),
+          'anthropic: GET /v1/models, y la segunda página se pide con after_id');
+        check(peticiones.every(p => p.cabeceras['x-api-key'] === CLAVE && p.cabeceras['anthropic-version']),
+          'anthropic: la clave va en x-api-key, con anthropic-version');
+        check(con.models[0].description === 'Claude Opus 5.5' && con.models[0].supportsVision === true,
+          'anthropic: nombre visible del catálogo, y visión con la misma regla que aplica el chat');
+      } else {
+        check(JSON.stringify(nombres) === JSON.stringify(['kimi-nuevo', 'moonshot-v1-8k']),
+          `moonshot: el catálogo es el que devuelve el proveedor, incluido un modelo que el código no conocía (${nombres.join(', ')})`);
+        check(peticiones.length === 1 && peticiones[0].metodo === 'GET' && peticiones[0].url === '/v1/models'
+          && peticiones[0].cabeceras.authorization === `Bearer ${CLAVE}`,
+          'moonshot: GET /models contra la misma dirección del chat, con la clave en Authorization');
+        check(con.models.every(x => !('supportsVision' in x) && !x.capabilities),
+          'moonshot: el catálogo no informa de capacidades y no se inventa ninguna');
+      }
+      check(peticiones.every(p => !/chat|messages|completions/.test(p.url)),
+        `${id}: descubrir modelos no hace ninguna inferencia facturable`);
+      check(!JSON.stringify(con).includes(CLAVE), `${id}: la clave no aparece en lo que se devuelve`);
+
+      // A través del gestor: catálogo vacío, clave rechazada, servidor caído.
+      const gm = gestor();
+      gm.apiKeys[id] = CLAVE;
+      responder = () => ({ status: 200, cuerpo: { data: [], has_more: false } });
+      const vacio = await conAdaptador(id, { baseUrl: BASE }, () => gm.getAvailability(id));
+      check(vacio.modelsAvailable === 0 && vacio.errorCode === 'PROVIDER_CATALOG_EMPTY' && vacio.canAttempt === false,
+        `${id} con catálogo vacío: no se ofrece ningún modelo, ni uno de reserva`);
+      responder = () => ({ status: 401, cuerpo: { error: { message: `clave ${CLAVE} inválida` } } });
+      const rechazada = await conAdaptador(id, { baseUrl: BASE }, () => gm.getAvailability(id));
+      check(rechazada.uiState === UI_STATE.AUTHENTICATION_REJECTED && rechazada.models.length === 0
+        && !JSON.stringify(rechazada).includes(CLAVE),
+        `${id} con clave rechazada: estado «clave rechazada», sin modelos y sin eco de la clave`);
+      responder = () => ({ status: 200, crudo: '<html>no es json</html>' });
+      const ilegible = await conAdaptador(id, { baseUrl: BASE }, () => gm.getAvailability(id));
+      check(ilegible.errorCode === 'PROVIDER_RESPONSE_INVALID' && ilegible.canAttempt === false,
+        `${id} con respuesta ilegible: error del proveedor, no un catálogo inventado`);
+      const caido = await conAdaptador(id, { baseUrl: BASE_CERRADA }, () => gm.getAvailability(id));
+      check(caido.reachable === false && caido.models.length === 0 && caido.canAttempt === false,
+        `${id} con el catálogo inaccesible: sin conexión, y sin caer a los modelos de otro proveedor`);
+    }
+
+    // Cambiar de proveedor repetidamente: cada catálogo es el suyo.
+    const varios = gestor();
+    varios.apiKeys.anthropic = CLAVE;
+    varios.apiKeys.moonshot = CLAVE;
+    const vistos = [];
+    for (const id of ['anthropic', 'moonshot', 'anthropic', 'moonshot']) {
+      responder = () => (id === 'anthropic'
+        ? { status: 200, cuerpo: { data: [{ id: 'claude-opus-5-5' }], has_more: false } }
+        : { status: 200, cuerpo: { data: [{ id: 'kimi-nuevo' }] } });
+      varios.setProvider(id);
+      const d = await conAdaptador(id, { baseUrl: BASE }, () => varios.getAvailability());
+      vistos.push(`${varios.getProvider().id}:${d.models.map(x => x.name).join('+')}`);
+    }
+    check(vistos.join(' ') === 'anthropic:claude-opus-5-5 moonshot:kimi-nuevo anthropic:claude-opus-5-5 moonshot:kimi-nuevo',
+      `al alternar proveedores cada uno muestra sólo sus modelos (${vistos.join(' ')})`);
+  } finally {
+    await new Promise(resolve => catalogo.close(resolve));
+  }
+
+  // Los modelos actuales de Claude aceptan imágenes: el selector y el envío coinciden.
+  const { resolveVisionSupport } = require('../src/main/provider-capabilities');
+  for (const modelo of ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-2', 'claude-haiku-4-5']) {
+    check(resolveVisionSupport({ providerId: 'anthropic', modelId: modelo }).supported === true,
+      `${modelo}: se admite adjuntar imágenes`);
+  }
+  const fuenteAnthropic = fuenteDelAdaptador('anthropic');
+  const fuenteMoonshot = fuenteDelAdaptador('moonshot');
+  check(!/claude-3-|claude-opus-4-5'|moonshot-v1-128k/.test(fuenteAnthropic + fuenteMoonshot),
+    'ni Anthropic ni Moonshot llevan ya una lista de modelos escrita en el código');
 }
 
 await srv.cerrar();

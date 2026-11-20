@@ -33,7 +33,7 @@ contextBridge.exposeInMainWorld("mika5", {
     queryByChat: (chatId, text, k) => ipcRenderer.invoke("rag:queryByChat", chatId, text, k),
     indexKnowledgeItem: (knowledgeItemId) => ipcRenderer.invoke("rag:indexKnowledgeItem", knowledgeItemId),
     getDocumentText: (knowledgeItemId) => ipcRenderer.invoke("rag:getDocumentText", knowledgeItemId),
-    listChunksRaw: (projectId, chatId, maxChars, mode = 'selective', opts) => ipcRenderer.invoke("rag:listChunksRaw", projectId, chatId, maxChars, mode, opts)
+    listChunksRaw: (projectId, chatId, maxChars, mode = 'selective', opts, query) => ipcRenderer.invoke("rag:listChunksRaw", projectId, chatId, maxChars, mode, opts, query)
   },
   files: {
     downloadImage: (params) => ipcRenderer.invoke('files:download-image', params)
@@ -49,11 +49,28 @@ contextBridge.exposeInMainWorld("mika5", {
     updateProviderModel: (provider, modelId, model) => ipcRenderer.invoke('ai:update-provider-model', provider, modelId, model),
     deleteProviderModel: (provider, modelId) => ipcRenderer.invoke('ai:delete-provider-model', provider, modelId),
     chat: (params) => ipcRenderer.invoke('ai:chat', params),
+    onChatProgress: (callback) => {
+      ipcRenderer.on('ai:chat-progress', (_event, data) => callback(data));
+    },
     generateImage: (params) => ipcRenderer.invoke('ai:generate-image', params),
     routeIntent: (params) => ipcRenderer.invoke('ai:route-intent', params),
     listModels: () => ipcRenderer.invoke('ai:list-models'),
     status: () => ipcRenderer.invoke('ai:status'),
     getAvailability: (providerId) => ipcRenderer.invoke('ai:get-availability', providerId),
+    getReadiness: (providerId, options) => ipcRenderer.invoke('ai:get-readiness', providerId, options),
+    startEngine: (providerId) => ipcRenderer.invoke('ai:start-engine', providerId),
+    describeEngine: (providerId) => ipcRenderer.invoke('ai:describe-engine', providerId),
+    chooseEngineFile: (providerId, kind) => ipcRenderer.invoke('ai:choose-engine-file', providerId, kind),
+    selectEngineModel: (providerId, modelId) => ipcRenderer.invoke('ai:select-engine-model', providerId, modelId),
+    selectEngineExecutable: (providerId, path) => ipcRenderer.invoke('ai:select-engine-executable', providerId, path),
+    approveEngine: (providerId) => ipcRenderer.invoke('ai:approve-engine', providerId),
+    installEngine: (providerId) => ipcRenderer.invoke('ai:install-engine', providerId),
+    downloadEngineModel: (providerId, repo) => ipcRenderer.invoke('ai:download-engine-model', providerId, repo),
+    downloadCatalogModel: (providerId, catalogId) => ipcRenderer.invoke('ai:download-catalog-model', providerId, catalogId),
+    modelDownloadStatus: () => ipcRenderer.invoke('ai:model-download-status'),
+    prepareEngine: (providerId) => ipcRenderer.invoke('ai:prepare-engine', providerId),
+    engineSetupStatus: (providerId) => ipcRenderer.invoke('ai:engine-setup-status', providerId),
+    cancelModelDownload: () => ipcRenderer.invoke('ai:cancel-model-download'),
     abort: (requestId) => ipcRenderer.invoke('ai:abort', requestId),
     getCapabilities: (providerId) => ipcRenderer.invoke('ai:get-capabilities', providerId),
     resolveVision: (params) => ipcRenderer.invoke('ai:resolve-vision', params),
@@ -85,6 +102,7 @@ contextBridge.exposeInMainWorld("mika5", {
   printToPDF: (payload) => ipcRenderer.invoke("app:printToPDF", payload),
   app: {
     quit: () => ipcRenderer.invoke("app:quit"),
-    getVersion: () => ipcRenderer.invoke("app:getVersion")
+    getVersion: () => ipcRenderer.invoke("app:getVersion"),
+    checkForUpdates: () => ipcRenderer.invoke("app:checkForUpdates")
   }
 });

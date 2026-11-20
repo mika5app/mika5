@@ -33,6 +33,26 @@ function resolverBaseOllama(valor) {
   return `${url.protocol}//${url.host}`;
 }
 
+// ¿`ollama serve` escucharía donde MIKA5 consulta, y sólo en bucle local?
+// `OLLAMA_HOST` admite «host», «host:puerto», «:puerto» y una URL completa.
+function ollamaHostEsElPorDefecto(valor) {
+  if (!valor) return true;
+  const texto = String(valor).trim();
+  const conEsquema = /^[a-z]+:\/\//i.test(texto);
+  let url;
+  try {
+    url = new URL(conEsquema ? texto : `http://${texto.startsWith(':') ? `127.0.0.1${texto}` : texto}`);
+  } catch (_) {
+    return false;
+  }
+  const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (host !== '127.0.0.1' && host !== '::1' && host !== 'localhost') return false;
+  // Sin puerto, un «host» a secas usa el 11434; una URL con esquema usa el
+  // puerto del esquema, que no es donde MIKA5 consulta.
+  if (url.port === '') return !conEsquema && !/:\d+$/.test(texto);
+  return url.port === '11434';
+}
+
 const BASE = resolverBaseOllama(process.env.MIKA5_OLLAMA_BASE);
 const FETCH_TIMEOUT = 600000; // 10 minutos para modelos muy grandes
 
@@ -336,4 +356,4 @@ const ollamaApi = {
 // local, que es la parte con consecuencias de seguridad. `BASE` no: quien la
 // necesita la obtiene de `ollamaApi.status().base`, y exponer el valor ya
 // resuelto sólo añade superficie que después hay que mantener.
-module.exports = { ollamaApi, fetchWithTimeout, resolverBaseOllama, describirPlazo };
+module.exports = { ollamaApi, fetchWithTimeout, resolverBaseOllama, ollamaHostEsElPorDefecto, describirPlazo };

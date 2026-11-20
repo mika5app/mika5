@@ -44,6 +44,18 @@ through the public MIKA5 releases repository:
 
 https://github.com/mika5app/mika5-releases
 
+Every release carries `MIKA5-<version>-source.tar.gz`, the complete source that
+produced its installers, together with `BUILDING.md`, `LICENSE` and
+`SHA256SUMS.txt`.
+
+Report problems and propose changes at
+https://github.com/mika5app/mika5-releases/issues. `CONTRIBUTING.md` explains
+how to send a change. Licenses of the bundled third-party software are listed in
+`THIRD_PARTY_NOTICES.md`.
+
+Inside the application, the version dialog (More actions → Check for a new
+version) links to the source, the issue tracker and the license.
+
 ## Current release: 0.3.1
 
 Download Windows, macOS Intel/Apple Silicon and Linux packages, corresponding
@@ -56,6 +68,8 @@ and native packaging validation. Ollama local and cloud models are supported;
 cloud use retains explicit privacy notices and consent. Pro and Cloud services
 remain future editions, separate from Community.
 
-Updates are manual. Close the application and keep a backup of its data before
-installing a newer version. Windows builds are not Authenticode-signed and
+MIKA5 can tell you when a newer stable version has been published, on request or
+when it opens if you turn that on; it never downloads or installs anything by
+itself. Updates are manual. Close the application and keep a backup of its data
+before installing a newer version. Windows builds are not Authenticode-signed and
 macOS builds are not notarized. Verify downloads using `SHA256SUMS.txt`.

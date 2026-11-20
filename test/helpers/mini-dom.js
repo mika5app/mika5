@@ -93,6 +93,13 @@ function createDocument() {
     }
     get innerHTML() { return this._text; }
 
+    // Sin argumentos, como la usa el renderer: vacía el nodo.
+    replaceChildren() {
+      this.children.forEach(c => { c.parentNode = null; });
+      this.children = [];
+      this._text = '';
+    }
+
     appendChild(child) {
       child.parentNode = this;
       this.children.push(child);

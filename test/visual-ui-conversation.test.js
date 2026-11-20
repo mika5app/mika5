@@ -231,8 +231,24 @@ function compositorTests() {
   check(/\.input-textarea\s*\{[^}]*max-height:\s*200px/.test(indexHtml),
     'el textarea conserva su límite de crecimiento');
   check(renderer.text.includes('updateSendButtonState'), 'updateSendButtonState sigue en uso');
-  check(/scrollHeight/.test(renderer.slice('wire')) || renderer.text.includes('input.style.height'),
-    'el autogrow del compositor sigue presente');
+  // El autogrow es ahora declarativo: `field-sizing: content`, con un mínimo de
+  // dos líneas (lo que fijaba rows="2") y el mismo tope. Ya no hay JavaScript
+  // midiendo `scrollHeight` en cada tecla ni alturas en línea que deshacer.
+  check(/\.input-textarea\s*\{[^}]*field-sizing:\s*content;[^}]*min-height:\s*calc\(2lh \+ 2 \* var\(--spacing-sm\)\)/.test(indexHtml),
+    'el autogrow del compositor sigue presente, en CSS');
+  check(!/scrollHeight, 200/.test(renderer.text) && !/el\("input"\)\.style\.height/.test(renderer.text),
+    'y nada en el renderer vuelve a fijar la altura del compositor a mano');
+
+  // Enter con un método de entrada (chino, japonés, coreano) confirma el
+  // carácter en composición: no envía, no crea el proyecto, no salta de resultado.
+  const confirmaComposicion = new Function(`${renderer.slice('confirmaComposicion')}; return confirmaComposicion;`)();
+  check(confirmaComposicion({ key: 'Enter', isComposing: true, keyCode: 229 }) === true
+    && confirmaComposicion({ key: 'Enter', isComposing: false, keyCode: 229 }) === true
+    && confirmaComposicion({ key: 'Enter', isComposing: false, keyCode: 13 }) === false,
+    'Enter durante una composición se reconoce; un Enter normal, no');
+  const enters = [...renderer.text.matchAll(/addEventListener\("keydown",[\s\S]{0,160}?e\.key === "Enter"[\s\S]{0,140}/g)].map(m => m[0]);
+  check(enters.length === 3 && enters.every(trozo => /e\.preventDefault\(\);[\s\S]*?if \(confirmaComposicion\(e\)\) return;/.test(trozo)),
+    `los ${enters.length} campos que actúan con Enter esperan a que termine la composición`);
   check(renderer.text.includes("el('btnStop')") || renderer.text.includes('btnStop'),
     'el estado de cancelación sigue cableado');
   check(renderer.slice('updateSendButtonState').includes('disabled'),
