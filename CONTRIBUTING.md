@@ -11,23 +11,23 @@ Thank you for your interest in contributing to MIKA5! Every contribution -- whet
 
 ## Where things live
 
-- **Issues, bug reports and ideas:** https://github.com/mika5app/mika5-releases/issues
-- **Releases, installers, checksums and the source of every release:**
+- **Source code and pull requests:** https://github.com/mika5app/mika5 (this repository)
+- **Issues about the code:** https://github.com/mika5app/mika5/issues
+- **Installers, checksums and the source archive of every release:**
   https://github.com/mika5app/mika5-releases/releases
+- **Questions and ideas:** https://github.com/mika5app/mika5-releases/discussions
 - **License:** AGPL-3.0, see `LICENSE`. Third-party notices are in
   `THIRD_PARTY_NOTICES.md`.
 
-The development repository is not public yet. Until a public source repository
-or mirror exists, the source you can build and modify is the
-`MIKA5-<version>-source.tar.gz` archive attached to each release, and code
-contributions are sent as patches (see "Sending a change" below).
+The repository is public. Each release also carries
+`MIKA5-<version>-source.tar.gz`, the exact source that release was built from.
 
 ## Getting Started
 
 ```bash
-# 1. Download MIKA5-<version>-source.tar.gz from the release page and unpack it
-tar -xzf MIKA5-<version>-source.tar.gz
-cd MIKA5-<version>
+# 1. Fork https://github.com/mika5app/mika5 and clone your fork
+git clone https://github.com/<your-username>/mika5.git
+cd mika5
 
 # 2. Install dependencies with the pinned Node (see .nvmrc and BUILDING.md)
 npm install
@@ -58,14 +58,20 @@ test: add RAG cosine similarity edge cases
 
 ## Sending a change
 
-1. Open an issue at https://github.com/mika5app/mika5-releases/issues describing
-   the problem or the proposal, so the change can be discussed first.
-2. Make the change on top of the source archive of the latest release.
-3. Attach the change to the issue as a patch (`git diff` or `git format-patch`
-   output), with the DCO sign-off described below.
+1. For anything larger than a small fix, open an issue at
+   https://github.com/mika5app/mika5/issues first, so the change can be
+   discussed before you write it.
+2. Create a branch from `main` in your fork and make the change there, with
+   tests and with the DCO sign-off described below.
+3. Open a pull request against `main`.
 
-When a public source repository is available, changes will be accepted as pull
-requests there and this section will be updated.
+What to expect:
+
+- `main` only changes through pull requests, and the CI checks have to pass.
+- Workflow runs for a pull request from outside the project wait for a
+  maintainer to approve them. They never have access to the project's secrets.
+- Never commit credentials. Local configuration belongs in a `.env` file, which
+  is ignored; `.env.example` may be committed, without real values.
 
 ## Review
 
