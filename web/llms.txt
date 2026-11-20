@@ -1,0 +1,21 @@
+# MIKA5
+
+> Free AI desktop app that runs 100% on your computer. Local RAG, projects, per-chat knowledge, vision models. Powered by Ollama.
+
+MIKA5 Community 0.3.1 runs on Windows 10+, macOS 12+ and Linux. It is free and distributed under AGPL-3.0.
+
+## Pages
+
+- [MIKA5 — AI on your machine. Under your control.](https://mika5.xyz/): Product overview, features, download instructions and frequently asked questions.
+- [MIKA5 Model Guide](https://mika5.xyz/models.html): How to choose local AI models for MIKA5: exact Ollama tags, verified download sizes, hardware requirements and use cases. No benchmark scores.
+- [MIKA5 White Paper](https://mika5.xyz/whitepaper.html): Technical white paper for MIKA5 Community v0.3.1: Electron architecture, local SQLite storage, local RAG engine, optional cloud adapters with explicit consent, security design and AGPL-3.0 distribution.
+
+## En español
+
+- [MIKA5 — IA en tu máquina. Bajo tu control.](https://mika5.xyz/es/): La portada en español: funciones, descarga, primeros pasos y preguntas frecuentes.
+- [Guía de modelos de MIKA5](https://mika5.xyz/es/models.html): Cómo elegir modelos de IA locales para MIKA5: etiquetas de Ollama, tamaños de descarga, requisitos de hardware y casos de uso.
+- [White Paper de MIKA5](https://mika5.xyz/es/whitepaper.html): Documento técnico de MIKA5 Community v0.3.1: arquitectura, almacenamiento local, motor RAG, adaptadores cloud opcionales con consentimiento y diseño de seguridad.
+
+## Downloads
+
+- [MIKA5 Community 0.3.1](https://github.com/mika5app/mika5-releases/releases/tag/v0.3.1): Installers for Windows, macOS and Linux.

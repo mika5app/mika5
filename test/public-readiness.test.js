@@ -72,6 +72,19 @@ for (const archivo of flujos) {
   }
 }
 
+// El flujo que despliega la web recibe la clave SSH del servidor. Con el
+// repositorio publico, una accion de terceros referida por etiqueta podria
+// cambiar de contenido sin que nada aqui cambie.
+{
+  const despliegue = leer('.github/workflows/deploy-landing.yml');
+  check(/^permissions:\n  contents: read\n/m.test(despliegue), 'deploy-landing.yml: su token solo puede leer');
+  const acciones = [...despliegue.matchAll(/^\s+(?:- )?uses: (\S+)/gm)].map(m => m[1]);
+  check(acciones.length === 3 && acciones.every(a => /@[0-9a-f]{40}$/.test(a)),
+    `deploy-landing.yml: sus ${acciones.length} acciones van fijadas a un commit exacto, no a una etiqueta`);
+  check(!/^\s{2}pull_request/m.test(despliegue) && /persist-credentials: false/.test(despliegue),
+    'deploy-landing.yml: no corre en pull requests ni deja credenciales en la copia de trabajo');
+}
+
 console.log('\n=== 4b. Protecciones preparadas para cuando el repositorio sea publico ===');
 {
   const regla = (nombre) => JSON.parse(leer(`.github/rulesets/${nombre}.json`));

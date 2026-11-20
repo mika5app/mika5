@@ -1,13 +1,19 @@
 <!DOCTYPE html>
-<html lang="en" class="scroll-smooth">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <meta name="color-scheme" content="dark">
     <title>MIKA5 Model Guide — Local models, hardware and use cases</title>
     <meta name="description" content="How to choose local AI models for MIKA5: exact Ollama tags, verified download sizes, hardware requirements and use cases. No benchmark scores.">
     <meta name="robots" content="index, follow">
     <link rel="canonical" href="https://mika5.xyz/models.html">
-    <link rel="icon" type="image/png" href="icon.png">
+    <link rel="alternate" hreflang="en" href="https://mika5.xyz/models.html">
+    <link rel="alternate" hreflang="es" href="https://mika5.xyz/es/models.html">
+    <link rel="alternate" hreflang="x-default" href="https://mika5.xyz/models.html">
+    <link rel="icon" type="image/png" sizes="64x64" href="icon-64.png">
+    <link rel="apple-touch-icon" href="icon-180.png">
     <meta name="author" content="MIKA5">
     <meta name="theme-color" content="#0B0F14">
 
@@ -17,6 +23,8 @@
     <meta property="og:type" content="article">
     <meta property="og:url" content="https://mika5.xyz/models.html">
     <meta property="og:image" content="https://mika5.xyz/og-image.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
     <meta property="og:locale" content="en_US">
     <meta property="og:locale:alternate" content="es_ES">
     <meta property="og:site_name" content="MIKA5">
@@ -82,65 +90,119 @@
     }
     </script>
 
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <!-- Fetch the other pages of the site when a link to them is about to be used.
+         Browsers without speculation rules ignore this block. -->
+    <script type="speculationrules">
+    {
+      "prefetch": [{
+        "where": { "href_matches": "/*" },
+        "eagerness": "moderate"
+      }]
+    }
+    </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
     <style>
-        body { background: #0B0F14; color: #F9FAFB; font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }
+        body { background: #0B0F14; color: #F9FAFB; font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; overflow-wrap: break-word; }
         h1,h2,h3,h4,.font-heading { font-family: 'Space Grotesk', sans-serif; }
         .glass { background: #111827; border: 1px solid rgba(255,255,255,0.06); }
         .accent { background: linear-gradient(90deg, #7C3AED, #6EE7B7); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+        /* Forced colours drop the gradient: without this the text stays transparent. */
+        @media (forced-colors: active) { .accent { background: none; -webkit-text-fill-color: currentColor; } }
         .tier-badge { font-size: 0.6rem; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700; }
         .bench-bar { height: 6px; border-radius: 3px; transition: width 0.5s ease; }
         .model-card { background: #111827; border: 1px solid rgba(255,255,255,0.06); transition: border-color 0.2s, transform 0.2s; }
-        .model-card:hover { border-color: rgba(124,58,237,0.4); transform: translateY(-2px); }
+        .model-card:hover { border-color: rgba(124,58,237,0.4); }
+        @media (prefers-reduced-motion: no-preference) { .model-card:hover { transform: translateY(-2px); } }
         .spec-chip { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); font-size: 0.7rem; }
         .tag-local { background: rgba(52,211,153,0.1); border: 1px solid rgba(52,211,153,0.3); color: #34D399; }
         .tag-cloud { background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.3); color: #FBBF24; }
         .tag-vision { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: #F87171; }
         .tag-code { background: rgba(56,189,248,0.1); border: 1px solid rgba(56,189,248,0.3); color: #38BDF8; }
         .tag-reason { background: rgba(167,139,250,0.1); border: 1px solid rgba(167,139,250,0.3); color: #A78BFA; }
-        .toc-link { color: #6B7280; transition: color 0.2s; font-size: 0.85rem; }
+        .toc-link { color: #8B95A5; transition: color 0.2s; font-size: 0.85rem; }
         .toc-link:hover { color: #A78BFA; }
+        @media (pointer: coarse) {
+            #lang-toggle { min-block-size: 44px; min-inline-size: 44px; }
+            nav .toc-link { min-block-size: 44px; padding-block: 0.75rem; }
+        }
         .terminal { background: #070A0E; border: 1px solid rgba(255,255,255,0.08); font-family: 'Menlo','Monaco','Cascadia Code',monospace; font-size: 0.78rem; line-height: 1.8; }
-        .terminal .p { color: #7C3AED; }
-        .terminal .c { color: #374151; }
+        .terminal .p { color: #A78BFA; }
+        .terminal .c { color: #7D8797; }
+        .terminal code { font-family: inherit; }
         table { border-collapse: collapse; width: 100%; }
-        thead th { background: #0D1117; font-family: 'Space Grotesk', sans-serif; font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase; color: #6B7280; padding: 12px 16px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.06); }
+        thead th { background: #0D1117; font-family: 'Space Grotesk', sans-serif; font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase; color: #8B95A5; padding: 12px 16px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.06); }
         tbody td { padding: 14px 16px; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 0.85rem; vertical-align: middle; }
         tbody tr:last-child td { border-bottom: none; }
         tbody tr:hover td { background: rgba(255,255,255,0.02); }
         .score-high { color: #34D399; font-weight: 600; }
         .score-mid { color: #FBBF24; font-weight: 600; }
         .score-low { color: #9CA3AF; }
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+        /* Scrollbar: standard properties. The thumb keeps at least 3:1 contrast
+           against the page background so it can be seen. */
+        :root {
+            color-scheme: dark;
+            --scrollbar-thumb: rgba(255,255,255,0.38);
+            --scrollbar-track: transparent;
+            scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+        }
+        /* scrollbar-width stays at its default: a thin thumb is too small a
+           target for some people. Engines without scrollbar-color get the
+           same colours through the legacy selectors. */
+        @supports not (scrollbar-color: auto) {
+            ::-webkit-scrollbar { width: 12px; height: 12px; }
+            ::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+            ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 6px; }
+        }
+
+        /* Smooth in-page scrolling only for people who have not asked for less motion. */
+        @media (prefers-reduced-motion: no-preference) {
+            html { scroll-behavior: smooth; }
+        }
+        /* Anchor jumps and keyboard focus stop below the sticky header. */
+        html { scroll-padding-top: 5rem; }
+        /* Shown only while it has keyboard focus. */
+        .visually-hidden:where(:not(:focus-within, :active)) {
+            position: absolute !important; clip-path: inset(50%) !important; overflow: hidden !important;
+            width: 1px !important; height: 1px !important; margin: -1px !important; padding: 0 !important;
+            border: 0 !important; white-space: nowrap !important;
+        }
+        .skip-link { position: fixed; top: 8px; left: 8px; z-index: 60; padding: 0.75rem 1rem; border-radius: 0.5rem; background: #111827; color: #F9FAFB; }
+        /* Headings break into lines of similar length; paragraphs avoid orphans. */
+        h1, h2, h3 { text-wrap: balance; }
+        p, li { text-wrap: pretty; }
+        /* Readable line length for running text; cards and tables keep their width. */
+        main p, main li { max-width: 60ch; }
     </style>
 </head>
 <body>
+<a href="#main-content" class="skip-link visually-hidden" data-i18n="models.nav.skip">Skip to main content</a>
 
 <!-- NAV -->
 <header class="sticky top-0 z-50 border-b border-white/5 bg-[#0B0F14]/90 backdrop-blur-md">
-    <div class="max-w-[1200px] mx-auto px-6 h-16 flex items-center justify-between">
+    <div class="max-w-[1200px] mx-auto px-6 min-h-[4rem] flex items-center justify-between">
         <a href="/" class="flex items-center gap-2.5 text-sm font-medium text-[#9CA3AF] hover:text-white transition-colors">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+            <svg aria-hidden="true" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
             <span data-i18n="models.nav.back">Back to MIKA5</span>
         </a>
         <div class="font-heading font-bold flex items-center gap-2">
-            <img src="icon.png" alt="MIKA5 logo" class="w-5 h-5 rounded" data-i18n-attr="alt:models.nav.logoAlt">
+            <img src="icon-64.png" width="20" height="20" alt="MIKA5 logo" class="w-5 h-5 rounded" data-i18n-attr="alt:models.nav.logoAlt">
             <span data-i18n="models.nav.guide">Model Guide</span>
         </div>
         <div class="flex items-center gap-3">
             <a href="#practical-table" class="text-sm text-[#9CA3AF] hover:text-white transition-colors hidden md:block" data-i18n="models.nav.jump">Jump to the practical table →</a>
-            <button id="lang-toggle" onclick="toggleLang()" class="text-xs font-bold px-3 py-1 rounded-full border border-white/10 text-[#9CA3AF] hover:text-white hover:border-white/30 transition-all" aria-label="Switch language to Spanish" data-i18n-attr="aria-label:models.nav.langLabel">EN</button>
+            <button id="lang-toggle" type="button" class="text-xs font-bold px-3 py-1 rounded-full border border-white/10 text-[#9CA3AF] hover:text-white hover:border-white/30 transition-all" aria-label="ES: switch language to Spanish" data-i18n-attr="aria-label:models.nav.langLabel">ES</button>
         </div>
     </div>
 </header>
 
-<main class="max-w-[1200px] mx-auto px-6 pb-32">
+<main id="main-content" class="max-w-[1200px] mx-auto px-6 pb-32">
 
     <!-- HERO -->
     <section class="py-16 md:py-20 space-y-6 max-w-3xl">
-        <div class="flex items-center gap-2 text-xs uppercase tracking-widest text-[#7C3AED] font-bold">
+        <div class="flex items-center gap-2 text-xs uppercase tracking-widest text-[#A78BFA] font-bold">
             <span class="w-2 h-2 rounded-full bg-[#7C3AED]"></span>
             <span data-i18n="models.hero.badge">MIKA5 official guide · Updated November 2026 · Verified against MIKA5 Community v0.3.1</span>
         </div>
@@ -151,7 +213,7 @@
         <p class="text-lg text-[#9CA3AF] leading-relaxed max-w-2xl" data-i18n="models.hero.lead">
             Not every model runs on every machine. This guide lists the models MIKA5 can work with today, what each one needs in memory and disk, what it is good for and where it falls short. Every figure below — size, parameters and quantization — comes from the model's own manifest in the official Ollama registry, read on 4 August 2026.
         </p>
-        <p class="text-sm text-[#6B7280]" data-i18n-html="models.hero.note">
+        <p class="text-sm text-[#8B95A5]" data-i18n-html="models.hero.note">
             All local models are pulled with <code class="bg-white/8 px-1.5 py-0.5 rounded text-xs">ollama pull &lt;tag&gt;</code>. Cloud providers need an API key of your own, configured in MIKA5 settings.
         </p>
     </section>
@@ -159,27 +221,29 @@
     <div class="flex flex-col lg:flex-row gap-12">
 
         <!-- SIDEBAR TOC (sticky) -->
-        <aside class="lg:w-56 shrink-0">
+        <nav class="lg:w-56 shrink-0" aria-labelledby="toc-title">
             <div class="sticky top-24 space-y-1">
-                <p class="text-[10px] uppercase tracking-widest text-[#4B5563] mb-3" data-i18n="models.toc.title">Contents</p>
-                <a href="#hardware-tiers" class="toc-link block py-1" data-i18n="models.toc.hardware">Hardware tiers</a>
-                <a href="#entry-level" class="toc-link block py-1 pl-3" data-i18n="models.toc.entry">↳ Entry level (8 GB)</a>
-                <a href="#mid-range" class="toc-link block py-1 pl-3" data-i18n="models.toc.mid">↳ Mid range (16 GB)</a>
-                <a href="#high-end" class="toc-link block py-1 pl-3" data-i18n="models.toc.high">↳ High end (32 GB)</a>
-                <a href="#workstation" class="toc-link block py-1 pl-3" data-i18n="models.toc.workstation">↳ Workstation (64 GB)</a>
-                <a href="#by-usecase" class="toc-link block py-1 mt-2" data-i18n="models.toc.useCases">By use case</a>
-                <a href="#reasoning" class="toc-link block py-1 pl-3" data-i18n="models.toc.reasoning">↳ Reasoning &amp; analysis</a>
-                <a href="#coding" class="toc-link block py-1 pl-3" data-i18n="models.toc.coding">↳ Coding</a>
-                <a href="#vision" class="toc-link block py-1 pl-3" data-i18n="models.toc.vision">↳ Vision &amp; OCR</a>
-                <a href="#documents" class="toc-link block py-1 pl-3" data-i18n="models.toc.documents">↳ Documents &amp; RAG</a>
-                <a href="#multilingual" class="toc-link block py-1 pl-3" data-i18n="models.toc.multilingual">↳ Multilingual</a>
-                <a href="#privacy" class="toc-link block py-1 pl-3" data-i18n="models.toc.privacy">↳ Maximum privacy</a>
-                <a href="#cloud" class="toc-link block py-1 mt-2" data-i18n="models.toc.cloud">Cloud providers</a>
-                <a href="#practical-table" class="toc-link block py-1" data-i18n="models.toc.table">Practical table</a>
-                <a href="#how-to-install" class="toc-link block py-1" data-i18n="models.toc.install">Install commands</a>
-                <a href="#embedding" class="toc-link block py-1" data-i18n="models.toc.embeddings">Embedding models</a>
+                <p id="toc-title" class="text-[0.625rem] uppercase tracking-widest text-[#7D8797] mb-3" data-i18n="models.toc.title">Contents</p>
+                <ul class="space-y-1">
+                <li><a href="#hardware-tiers" class="toc-link block py-1" data-i18n="models.toc.hardware">Hardware tiers</a></li>
+                <li><a href="#entry-level" class="toc-link block py-1 pl-3" data-i18n="models.toc.entry">↳ Entry level (8 GB)</a></li>
+                <li><a href="#mid-range" class="toc-link block py-1 pl-3" data-i18n="models.toc.mid">↳ Mid range (16 GB)</a></li>
+                <li><a href="#high-end" class="toc-link block py-1 pl-3" data-i18n="models.toc.high">↳ High end (32 GB)</a></li>
+                <li><a href="#workstation" class="toc-link block py-1 pl-3" data-i18n="models.toc.workstation">↳ Workstation (64 GB)</a></li>
+                <li><a href="#by-usecase" class="toc-link block py-1 mt-2" data-i18n="models.toc.useCases">By use case</a></li>
+                <li><a href="#reasoning" class="toc-link block py-1 pl-3" data-i18n="models.toc.reasoning">↳ Reasoning &amp; analysis</a></li>
+                <li><a href="#coding" class="toc-link block py-1 pl-3" data-i18n="models.toc.coding">↳ Coding</a></li>
+                <li><a href="#vision" class="toc-link block py-1 pl-3" data-i18n="models.toc.vision">↳ Vision &amp; OCR</a></li>
+                <li><a href="#documents" class="toc-link block py-1 pl-3" data-i18n="models.toc.documents">↳ Documents &amp; RAG</a></li>
+                <li><a href="#multilingual" class="toc-link block py-1 pl-3" data-i18n="models.toc.multilingual">↳ Multilingual</a></li>
+                <li><a href="#privacy" class="toc-link block py-1 pl-3" data-i18n="models.toc.privacy">↳ Maximum privacy</a></li>
+                <li><a href="#cloud" class="toc-link block py-1 mt-2" data-i18n="models.toc.cloud">Cloud providers</a></li>
+                <li><a href="#practical-table" class="toc-link block py-1" data-i18n="models.toc.table">Practical table</a></li>
+                <li><a href="#how-to-install" class="toc-link block py-1" data-i18n="models.toc.install">Install commands</a></li>
+                <li><a href="#embedding" class="toc-link block py-1" data-i18n="models.toc.embeddings">Embedding models</a></li>
+                </ul>
             </div>
-        </aside>
+        </nav>
 
         <!-- MAIN CONTENT -->
         <div class="flex-1 min-w-0 space-y-20">
@@ -207,12 +271,12 @@
                                 <span class="tag-local tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.local">Local</span>
                             </div>
                             <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.cards.llama32-3b">Meta's small Llama. It follows instructions reliably and writes acceptable English and Spanish, which is why MIKA5 offers it as the first download when no local model is installed. It is the safe place to start, not the model to pick for long documents.</p>
-                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                            <div class="flex flex-wrap gap-1.5 text-[0.625rem]">
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.size.llama32-3b">2.0 GB</span>
                                 <span class="spec-chip px-2 py-0.5 rounded">Q4_K_M</span>
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.params.llama32-3b">3.2B parameters</span>
                             </div>
-                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull llama3.2:3b</div>
+                            <div class="terminal rounded-lg p-3 text-[0.6875rem]"><span class="p">$</span> <code>ollama pull llama3.2:3b</code></div>
                         </div>
                         <div class="model-card p-5 rounded-xl space-y-3">
                             <div class="flex items-start justify-between gap-2">
@@ -220,13 +284,13 @@
                                 <span class="tag-local tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.local">Local</span>
                             </div>
                             <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.cards.qwen25-3b">Alibaba's small Qwen. Trained on a broad multilingual corpus, it is the most solid option at this size if you work in Spanish or switch languages often. Its reasoning is limited by its size, as in any 3B model.</p>
-                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                            <div class="flex flex-wrap gap-1.5 text-[0.625rem]">
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.size.qwen25-3b">1.9 GB</span>
                                 <span class="spec-chip px-2 py-0.5 rounded">Q4_K_M</span>
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.params.qwen25-3b">3.1B parameters</span>
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.tag.multilingual">Multilingual</span>
                             </div>
-                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull qwen2.5:3b</div>
+                            <div class="terminal rounded-lg p-3 text-[0.6875rem]"><span class="p">$</span> <code>ollama pull qwen2.5:3b</code></div>
                         </div>
                         <div class="model-card p-5 rounded-xl space-y-3">
                             <div class="flex items-start justify-between gap-2">
@@ -234,12 +298,12 @@
                                 <span class="tag-local tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.local">Local</span>
                             </div>
                             <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.cards.gemma2-2b">The lightest model in this guide. Under 2 GB, it runs on almost any modern machine and answers short questions quickly. It is a Gemma 2 build, one generation behind Gemma 3, and quality drops clearly as soon as the task gets complex: choose it when the limit is memory, not quality.</p>
-                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                            <div class="flex flex-wrap gap-1.5 text-[0.625rem]">
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.size.gemma2-2b">1.6 GB</span>
                                 <span class="spec-chip px-2 py-0.5 rounded">Q4_0</span>
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.params.gemma2-2b">2.6B parameters</span>
                             </div>
-                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull gemma2:2b</div>
+                            <div class="terminal rounded-lg p-3 text-[0.6875rem]"><span class="p">$</span> <code>ollama pull gemma2:2b</code></div>
                         </div>
                         <div class="model-card p-5 rounded-xl space-y-3">
                             <div class="flex items-start justify-between gap-2">
@@ -247,13 +311,13 @@
                                 <div class="flex gap-1"><span class="tag-local tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.local">Local</span><span class="tag-vision tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.vision">Vision</span></div>
                             </div>
                             <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.cards.gemma3-4b">The smallest Gemma 3 build that still fits an 8 GB machine, and the only model in this tier that accepts images. Whether MIKA5 lets you attach one depends on the capability probe: the app asks Ollama what the model supports and never infers it from the name.</p>
-                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                            <div class="flex flex-wrap gap-1.5 text-[0.625rem]">
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.size.gemma3-4b">3.3 GB</span>
                                 <span class="spec-chip px-2 py-0.5 rounded">Q4_K_M</span>
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.params.gemma3-4b">4.3B parameters</span>
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.tag.imageInput">Image input</span>
                             </div>
-                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull gemma3:4b</div>
+                            <div class="terminal rounded-lg p-3 text-[0.6875rem]"><span class="p">$</span> <code>ollama pull gemma3:4b</code></div>
                         </div>
                     </div>
                 </div>
@@ -274,13 +338,13 @@
                                 <div class="flex gap-1"><span class="tag-local tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.local">Local</span></div>
                             </div>
                             <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.cards.qwen25-7b">The general-purpose model of this tier. Broad multilingual coverage, Spanish included, and solid instruction following. If you are going to install a single 7B model and use it for everything, start with this one.</p>
-                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                            <div class="flex flex-wrap gap-1.5 text-[0.625rem]">
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.size.qwen25-7b">4.7 GB</span>
                                 <span class="spec-chip px-2 py-0.5 rounded">Q4_K_M</span>
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.params.qwen25-7b">7.6B parameters</span>
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.tag.multilingual">Multilingual</span>
                             </div>
-                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull qwen2.5:7b</div>
+                            <div class="terminal rounded-lg p-3 text-[0.6875rem]"><span class="p">$</span> <code>ollama pull qwen2.5:7b</code></div>
                         </div>
                         <div class="model-card p-5 rounded-xl space-y-3">
                             <div class="flex items-start justify-between gap-2">
@@ -288,12 +352,12 @@
                                 <span class="tag-local tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.local">Local</span>
                             </div>
                             <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.cards.llama31-8b">Meta's 8B, a solid base for work mostly in English and the starting point of a very large ecosystem of fine-tunes. Conversational and comfortable with long-form writing; in Spanish it stays one step behind Qwen.</p>
-                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                            <div class="flex flex-wrap gap-1.5 text-[0.625rem]">
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.size.llama31-8b">4.9 GB</span>
                                 <span class="spec-chip px-2 py-0.5 rounded">Q4_K_M</span>
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.params.llama31-8b">8.0B parameters</span>
                             </div>
-                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull llama3.1:8b</div>
+                            <div class="terminal rounded-lg p-3 text-[0.6875rem]"><span class="p">$</span> <code>ollama pull llama3.1:8b</code></div>
                         </div>
                         <div class="model-card p-5 rounded-xl space-y-3">
                             <div class="flex items-start justify-between gap-2">
@@ -301,12 +365,12 @@
                                 <span class="tag-local tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.local">Local</span>
                             </div>
                             <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.cards.mistral-7b">A fast 7B from the French lab Mistral. It is the lightest of the group at 4.4 GB and holds a requested format well, which makes it a good fit for structured output and extraction tasks where response time matters.</p>
-                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                            <div class="flex flex-wrap gap-1.5 text-[0.625rem]">
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.size.mistral-7b">4.4 GB</span>
                                 <span class="spec-chip px-2 py-0.5 rounded">Q4_K_M</span>
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.params.mistral-7b">7.2B parameters</span>
                             </div>
-                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull mistral:7b</div>
+                            <div class="terminal rounded-lg p-3 text-[0.6875rem]"><span class="p">$</span> <code>ollama pull mistral:7b</code></div>
                         </div>
                         <div class="model-card p-5 rounded-xl space-y-3">
                             <div class="flex items-start justify-between gap-2">
@@ -314,13 +378,13 @@
                                 <div class="flex gap-1"><span class="tag-local tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.local">Local</span><span class="tag-reason tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.reasoning">Reasoning</span></div>
                             </div>
                             <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.cards.deepseekr1-7b">A reasoning distillation: the model writes out its reasoning before answering, so it takes longer but solves multi-step problems more reliably. Use it for maths, logic and analysis, not for quick conversation.</p>
-                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                            <div class="flex flex-wrap gap-1.5 text-[0.625rem]">
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.size.deepseekr1-7b">4.7 GB</span>
                                 <span class="spec-chip px-2 py-0.5 rounded">Q4_K_M</span>
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.params.deepseekr1-7b">7.6B parameters</span>
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.tag.chainOfThought">Explicit reasoning</span>
                             </div>
-                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull deepseek-r1:7b</div>
+                            <div class="terminal rounded-lg p-3 text-[0.6875rem]"><span class="p">$</span> <code>ollama pull deepseek-r1:7b</code></div>
                         </div>
                         <div class="model-card p-5 rounded-xl space-y-3">
                             <div class="flex items-start justify-between gap-2">
@@ -328,12 +392,12 @@
                                 <div class="flex gap-1"><span class="tag-local tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.local">Local</span><span class="tag-code tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.code">Code</span></div>
                             </div>
                             <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.cards.qwen25coder-7b">The coding build of Qwen 2.5 in a size that fits a 6 GB GPU. It writes, explains and reviews code in the usual languages, and pairs well with a MIKA5 knowledge base holding your project documentation.</p>
-                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                            <div class="flex flex-wrap gap-1.5 text-[0.625rem]">
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.size.qwen25coder-7b">4.7 GB</span>
                                 <span class="spec-chip px-2 py-0.5 rounded">Q4_K_M</span>
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.params.qwen25coder-7b">7.6B parameters</span>
                             </div>
-                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull qwen2.5-coder:7b</div>
+                            <div class="terminal rounded-lg p-3 text-[0.6875rem]"><span class="p">$</span> <code>ollama pull qwen2.5-coder:7b</code></div>
                         </div>
                         <div class="model-card p-5 rounded-xl space-y-3">
                             <div class="flex items-start justify-between gap-2">
@@ -341,13 +405,13 @@
                                 <div class="flex gap-1"><span class="tag-local tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.local">Local</span><span class="tag-vision tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.vision">Vision</span></div>
                             </div>
                             <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.cards.qwen25vl-7b">The vision model of this tier. It reads screenshots, charts, diagrams and scanned pages, and answers questions about what it sees. MIKA5 only enables image attachments once the capability probe confirms the model accepts them.</p>
-                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                            <div class="flex flex-wrap gap-1.5 text-[0.625rem]">
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.size.qwen25vl-7b">6.0 GB</span>
                                 <span class="spec-chip px-2 py-0.5 rounded">Q4_K_M</span>
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.params.qwen25vl-7b">8.3B parameters</span>
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.tag.imageInput">Image input</span>
                             </div>
-                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull qwen2.5vl:7b</div>
+                            <div class="terminal rounded-lg p-3 text-[0.6875rem]"><span class="p">$</span> <code>ollama pull qwen2.5vl:7b</code></div>
                         </div>
                     </div>
                 </div>
@@ -368,13 +432,13 @@
                                 <div class="flex gap-1"><span class="tag-local tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.local">Local</span></div>
                             </div>
                             <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.cards.qwen25-14b">The step up from qwen2.5:7b: same family, same multilingual behaviour, more room. The most direct upgrade if you already use the 7B and have 12 GB of VRAM free.</p>
-                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                            <div class="flex flex-wrap gap-1.5 text-[0.625rem]">
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.size.qwen25-14b">9.0 GB</span>
                                 <span class="spec-chip px-2 py-0.5 rounded">Q4_K_M</span>
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.params.qwen25-14b">14.8B parameters</span>
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.tag.multilingual">Multilingual</span>
                             </div>
-                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull qwen2.5:14b</div>
+                            <div class="terminal rounded-lg p-3 text-[0.6875rem]"><span class="p">$</span> <code>ollama pull qwen2.5:14b</code></div>
                         </div>
                         <div class="model-card p-5 rounded-xl space-y-3">
                             <div class="flex items-start justify-between gap-2">
@@ -382,12 +446,12 @@
                                 <div class="flex gap-1"><span class="tag-local tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.local">Local</span><span class="tag-code tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.code">Code</span></div>
                             </div>
                             <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.cards.qwen25coder-14b">The coding build at 14B. It covers the mainstream languages, explains unfamiliar code, writes tests and reviews diffs. It is the largest coding model most desktop GPUs hold without offloading to CPU.</p>
-                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                            <div class="flex flex-wrap gap-1.5 text-[0.625rem]">
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.size.qwen25coder-14b">9.0 GB</span>
                                 <span class="spec-chip px-2 py-0.5 rounded">Q4_K_M</span>
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.params.qwen25coder-14b">14.8B parameters</span>
                             </div>
-                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull qwen2.5-coder:14b</div>
+                            <div class="terminal rounded-lg p-3 text-[0.6875rem]"><span class="p">$</span> <code>ollama pull qwen2.5-coder:14b</code></div>
                         </div>
                         <div class="model-card p-5 rounded-xl space-y-3">
                             <div class="flex items-start justify-between gap-2">
@@ -395,13 +459,13 @@
                                 <div class="flex gap-1"><span class="tag-local tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.local">Local</span><span class="tag-reason tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.reasoning">Reasoning</span></div>
                             </div>
                             <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.cards.deepseekr1-14b">The 14B reasoning distillation. The same explicit reasoning as the 7B with more headroom for long chains, which shows in proofs, problems with many constraints and careful analysis. It is slower per answer by design.</p>
-                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                            <div class="flex flex-wrap gap-1.5 text-[0.625rem]">
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.size.deepseekr1-14b">9.0 GB</span>
                                 <span class="spec-chip px-2 py-0.5 rounded">Q4_K_M</span>
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.params.deepseekr1-14b">14.8B parameters</span>
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.tag.chainOfThought">Explicit reasoning</span>
                             </div>
-                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull deepseek-r1:14b</div>
+                            <div class="terminal rounded-lg p-3 text-[0.6875rem]"><span class="p">$</span> <code>ollama pull deepseek-r1:14b</code></div>
                         </div>
                         <div class="model-card p-5 rounded-xl space-y-3">
                             <div class="flex items-start justify-between gap-2">
@@ -409,12 +473,12 @@
                                 <div class="flex gap-1"><span class="tag-local tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.local">Local</span><span class="tag-reason tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.reasoning">Reasoning</span></div>
                             </div>
                             <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.cards.phi4-14b">Microsoft's Phi-4, a compact model trained on heavily curated data with a STEM focus. It does well on maths, science and reading code; it performs below the Llama and Qwen builds on open conversation and creative writing.</p>
-                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                            <div class="flex flex-wrap gap-1.5 text-[0.625rem]">
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.size.phi4-14b">9.1 GB</span>
                                 <span class="spec-chip px-2 py-0.5 rounded">Q4_K_M</span>
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.params.phi4-14b">14.7B parameters</span>
                             </div>
-                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull phi4:14b</div>
+                            <div class="terminal rounded-lg p-3 text-[0.6875rem]"><span class="p">$</span> <code>ollama pull phi4:14b</code></div>
                         </div>
                         <div class="model-card p-5 rounded-xl space-y-3">
                             <div class="flex items-start justify-between gap-2">
@@ -422,13 +486,13 @@
                                 <div class="flex gap-1"><span class="tag-local tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.local">Local</span><span class="tag-vision tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.vision">Vision</span></div>
                             </div>
                             <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.cards.gemma3-12b">Google's Gemma 3 at 12B, the multimodal option of this tier: text and images in the same model. Its weights take 8.2 GB, so it needs 12 GB of VRAM to run comfortably — for smaller machines, the 4B build.</p>
-                            <div class="flex flex-wrap gap-1.5 text-[10px]">
+                            <div class="flex flex-wrap gap-1.5 text-[0.625rem]">
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.size.gemma3-12b">8.2 GB</span>
                                 <span class="spec-chip px-2 py-0.5 rounded">Q4_K_M</span>
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.params.gemma3-12b">12.2B parameters</span>
                                 <span class="spec-chip px-2 py-0.5 rounded" data-i18n="models.tag.imageInput">Image input</span>
                             </div>
-                            <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull gemma3:12b</div>
+                            <div class="terminal rounded-lg p-3 text-[0.6875rem]"><span class="p">$</span> <code>ollama pull gemma3:12b</code></div>
                         </div>
                     </div>
                 </div>
@@ -437,19 +501,20 @@
                 <div id="workstation" class="space-y-5">
                     <div class="flex items-center gap-3">
                         <span class="tier-badge px-3 py-1 rounded-full bg-yellow-900/40 text-yellow-300" data-i18n="models.hardware.wsBadge">Workstation</span>
-                        <h3 class="text-xl font-heading" data-i18n="models.hardware.wsTitle">64 GB RAM — GPU with 24 GB+ of VRAM (or several GPUs)</h3>
+                        <h3 id="workstation-title" class="text-xl font-heading" data-i18n="models.hardware.wsTitle">64 GB RAM — GPU with 24 GB+ of VRAM (or several GPUs)</h3>
                     </div>
                     <p class="text-[#9CA3AF] text-sm leading-relaxed" data-i18n="models.hardware.wsDesc">
                         The 70B class. Weights take between 42 and 49 GB in Q4, more than a single 24 GB card holds: expect CPU offloading, several GPUs or professional hardware. On one consumer GPU the answers are slow, so this tier is about quality rather than throughput. Check the size against your hardware before pulling: a failed 47 GB download is an expensive mistake.
                     </p>
-                    <div class="glass rounded-2xl overflow-x-auto">
+                    <div class="glass rounded-2xl overflow-x-auto" tabindex="0" role="region" aria-labelledby="workstation-title">
                         <table>
+                        <caption class="visually-hidden" data-i18n="models.table.wsCaption">Workstation-class models: parameters, size, role and install command</caption>
                             <thead><tr>
-                                <th data-i18n="models.table.colModel">Model</th>
-                                <th data-i18n="models.table.colParams">Parameters</th>
-                                <th data-i18n="models.table.colSize">Size (Q4)</th>
-                                <th data-i18n="models.table.colRole">Role</th>
-                                <th data-i18n="models.table.colCommand">Command</th>
+                                <th scope="col" data-i18n="models.table.colModel">Model</th>
+                                <th scope="col" data-i18n="models.table.colParams">Parameters</th>
+                                <th scope="col" data-i18n="models.table.colSize">Size (Q4)</th>
+                                <th scope="col" data-i18n="models.table.colRole">Role</th>
+                                <th scope="col" data-i18n="models.table.colCommand">Command</th>
                             </tr></thead>
                             <tbody>
                                 <tr>
@@ -457,35 +522,35 @@
                                     <td class="text-[#9CA3AF]" data-i18n="models.params.llama33-70b">70.6B</td>
                                     <td data-i18n="models.size.llama33-70b">42.5 GB</td>
                                     <td data-i18n="models.ws.llama33-70b">General chat, English first</td>
-                                    <td class="font-mono text-xs text-[#7C3AED]">ollama pull llama3.3:70b</td>
+                                    <td class="font-mono text-xs text-[#A78BFA]"><code>ollama pull llama3.3:70b</code></td>
                                 </tr>
                                 <tr>
                                     <td class="font-mono text-sm">qwen2.5:72b</td>
                                     <td class="text-[#9CA3AF]" data-i18n="models.params.qwen25-72b">72.7B</td>
                                     <td data-i18n="models.size.qwen25-72b">47.4 GB</td>
                                     <td data-i18n="models.ws.qwen25-72b">General chat, broad multilingual coverage</td>
-                                    <td class="font-mono text-xs text-[#7C3AED]">ollama pull qwen2.5:72b</td>
+                                    <td class="font-mono text-xs text-[#A78BFA]"><code>ollama pull qwen2.5:72b</code></td>
                                 </tr>
                                 <tr>
                                     <td class="font-mono text-sm">deepseek-r1:70b</td>
                                     <td class="text-[#9CA3AF]" data-i18n="models.params.deepseekr1-70b">70.6B</td>
                                     <td data-i18n="models.size.deepseekr1-70b">42.5 GB</td>
                                     <td data-i18n="models.ws.deepseekr1-70b">Explicit step-by-step reasoning</td>
-                                    <td class="font-mono text-xs text-[#7C3AED]">ollama pull deepseek-r1:70b</td>
+                                    <td class="font-mono text-xs text-[#A78BFA]"><code>ollama pull deepseek-r1:70b</code></td>
                                 </tr>
                                 <tr>
                                     <td class="font-mono text-sm">qwen2.5-coder:32b</td>
                                     <td class="text-[#9CA3AF]" data-i18n="models.params.qwen25coder-32b">32.8B</td>
                                     <td data-i18n="models.size.qwen25coder-32b">19.9 GB</td>
                                     <td data-i18n="models.ws.qwen25coder-32b">Code; the only entry here that fits a single 24 GB card</td>
-                                    <td class="font-mono text-xs text-[#7C3AED]">ollama pull qwen2.5-coder:32b</td>
+                                    <td class="font-mono text-xs text-[#A78BFA]"><code>ollama pull qwen2.5-coder:32b</code></td>
                                 </tr>
                                 <tr>
                                     <td class="font-mono text-sm">qwen2.5vl:72b</td>
                                     <td class="text-[#9CA3AF]" data-i18n="models.params.qwen25vl-72b">73.4B</td>
                                     <td data-i18n="models.size.qwen25vl-72b">48.7 GB</td>
                                     <td data-i18n="models.ws.qwen25vl-72b">Vision at 70B scale</td>
-                                    <td class="font-mono text-xs text-[#7C3AED]">ollama pull qwen2.5vl:72b</td>
+                                    <td class="font-mono text-xs text-[#A78BFA]"><code>ollama pull qwen2.5vl:72b</code></td>
                                 </tr>
                             </tbody>
                         </table>
@@ -510,7 +575,7 @@
                                 <div class="flex items-center gap-2"><span class="font-mono font-semibold">deepseek-r1</span><span class="tag-reason tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.reasoning">Reasoning</span></div>
                                 <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.useCases.r1Desc">Published as distillations in several sizes; this guide verifies 7b, 14b and 70b. All of them write their reasoning before the answer, which is what you want when you need to check how a conclusion was reached. Take the largest one your hardware holds: 7b is the practical entry point.</p>
                             </div>
-                            <div class="text-right text-xs text-[#6B7280] shrink-0 space-y-1">
+                            <div class="text-right text-xs text-[#8B95A5] shrink-0 space-y-1">
                                 <div class="font-semibold text-green-400" data-i18n="models.useCases.r1Size1">7b · 4.7 GB</div>
                                 <div data-i18n="models.useCases.r1Size2">14b · 9.0 GB</div>
                                 <div data-i18n="models.useCases.r1Size3">70b · 42.5 GB</div>
@@ -521,7 +586,7 @@
                                 <div class="flex items-center gap-2"><span class="font-mono font-semibold">qwen2.5</span><span class="tag-local tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.local">Local</span></div>
                                 <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.useCases.qwenDesc">Not a reasoning model, but the family that behaves most consistently across sizes, and the one to reach for when you want a single model that also handles analysis. Published from 3b to 72b with the same behaviour and the same multilingual coverage.</p>
                             </div>
-                            <div class="text-right text-xs text-[#6B7280] shrink-0 space-y-1">
+                            <div class="text-right text-xs text-[#8B95A5] shrink-0 space-y-1">
                                 <div class="font-semibold text-green-400" data-i18n="models.useCases.qwenSize1">7b · 4.7 GB</div>
                                 <div data-i18n="models.useCases.qwenSize2">14b · 9.0 GB</div>
                                 <div data-i18n="models.useCases.qwenSize3">72b · 47.4 GB</div>
@@ -627,7 +692,7 @@
                     </p>
                     <div class="grid sm:grid-cols-2 gap-4">
                         <div class="glass p-5 rounded-xl space-y-2">
-                            <div class="flex items-center gap-2"><span class="font-mono font-semibold">qwen2.5:7b</span><span class="text-[#4B5563]">+</span><span class="font-mono font-semibold">nomic-embed-text</span><span class="tag-local tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.local">Local</span></div>
+                            <div class="flex items-center gap-2"><span class="font-mono font-semibold">qwen2.5:7b</span><span class="text-[#7D8797]">+</span><span class="font-mono font-semibold">nomic-embed-text</span><span class="tag-local tier-badge px-2 py-0.5 rounded-full" data-i18n="models.tag.local">Local</span></div>
                             <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.useCases.privacyStackDesc">A fully local setup: one chat model from your hardware tier plus nomic-embed-text for the knowledge base. Nothing else is needed and no API key is involved.</p>
                         </div>
                         <div class="glass p-5 rounded-xl space-y-2">
@@ -666,32 +731,33 @@
                         <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.cloud.alibaba">Implemented in v0.3.1 as an Anthropic-compatible endpoint. Its adapter declares chat, vision and image generation, but the catalogue, the region and the billing mode are configured by you, and the capability of each model comes from that catalogue. This guide names no Alibaba model: nothing in the published v0.3.1 tag pins those identifiers down.</p>
                     </div>
                 </div>
-                <p class="text-sm text-[#6B7280] leading-relaxed" data-i18n="models.cloud.statusNote">
+                <p class="text-sm text-[#8B95A5] leading-relaxed" data-i18n="models.cloud.statusNote">
                     Status of every cloud model: PROVIDER ADAPTER COMPATIBLE, NOT VALIDATED. MIKA5 implements the protocol; it does not certify any particular model behind it.
                 </p>
             </section>
 
             <!-- ─── PRACTICAL TABLE ──────────────────────────── -->
             <section id="practical-table" class="space-y-6">
-                <h2 class="text-3xl font-heading" data-i18n="models.table.title">Practical table</h2>
+                <h2 id="practical-table-title" class="text-3xl font-heading" data-i18n="models.table.title">Practical table</h2>
                 <p class="text-sm text-[#9CA3AF] leading-relaxed" data-i18n="models.table.intro">
                     This guide publishes no benchmark scores. Reported numbers move with quantization, prompt format, sampling parameters and evaluation harness, and a figure that cannot be traced to the exact build you are running is not useful for choosing a model. What follows is what can be stated exactly: the tag, where it runs, its role, the size of the published Q4 build, the hardware it needs and its status in MIKA5. Every tag and every size was read from registry.ollama.ai on 4 August 2026; each model card on ollama.com/library documents licence, context window and evaluations.
                 </p>
-                <div class="glass p-5 rounded-xl space-y-2 text-xs text-[#9CA3AF] leading-relaxed">
-                    <p><span class="tier-badge text-[#6EE7B7]" data-i18n="models.status.validated">VALIDATED IN MIKA5 v0.3.1</span> — <span data-i18n="models.status.validatedNote">MIKA5 references the model itself: it is a default or a suggested download in v0.3.1.</span></p>
-                    <p><span class="tier-badge text-[#93C5FD]" data-i18n="models.status.ollama">AVAILABLE VIA OLLAMA</span> — <span data-i18n="models.status.ollamaNote">the tag exists in the official registry and MIKA5 can run it, which is not the same as MIKA5 having tested it.</span></p>
-                    <p><span class="tier-badge text-[#FBBF24]" data-i18n="models.status.adapter">PROVIDER ADAPTER COMPATIBLE, NOT VALIDATED</span> — <span data-i18n="models.status.adapterNote">reachable through an implemented cloud adapter; the model itself is the provider's, not verified by MIKA5.</span></p>
-                    <p><span class="tier-badge text-[#6B7280]" data-i18n="models.status.future">FUTURE / NOT INCLUDED</span> — <span data-i18n="models.status.futureNote">does not exist in Community v0.3.1 and is not scheduled in this guide.</span></p>
-                </div>
-                <div class="glass rounded-2xl overflow-x-auto">
+                <ul role="list" class="glass p-5 rounded-xl space-y-2 text-xs text-[#9CA3AF] leading-relaxed">
+                    <li><span class="tier-badge text-[#6EE7B7]" data-i18n="models.status.validated">VALIDATED IN MIKA5 v0.3.1</span> — <span data-i18n="models.status.validatedNote">MIKA5 references the model itself: it is a default or a suggested download in v0.3.1.</span></li>
+                    <li><span class="tier-badge text-[#93C5FD]" data-i18n="models.status.ollama">AVAILABLE VIA OLLAMA</span> — <span data-i18n="models.status.ollamaNote">the tag exists in the official registry and MIKA5 can run it, which is not the same as MIKA5 having tested it.</span></li>
+                    <li><span class="tier-badge text-[#FBBF24]" data-i18n="models.status.adapter">PROVIDER ADAPTER COMPATIBLE, NOT VALIDATED</span> — <span data-i18n="models.status.adapterNote">reachable through an implemented cloud adapter; the model itself is the provider's, not verified by MIKA5.</span></li>
+                    <li><span class="tier-badge text-[#8B95A5]" data-i18n="models.status.future">FUTURE / NOT INCLUDED</span> — <span data-i18n="models.status.futureNote">does not exist in Community v0.3.1 and is not scheduled in this guide.</span></li>
+                </ul>
+                <div class="glass rounded-2xl overflow-x-auto" tabindex="0" role="region" aria-labelledby="practical-table-title">
                     <table>
+                        <caption class="visually-hidden" data-i18n="models.table.practicalCaption">Models MIKA5 can run: where they run, role, size, hardware and status</caption>
                         <thead><tr>
-                            <th data-i18n="models.table.colModel">Model</th>
-                            <th data-i18n="models.table.colRuns">Runs</th>
-                            <th data-i18n="models.table.colRole">Role</th>
-                            <th data-i18n="models.table.colSize">Size (Q4)</th>
-                            <th data-i18n="models.table.colHardware">Hardware</th>
-                            <th data-i18n="models.table.colStatus">Status &amp; notes</th>
+                            <th scope="col" data-i18n="models.table.colModel">Model</th>
+                            <th scope="col" data-i18n="models.table.colRuns">Runs</th>
+                            <th scope="col" data-i18n="models.table.colRole">Role</th>
+                            <th scope="col" data-i18n="models.table.colSize">Size (Q4)</th>
+                            <th scope="col" data-i18n="models.table.colHardware">Hardware</th>
+                            <th scope="col" data-i18n="models.table.colStatus">Status &amp; notes</th>
                         </tr></thead>
                         <tbody>
                             <tr data-model-id="llama3.2:3b"><td class="font-mono text-sm text-[#D1D5DB]">llama3.2:3b</td><td class="text-[#9CA3AF]" data-i18n="models.table.runsLocal">Local</td><td class="text-[#9CA3AF]" data-i18n="models.role.chat">Chat</td><td class="text-[#9CA3AF]" data-i18n="models.size.llama32-3b">2.0 GB</td><td class="text-[#9CA3AF]" data-i18n="models.hw.cpu8">8 GB RAM, CPU</td><td class="text-[#9CA3AF]"><span class="tier-badge text-[#6EE7B7]" data-i18n="models.status.validated">VALIDATED IN MIKA5 v0.3.1</span><br><span data-i18n="models.notes.llama32-3b">The download MIKA5 suggests when no local model is installed.</span></td></tr>
@@ -735,35 +801,35 @@
                 <p class="text-sm text-[#9CA3AF]" data-i18n="models.install.intro">Copy these into your terminal with Ollama already installed. Each command downloads the model and leaves it ready for MIKA5.</p>
                 <div class="terminal rounded-2xl p-6 space-y-4">
                     <div>
-                        <p class="text-[#4B5563] text-[11px] uppercase tracking-wider mb-2" data-i18n="models.install.entry"># Entry level (8 GB RAM)</p>
-                        <p><span class="p">$</span> ollama pull llama3.2:3b</p>
-                        <p><span class="p">$</span> ollama pull qwen2.5:3b</p>
-                        <p><span class="p">$</span> ollama pull gemma3:4b</p>
+                        <p class="text-[#7D8797] text-[0.6875rem] uppercase tracking-wider mb-2" data-i18n="models.install.entry"># Entry level (8 GB RAM)</p>
+                        <p><span class="p">$</span> <code>ollama pull llama3.2:3b</code></p>
+                        <p><span class="p">$</span> <code>ollama pull qwen2.5:3b</code></p>
+                        <p><span class="p">$</span> <code>ollama pull gemma3:4b</code></p>
                     </div>
                     <div>
-                        <p class="text-[#4B5563] text-[11px] uppercase tracking-wider mb-2" data-i18n="models.install.mid"># Mid range (16 GB RAM / 6-8 GB VRAM)</p>
-                        <p><span class="p">$</span> ollama pull qwen2.5:7b          <span class="c" data-i18n="models.install.cGeneral"># general purpose</span></p>
-                        <p><span class="p">$</span> ollama pull deepseek-r1:7b       <span class="c" data-i18n="models.install.cReasoning"># reasoning</span></p>
-                        <p><span class="p">$</span> ollama pull qwen2.5vl:7b         <span class="c" data-i18n="models.install.cImages"># images</span></p>
-                        <p><span class="p">$</span> ollama pull qwen2.5-coder:7b     <span class="c" data-i18n="models.install.cCode"># code</span></p>
-                        <p><span class="p">$</span> ollama pull mistral:7b           <span class="c" data-i18n="models.install.cLight"># the lightest of the tier</span></p>
+                        <p class="text-[#7D8797] text-[0.6875rem] uppercase tracking-wider mb-2" data-i18n="models.install.mid"># Mid range (16 GB RAM / 6-8 GB VRAM)</p>
+                        <p><span class="p">$</span> <code>ollama pull qwen2.5:7b</code>          <span class="c" data-i18n="models.install.cGeneral"># general purpose</span></p>
+                        <p><span class="p">$</span> <code>ollama pull deepseek-r1:7b</code>       <span class="c" data-i18n="models.install.cReasoning"># reasoning</span></p>
+                        <p><span class="p">$</span> <code>ollama pull qwen2.5vl:7b</code>         <span class="c" data-i18n="models.install.cImages"># images</span></p>
+                        <p><span class="p">$</span> <code>ollama pull qwen2.5-coder:7b</code>     <span class="c" data-i18n="models.install.cCode"># code</span></p>
+                        <p><span class="p">$</span> <code>ollama pull mistral:7b</code>           <span class="c" data-i18n="models.install.cLight"># the lightest of the tier</span></p>
                     </div>
                     <div>
-                        <p class="text-[#4B5563] text-[11px] uppercase tracking-wider mb-2" data-i18n="models.install.high"># High end (32 GB RAM / 12-16 GB VRAM)</p>
-                        <p><span class="p">$</span> ollama pull qwen2.5:14b</p>
-                        <p><span class="p">$</span> ollama pull qwen2.5-coder:14b    <span class="c" data-i18n="models.install.cCode"># code</span></p>
-                        <p><span class="p">$</span> ollama pull deepseek-r1:14b      <span class="c" data-i18n="models.install.cReasoning"># reasoning</span></p>
-                        <p><span class="p">$</span> ollama pull gemma3:12b           <span class="c" data-i18n="models.install.cImages"># images</span></p>
+                        <p class="text-[#7D8797] text-[0.6875rem] uppercase tracking-wider mb-2" data-i18n="models.install.high"># High end (32 GB RAM / 12-16 GB VRAM)</p>
+                        <p><span class="p">$</span> <code>ollama pull qwen2.5:14b</code></p>
+                        <p><span class="p">$</span> <code>ollama pull qwen2.5-coder:14b</code>    <span class="c" data-i18n="models.install.cCode"># code</span></p>
+                        <p><span class="p">$</span> <code>ollama pull deepseek-r1:14b</code>      <span class="c" data-i18n="models.install.cReasoning"># reasoning</span></p>
+                        <p><span class="p">$</span> <code>ollama pull gemma3:12b</code>           <span class="c" data-i18n="models.install.cImages"># images</span></p>
                     </div>
                     <div>
-                        <p class="text-[#4B5563] text-[11px] uppercase tracking-wider mb-2" data-i18n="models.install.ws"># Workstation (64 GB RAM / 24+ GB VRAM)</p>
-                        <p><span class="p">$</span> ollama pull llama3.3:70b</p>
-                        <p><span class="p">$</span> ollama pull deepseek-r1:70b</p>
-                        <p><span class="p">$</span> ollama pull qwen2.5:72b</p>
+                        <p class="text-[#7D8797] text-[0.6875rem] uppercase tracking-wider mb-2" data-i18n="models.install.ws"># Workstation (64 GB RAM / 24+ GB VRAM)</p>
+                        <p><span class="p">$</span> <code>ollama pull llama3.3:70b</code></p>
+                        <p><span class="p">$</span> <code>ollama pull deepseek-r1:70b</code></p>
+                        <p><span class="p">$</span> <code>ollama pull qwen2.5:72b</code></p>
                     </div>
                     <div>
-                        <p class="text-[#4B5563] text-[11px] uppercase tracking-wider mb-2" data-i18n="models.install.embed"># Always required — RAG embedding model</p>
-                        <p><span class="p">$</span> ollama pull nomic-embed-text     <span class="c" data-i18n="models.install.cEmbed"># required for the knowledge base</span></p>
+                        <p class="text-[#7D8797] text-[0.6875rem] uppercase tracking-wider mb-2" data-i18n="models.install.embed"># Always required — RAG embedding model</p>
+                        <p><span class="p">$</span> <code>ollama pull nomic-embed-text</code>     <span class="c" data-i18n="models.install.cEmbed"># required for the knowledge base</span></p>
                     </div>
                 </div>
             </section>
@@ -778,16 +844,16 @@
                     <div class="glass p-5 rounded-xl space-y-2">
                         <div class="flex items-center gap-2 font-mono font-semibold">nomic-embed-text <span class="tier-badge px-2 py-0.5 rounded-full bg-green-900/30 text-green-300" data-i18n="models.tag.recommended">Recommended</span></div>
                         <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.embeddings.nomic">The default embedding model in MIKA5 v0.3.1, set in the RAG engine itself. It weighs 274 MB, indexes quickly and works well with documents in English and Spanish. Unless you configure another one, this is the model that indexes your knowledge base.</p>
-                        <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull nomic-embed-text</div>
+                        <div class="terminal rounded-lg p-3 text-[0.6875rem]"><span class="p">$</span> <code>ollama pull nomic-embed-text</code></div>
                     </div>
                     <div class="glass p-5 rounded-xl space-y-2">
                         <div class="font-mono font-semibold">mxbai-embed-large</div>
                         <p class="text-xs text-[#9CA3AF] leading-relaxed" data-i18n="models.embeddings.mxbai">A larger alternative: 670 MB and slower to index, in exchange for a wider vector representation. Worth trying if retrieval brings back fragments that are not the relevant ones, especially with long documents.</p>
-                        <div class="terminal rounded-lg p-3 text-[11px]"><span class="p">$</span> ollama pull mxbai-embed-large</div>
+                        <div class="terminal rounded-lg p-3 text-[0.6875rem]"><span class="p">$</span> <code>ollama pull mxbai-embed-large</code></div>
                     </div>
                 </div>
                 <div class="glass p-5 rounded-xl flex gap-3 items-start">
-                    <span class="text-yellow-400 text-lg shrink-0">⚡</span>
+                    <span class="text-yellow-400 text-lg shrink-0" aria-hidden="true">⚡</span>
                     <p class="text-sm text-[#9CA3AF] leading-relaxed" data-i18n="models.embeddings.note">Embedding models run in the background when you add documents to MIKA5. You never talk to them directly: they only need to be installed. Do not select them as your chat model in the model dropdown — they do not produce text.</p>
                 </div>
             </section>
@@ -796,10 +862,10 @@
     </div>
 </main>
 
-<footer class="border-t border-white/5 py-10 text-[#6B7280] text-sm">
+<footer class="border-t border-white/5 py-10 text-[#8B95A5] text-sm">
     <div class="max-w-[1200px] mx-auto px-6 flex flex-col md:flex-row justify-between gap-4 items-center">
         <div class="flex items-center gap-2 font-heading text-white font-bold">
-            <img src="icon.png" alt="MIKA5 logo" class="w-5 h-5 rounded" data-i18n-attr="alt:models.nav.logoAlt">
+            <img src="icon-64.png" width="20" height="20" loading="lazy" alt="MIKA5 logo" class="w-5 h-5 rounded" data-i18n-attr="alt:models.nav.logoAlt">
             <span data-i18n="models.footer.brand">MIKA5 Model Guide</span>
         </div>
         <div class="flex gap-6">
@@ -807,7 +873,7 @@
             <a href="whitepaper.html" class="hover:text-white transition-colors" data-i18n="models.footer.whitepaper">White Paper</a>
             <a href="https://github.com/mika5app/mika5-releases" target="_blank" rel="noopener" class="hover:text-white transition-colors" data-i18n="models.footer.github">GitHub</a>
         </div>
-        <p class="text-xs text-[#4B5563]" data-i18n="models.footer.tagline">v0.3.1 · 2026 · Tags and sizes verified against registry.ollama.ai on 4 August 2026</p>
+        <p class="text-xs text-[#7D8797]" data-i18n="models.footer.tagline">v0.3.1 · 2026 · Tags and sizes verified against registry.ollama.ai on 4 August 2026</p>
     </div>
 </footer>
 
@@ -835,7 +901,8 @@ const STRINGS = {
     'models.nav.guide': 'Model Guide',
     'models.nav.jump': 'Jump to the practical table →',
     'models.nav.logoAlt': 'MIKA5 logo',
-    'models.nav.langLabel': 'Switch language to Spanish',
+    'models.nav.skip': 'Skip to main content',
+    'models.nav.langLabel': 'ES: switch language to Spanish',
     // --- models.hero.* ---
     'models.hero.badge': 'MIKA5 official guide · Updated November 2026 · Verified against MIKA5 Community v0.3.1',
     'models.hero.titleTop': 'Choosing the right AI model',
@@ -1013,6 +1080,8 @@ const STRINGS = {
     'models.table.colRuns': 'Runs',
     'models.table.colHardware': 'Hardware',
     'models.table.colStatus': 'Status & notes',
+    'models.table.wsCaption': 'Workstation-class models: parameters, size, role and install command',
+    'models.table.practicalCaption': 'Models MIKA5 can run: where they run, role, size, hardware and status',
     'models.table.runsLocal': 'Local',
     // --- models.role.* ---
     'models.role.chat': 'Chat',
@@ -1116,7 +1185,8 @@ const STRINGS = {
     'models.nav.guide': 'Guía de modelos',
     'models.nav.jump': 'Ir a la tabla práctica →',
     'models.nav.logoAlt': 'Logotipo de MIKA5',
-    'models.nav.langLabel': 'Cambiar el idioma a inglés',
+    'models.nav.skip': 'Saltar al contenido principal',
+    'models.nav.langLabel': 'EN: cambiar el idioma a inglés',
     // --- models.hero.* ---
     'models.hero.badge': 'Guía oficial de MIKA5 · Actualizada en noviembre de 2026 · Verificada contra MIKA5 Community v0.3.1',
     'models.hero.titleTop': 'Elegir el modelo de IA adecuado',
@@ -1294,6 +1364,8 @@ const STRINGS = {
     'models.table.colRuns': 'Se ejecuta',
     'models.table.colHardware': 'Hardware',
     'models.table.colStatus': 'Estado y notas',
+    'models.table.wsCaption': 'Modelos de clase workstation: parámetros, tamaño, función y comando de instalación',
+    'models.table.practicalCaption': 'Modelos que MIKA5 puede ejecutar: dónde se ejecutan, función, tamaño, hardware y estado',
     'models.table.runsLocal': 'Local',
     // --- models.role.* ---
     'models.role.chat': 'Chat',
@@ -1377,7 +1449,9 @@ const STRINGS = {
   }
 };
 
-let currentLang = localStorage.getItem('mika5-lang') || ((navigator.language || navigator.userLanguage || 'en').startsWith('es') ? 'es' : 'en');
+// A page written in one language (the generated /es/ pages) declares it in
+// data-lang, and that wins over the stored or browser preference.
+let currentLang = document.documentElement.getAttribute('data-lang') || localStorage.getItem('mika5-lang') || ((navigator.language || navigator.userLanguage || 'en').startsWith('es') ? 'es' : 'en');
 
 // Atributos que el sistema puede traducir. Lista cerrada: un data-i18n-attr
 // con cualquier otro nombre se ignora, para que el contenido nunca pueda
@@ -1482,10 +1556,22 @@ function applyLang(lang) {
 function toggleLang() {
   var next = currentLang === 'es' ? 'en' : 'es';
   localStorage.setItem('mika5-lang', next);
+  // Each language has its own address. On the live site the switch goes there;
+  // if this page is already that address (or is opened from disk) it swaps in place.
+  var otra = document.querySelector('link[rel="alternate"][hreflang="' + next + '"]');
+  var aqui = location.href.split('#')[0];
+  if (otra && /^https?:$/.test(location.protocol) && location.hostname === new URL(otra.href).hostname && otra.href !== aqui) {
+    location.href = otra.href;
+    return;
+  }
   applyLang(next);
 }
 
-document.addEventListener('DOMContentLoaded', function() { applyLang(currentLang); });
+document.addEventListener('DOMContentLoaded', function() {
+  applyLang(currentLang);
+  var idioma = document.getElementById('lang-toggle');
+  if (idioma) idioma.addEventListener('click', toggleLang);
+});
 </script>
 <script src="chat-widget.js" defer></script>
 </body>

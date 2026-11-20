@@ -327,7 +327,9 @@
       greeting: 'Hello! How can I help you with MIKA5 today?',
       fallback: "I'm not sure about that. Try asking about:",
       suggestions: ['Features', 'Download', 'Privacy', 'Models', 'RAG', 'Getting Started'],
-      powered: 'Knowledge-based assistant'
+      powered: 'Knowledge-based assistant',
+      send: 'Send message',
+      close: 'Close chat'
     },
     es: {
       title: 'Asistente MIKA5',
@@ -336,7 +338,9 @@
       greeting: 'Hola! Como puedo ayudarte con MIKA5 hoy?',
       fallback: 'No estoy seguro sobre eso. Prueba preguntar sobre:',
       suggestions: ['Funcionalidades', 'Descargar', 'Privacidad', 'Modelos', 'RAG', 'Inicio'],
-      powered: 'Asistente basado en conocimiento'
+      powered: 'Asistente basado en conocimiento',
+      send: 'Enviar mensaje',
+      close: 'Cerrar chat'
     }
   };
 
@@ -344,40 +348,44 @@
   function injectStyles() {
     var css = [
       '#mika5-cw-bubble{position:fixed;bottom:24px;right:24px;z-index:9999;width:56px;height:56px;border-radius:28px;background:#7C3AED;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(124,58,237,0.4);transition:transform 0.2s,box-shadow 0.2s}',
-      '#mika5-cw-bubble:hover{transform:scale(1.08);box-shadow:0 6px 28px rgba(124,58,237,0.5)}',
+      '#mika5-cw-bubble:hover{box-shadow:0 6px 28px rgba(124,58,237,0.5)}',
       '#mika5-cw-bubble svg{width:26px;height:26px;fill:#fff;transition:transform 0.2s}',
-      '#mika5-cw-window{position:fixed;bottom:92px;right:24px;z-index:9998;width:380px;max-height:520px;background:#0B0F14;border:1px solid rgba(255,255,255,0.08);border-radius:16px;display:flex;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,0.5);opacity:0;transform:translateY(12px);transition:opacity 0.25s,transform 0.25s;pointer-events:none;overflow:hidden;font-family:"Inter",sans-serif}',
+      '#mika5-cw-window{position:fixed;bottom:92px;right:24px;z-index:9998;width:380px;max-height:520px;background:#0B0F14;border:1px solid rgba(255,255,255,0.08);border-radius:16px;display:flex;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,0.5);opacity:0;transition:opacity 0.25s,transform 0.25s;pointer-events:none;overflow:hidden;font-family:"Inter",sans-serif}',
       '#mika5-cw-window.open{opacity:1;transform:translateY(0);pointer-events:auto}',
       '#mika5-cw-header{background:#111827;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.06)}',
       '#mika5-cw-header-left{display:flex;align-items:center;gap:10px}',
       '#mika5-cw-header-dot{width:8px;height:8px;border-radius:4px;background:#34D399}',
-      '#mika5-cw-header-title{font-family:"Space Grotesk",sans-serif;font-weight:700;font-size:14px;color:#F9FAFB}',
-      '#mika5-cw-header-close{background:none;border:none;cursor:pointer;color:#6B7280;font-size:20px;line-height:1;padding:4px;transition:color 0.2s}',
+      '#mika5-cw-header-title{font-family:"Space Grotesk",sans-serif;font-weight:700;font-size:0.875rem;color:#F9FAFB}',
+      '#mika5-cw-header-close{background:none;border:none;cursor:pointer;color:#8B95A5;font-size:1.25rem;line-height:1;padding:4px;transition:color 0.2s}',
       '#mika5-cw-header-close:hover{color:#F9FAFB}',
-      '#mika5-cw-messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;min-height:280px;max-height:360px;scroll-behavior:smooth}',
-      '.mika5-cw-msg{max-width:85%;padding:10px 14px;border-radius:14px;font-size:13px;line-height:1.55;word-wrap:break-word;white-space:pre-wrap}',
+      '#mika5-cw-messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;min-height:280px;max-height:360px}',
+      '.mika5-cw-msg{max-width:85%;padding:10px 14px;border-radius:14px;font-size:0.8125rem;line-height:1.55;word-wrap:break-word;white-space:pre-wrap}',
       '.mika5-cw-msg-bot{background:#111827;color:#D1D5DB;align-self:flex-start;border-bottom-left-radius:4px}',
       '.mika5-cw-msg-user{background:#7C3AED;color:#F9FAFB;align-self:flex-end;border-bottom-right-radius:4px}',
       '.mika5-cw-msg a{color:#A78BFA;text-decoration:underline}',
       '#mika5-cw-suggestions{display:flex;flex-wrap:wrap;gap:6px;padding:0 16px 12px}',
-      '.mika5-cw-chip{background:rgba(124,58,237,0.12);border:1px solid rgba(124,58,237,0.3);color:#A78BFA;font-size:11px;padding:5px 12px;border-radius:20px;cursor:pointer;transition:background 0.2s,color 0.2s;font-family:"Inter",sans-serif}',
+      '.mika5-cw-chip{background:rgba(124,58,237,0.12);border:1px solid rgba(124,58,237,0.3);color:#A78BFA;font-size:0.6875rem;padding:5px 12px;border-radius:20px;cursor:pointer;transition:background 0.2s,color 0.2s;font-family:"Inter",sans-serif}',
       '.mika5-cw-chip:hover{background:rgba(124,58,237,0.25);color:#F9FAFB}',
       '#mika5-cw-input-area{display:flex;gap:8px;padding:12px 16px;border-top:1px solid rgba(255,255,255,0.06);background:#0D1117}',
-      '#mika5-cw-input{flex:1;background:#111827;border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:9px 14px;color:#F9FAFB;font-size:13px;outline:none;font-family:"Inter",sans-serif;transition:border-color 0.2s}',
+      '#mika5-cw-input{flex:1;background:#111827;border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:9px 14px;color:#F9FAFB;font-size:1rem;font-family:"Inter",sans-serif;transition:border-color 0.2s}',
       '#mika5-cw-input:focus{border-color:rgba(124,58,237,0.5)}',
-      '#mika5-cw-input::placeholder{color:#4B5563}',
+      '#mika5-cw-input:focus-visible{outline:2px solid #A78BFA;outline-offset:2px}',
+      '#mika5-cw-input::placeholder{color:#8B95A5}',
       '#mika5-cw-send{background:#7C3AED;border:none;border-radius:10px;width:38px;height:38px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background 0.2s}',
       '#mika5-cw-send:hover{background:#8B5CF6}',
       '#mika5-cw-send svg{width:18px;height:18px;fill:#fff}',
-      '#mika5-cw-powered{text-align:center;padding:6px;font-size:10px;color:#4B5563}',
+      '#mika5-cw-powered{text-align:center;padding:6px;font-size:0.625rem;color:#8B95A5}',
       '.mika5-cw-typing{display:flex;gap:4px;padding:10px 14px;align-self:flex-start}',
-      '.mika5-cw-typing span{width:6px;height:6px;border-radius:3px;background:#6B7280;animation:mika5-bounce 1.2s infinite}',
+      '.mika5-cw-typing span{width:6px;height:6px;border-radius:3px;background:#6B7280}',
       '.mika5-cw-typing span:nth-child(2){animation-delay:0.15s}',
       '.mika5-cw-typing span:nth-child(3){animation-delay:0.3s}',
       '@keyframes mika5-bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-6px)}}',
-      '#mika5-cw-messages::-webkit-scrollbar{width:4px}',
-      '#mika5-cw-messages::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:2px}',
-      '@media(max-width:480px){#mika5-cw-window{width:calc(100vw - 32px);max-height:calc(100vh - 120px);bottom:88px;right:16px}#mika5-cw-bubble{bottom:16px;right:16px}}'
+      // Movement only for people who have not asked their system to reduce it.
+      '@media(prefers-reduced-motion:no-preference){#mika5-cw-bubble:hover{transform:scale(1.08)}#mika5-cw-window{transform:translateY(12px)}#mika5-cw-messages{scroll-behavior:smooth}.mika5-cw-typing span{animation:mika5-bounce 1.2s infinite}}',
+      // Standard scrollbar styling; the -webkit- rules stay only for engines without it.
+      '#mika5-cw-messages{--mika5-cw-thumb:rgba(255,255,255,0.38);--mika5-cw-track:transparent;scrollbar-color:var(--mika5-cw-thumb) var(--mika5-cw-track)}',
+      '@supports not (scrollbar-color:auto){#mika5-cw-messages::-webkit-scrollbar{width:8px}#mika5-cw-messages::-webkit-scrollbar-thumb{background:var(--mika5-cw-thumb);border-radius:2px}}',
+      '@media(max-width:480px){#mika5-cw-window{width:calc(100vw - 32px);max-height:calc(100vh - 120px);max-height:calc(100dvh - 120px);bottom:88px;right:16px}#mika5-cw-bubble{bottom:16px;right:16px}}'
     ].join('\n');
 
     var style = document.createElement('style');
@@ -392,22 +400,40 @@
   var messagesEl, inputEl, suggestionsEl, titleEl, poweredEl, inputPlaceholder;
 
   function getLang() {
-    return localStorage.getItem('mika5-lang') || ((navigator.language || 'en').startsWith('es') ? 'es' : 'en');
+    // A page written in one language says so in data-lang; that wins.
+    return document.documentElement.getAttribute('data-lang') || localStorage.getItem('mika5-lang') || ((navigator.language || 'en').startsWith('es') ? 'es' : 'en');
   }
 
   function s(key) {
     return (UI[lang] && UI[lang][key]) || UI.en[key] || '';
   }
 
+  // Returns DOM nodes, never HTML: typed text must not reach the HTML parser.
   function linkify(text) {
-    return text.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+    var frag = document.createDocumentFragment();
+    var re = /(https?:\/\/[^\s]+)/g;
+    var last = 0;
+    var m;
+    while ((m = re.exec(text)) !== null) {
+      if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+      var a = document.createElement('a');
+      a.href = m[1];
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = m[1];
+      frag.appendChild(a);
+      last = re.lastIndex;
+    }
+    if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+    return frag;
   }
 
   function createBubble() {
     var btn = document.createElement('button');
     btn.id = 'mika5-cw-bubble';
     btn.setAttribute('aria-label', 'Chat');
-    btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z"/><path d="M7 9h2v2H7zm4 0h2v2h-2zm4 0h2v2h-2z"/></svg>';
+    btn.setAttribute('aria-expanded', 'false');
+    btn.innerHTML = '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z"/><path d="M7 9h2v2H7zm4 0h2v2h-2zm4 0h2v2h-2z"/></svg>';
     btn.addEventListener('click', toggleChat);
     return btn;
   }
@@ -415,6 +441,8 @@
   function createWindow() {
     var win = document.createElement('div');
     win.id = 'mika5-cw-window';
+    // Closed, the panel is only transparent: inert keeps it out of the tab order and of assistive tech.
+    win.setAttribute('inert', '');
 
     // Header
     var header = document.createElement('div');
@@ -430,7 +458,7 @@
     headerLeft.appendChild(titleEl);
     var closeBtn = document.createElement('button');
     closeBtn.id = 'mika5-cw-header-close';
-    closeBtn.innerHTML = '&times;';
+    closeBtn.textContent = '\u00D7';
     closeBtn.addEventListener('click', toggleChat);
     header.appendChild(headerLeft);
     header.appendChild(closeBtn);
@@ -438,6 +466,8 @@
     // Messages
     messagesEl = document.createElement('div');
     messagesEl.id = 'mika5-cw-messages';
+    // Answers arrive while focus stays in the input: announce them.
+    messagesEl.setAttribute('aria-live', 'polite');
 
     // Suggestions
     suggestionsEl = document.createElement('div');
@@ -453,12 +483,14 @@
     inputEl.addEventListener('keydown', function (e) {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
+        // Enter confirming an IME composition must not send. keyCode 229 covers Safari.
+        if (e.isComposing || e.keyCode === 229) return;
         handleSend();
       }
     });
     var sendBtn = document.createElement('button');
     sendBtn.id = 'mika5-cw-send';
-    sendBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>';
+    sendBtn.innerHTML = '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>';
     sendBtn.addEventListener('click', handleSend);
     inputArea.appendChild(inputEl);
     inputArea.appendChild(sendBtn);
@@ -479,7 +511,7 @@
   function addMessage(text, sender) {
     var div = document.createElement('div');
     div.className = 'mika5-cw-msg mika5-cw-msg-' + sender;
-    div.innerHTML = linkify(text);
+    div.appendChild(linkify(text));
     messagesEl.appendChild(div);
     messagesEl.scrollTop = messagesEl.scrollHeight;
     return div;
@@ -503,7 +535,7 @@
   }
 
   function renderSuggestions() {
-    suggestionsEl.innerHTML = '';
+    suggestionsEl.replaceChildren();
     var items = s('suggestions');
     if (!items) return;
     for (var i = 0; i < items.length; i++) {
@@ -523,7 +555,11 @@
   function updateUILang() {
     lang = getLang();
     if (titleEl) titleEl.textContent = s('title');
-    if (inputEl) inputEl.placeholder = s('placeholder');
+    if (inputEl) { inputEl.placeholder = s('placeholder'); inputEl.setAttribute('aria-label', s('placeholder')); }
+    var sendEl = document.getElementById('mika5-cw-send');
+    if (sendEl) sendEl.setAttribute('aria-label', s('send'));
+    var closeEl = document.getElementById('mika5-cw-header-close');
+    if (closeEl) closeEl.setAttribute('aria-label', s('close'));
     if (poweredEl) poweredEl.textContent = s('powered');
   }
 
@@ -567,12 +603,17 @@
     isOpen = !isOpen;
 
     if (isOpen) {
+      win.removeAttribute('inert');
       win.classList.add('open');
-      bubble.innerHTML = '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>';
+      bubble.setAttribute('aria-expanded', 'true');
+      bubble.innerHTML = '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>';
       inputEl.focus();
     } else {
       win.classList.remove('open');
-      bubble.innerHTML = '<svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z"/><path d="M7 9h2v2H7zm4 0h2v2h-2zm4 0h2v2h-2z"/></svg>';
+      win.setAttribute('inert', '');
+      bubble.setAttribute('aria-expanded', 'false');
+      bubble.innerHTML = '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z"/><path d="M7 9h2v2H7zm4 0h2v2h-2zm4 0h2v2h-2z"/></svg>';
+      bubble.focus();
     }
   }
 
