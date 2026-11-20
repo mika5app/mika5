@@ -1,4 +1,4 @@
-# MIKA5 Community 0.3.1 Architecture
+# MIKA5 Community 0.3.2 Architecture
 
 MIKA5 uses Electron 43.8.7 with a sandboxed renderer, a restricted preload bridge and a main process that owns providers, SQLite and file/network operations. This document describes the current contributor-facing structure; version-specific audits in `docs/` remain historical records.
 

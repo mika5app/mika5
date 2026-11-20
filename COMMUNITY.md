@@ -60,16 +60,19 @@ how to send a change. Licenses of the bundled third-party software are listed in
 Inside the application, the version dialog (More actions → Check for a new
 version) links to the source, the issue tracker and the license.
 
-## Current release: 0.3.1
+## Current release: 0.3.2
 
 Download Windows, macOS Intel/Apple Silicon and Linux packages, corresponding
 source and checksums from:
 
-https://github.com/mika5app/mika5-releases/releases/tag/v0.3.1
+https://github.com/mika5app/mika5-releases/releases/tag/v0.3.2
 
-This release updates provider handling, cloud consent, document/image handling
-and native packaging validation. Ollama local and cloud models are supported;
-cloud use retains explicit privacy notices and consent. Pro and Cloud services
+This release adds BitNet as an experimental local runtime, lets MIKA5 find and
+start llama.cpp and BitNet engines with the models already on the machine,
+reports the same readiness states for every provider, searches every fragment of
+long documents, adds a new-version notice and fixes chat routing in
+conversations that contain images or documents. Ollama local and cloud models are
+supported; cloud use retains explicit privacy notices and consent. Pro and Cloud services
 remain future editions, separate from Community.
 
 MIKA5 can tell you when a newer stable version has been published, on request or
