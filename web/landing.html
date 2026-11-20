@@ -161,7 +161,6 @@
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
     <!-- Fetch the two other pages when a link to them is about to be used.
          Browsers without speculation rules ignore this block. -->
@@ -346,6 +345,9 @@
         /* Coming soon */
         .coming-soon { opacity: 0.45; cursor: not-allowed; }
     </style>
+    <!-- Compiled by `npm run build:web-css`; after the page styles, where the
+         Tailwind CDN used to insert its own, so the cascade is unchanged. -->
+    <link rel="stylesheet" href="/tailwind.css">
 </head>
 <body>
 <a href="#main-content" class="skip-link visually-hidden" data-i18n="landing.nav.skip">Skip to main content</a>
