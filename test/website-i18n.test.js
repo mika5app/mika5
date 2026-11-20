@@ -654,6 +654,44 @@ for (const pagina of ['landing.html', 'es/index.html']) {
 check(fs.existsSync(path.join(ROOT, 'CODE_SIGNING_POLICY.md')) && fs.existsSync(path.join(ROOT, 'PRIVACY.md')),
   'los dos documentos enlazados existen en la raiz del repositorio');
 
+// Logo v2 (brand/README.md). Cada pagina, tambien las de /es/, ofrece el
+// favicon ICO, el SVG y los PNG de 16 y 32, y todos existen desde la ruta de
+// esa pagina: las de /es/ los piden al padre, y un `../` olvidado en
+// build-web-es.js deja la pestana sin icono sin que nada falle.
+{
+  const FAVICONS = [
+    ['favicon.ico', 'sizes="any"'],
+    ['favicon.svg', 'type="image/svg+xml"'],
+    ['favicon-32.png', 'sizes="32x32"'],
+    ['favicon-16.png', 'sizes="16x16"']
+  ];
+  for (const pagina of [...PAGINAS_AUDITADAS, 'es/index.html', 'es/models.html', 'es/whitepaper.html']) {
+    const html = leer(pagina);
+    const prefijo = pagina.startsWith('es/') ? '../' : '';
+    for (const [archivo, rasgo] of FAVICONS) {
+      const etiqueta = new RegExp(`<link rel="icon"[^>]*href="${prefijo.replace(/\./g, '\\.')}${archivo.replace(/\./g, '\\.')}"[^>]*>`).exec(html);
+      check(etiqueta && etiqueta[0].includes(rasgo)
+        && fs.existsSync(path.join(WEB, path.dirname(pagina), prefijo + archivo)),
+        `${pagina}: enlaza ${prefijo}${archivo} (${rasgo}) y el archivo existe`);
+    }
+    check(!/sizes="64x64" href="(?:\.\.\/)?icon-64\.png"/.test(html), `${pagina}: el favicon ya no es icon-64.png`);
+  }
+  const ico = fs.readFileSync(path.join(WEB, 'favicon.ico'));
+  const lados = ico.readUInt16LE(0) === 0 && ico.readUInt16LE(2) === 1
+    ? Array.from({ length: ico.readUInt16LE(4) }, (_, i) => ico[6 + 16 * i] || 256).sort((a, b) => a - b) : [];
+  check(lados.join() === '16,32,48', `favicon.ico contiene 16, 32 y 48 px (${lados.join(', ')})`);
+  const svg = leer('favicon.svg');
+  check(/^<svg [^>]*viewBox="0 0 32 32"/.test(svg) && !/<script|\son\w+=|href=|<foreignObject/i.test(svg),
+    'favicon.svg es un SVG estatico, sin scripts ni referencias externas');
+  for (const [archivo, lado] of [['favicon-16.png', 16], ['favicon-32.png', 32], ['icon-64.png', 64], ['icon-180.png', 180], ['icon.png', 1024]]) {
+    const png = dimensionesPng(archivo);
+    check(png && png.ancho === lado && png.alto === lado, `${archivo} es un PNG de ${lado}x${lado}`);
+  }
+  // El logo del JSON-LD era un PNG de 1 MB; el de logo v2 pesa unos 37 KB.
+  check(dimensionesPng('icon.png').bytes < 100000, `icon.png (logo del JSON-LD) pesa menos de 100 KB (${dimensionesPng('icon.png').bytes})`);
+  check(social.bytes < 150000, `og-image.png pesa menos de 150 KB (${social.bytes})`);
+}
+
 // llms.txt: lo que enlaza del propio sitio son las URLs del sitemap, ni una mas.
 const llms = fs.readFileSync(path.join(WEB, 'llms.txt'), 'utf8');
 const enlacesPropios = [...llms.matchAll(/\]\((https:\/\/mika5\.xyz\/[^)]*)\)/g)].map(m => m[1]);
