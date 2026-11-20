@@ -846,6 +846,7 @@
             <div class="text-center space-y-3">
                 <h3 class="text-2xl font-heading" data-i18n="guide.title">First launch: getting past the Windows and macOS warnings</h3>
                 <p class="text-sm text-[#9CA3AF] max-w-2xl mx-auto" data-i18n="guide.intro">MIKA5 is not code-signed yet, so the system asks you to confirm the first time. It takes three steps, and only once.</p>
+                <p class="text-sm"><a href="https://github.com/mika5app/mika5/blob/main/CODE_SIGNING_POLICY.md" target="_blank" rel="noopener" class="text-[#A78BFA] hover:text-white underline" data-i18n="guide.policyLink">Code signing policy</a></p>
             </div>
             <div class="grid md:grid-cols-2 gap-6">
                 <div class="glass-card rounded-2xl p-7 space-y-5">
@@ -1227,6 +1228,7 @@
                     <a href="https://github.com/mika5app/mika5-releases" target="_blank" rel="noopener" class="block hover:text-white transition-colors">GitHub</a>
                     <a href="https://github.com/mika5app/mika5-releases/releases" target="_blank" rel="noopener" class="block hover:text-white transition-colors" data-i18n="footer.releases">Releases</a>
                     <a href="https://github.com/mika5app/mika5-releases/issues" target="_blank" rel="noopener" class="block hover:text-white transition-colors" data-i18n="footer.issues">Issues</a>
+                    <a href="https://github.com/mika5app/mika5" target="_blank" rel="noopener" class="block hover:text-white transition-colors" data-i18n="footer.source">Source code</a>
                 </div>
             </div>
             <div class="space-y-2">
@@ -1234,6 +1236,8 @@
                 <div class="space-y-1.5">
                     <a href="#privacy" class="block hover:text-white transition-colors" data-i18n="footer.privacy">Privacy</a>
                     <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/LICENSE" target="_blank" rel="noopener" class="block hover:text-white transition-colors" data-i18n="footer.license">License (AGPL-3.0)</a>
+                    <a href="https://github.com/mika5app/mika5/blob/main/CODE_SIGNING_POLICY.md" target="_blank" rel="noopener" class="block hover:text-white transition-colors" data-i18n="footer.codeSigning">Code signing policy</a>
+                    <a href="https://github.com/mika5app/mika5/blob/main/PRIVACY.md" target="_blank" rel="noopener" class="block hover:text-white transition-colors" data-i18n="footer.privacyPolicy">Privacy policy</a>
                     <span class="block" data-i18n="footer.trademark">Trademark</span>
                 </div>
             </div>
@@ -1511,6 +1515,10 @@ const STRINGS = {
     'footer.copyright': 'v0.3.1 · © 2026 MIKA5 · AGPL-3.0',
     'footer.privacy': 'Privacy',
     'footer.license': 'License (AGPL-3.0)',
+    'footer.source': 'Source code',
+    'footer.codeSigning': 'Code signing policy',
+    'footer.privacyPolicy': 'Privacy policy',
+    'guide.policyLink': 'Code signing policy',
     'footer.trademark': 'Trademark'
   },
   es: {
@@ -1780,6 +1788,10 @@ const STRINGS = {
     'footer.copyright': 'v0.3.1 · © 2026 MIKA5 · AGPL-3.0',
     'footer.privacy': 'Privacidad',
     'footer.license': 'Licencia (AGPL-3.0)',
+    'footer.source': 'Código fuente',
+    'footer.codeSigning': 'Política de firma de código (Code signing policy)',
+    'footer.privacyPolicy': 'Política de privacidad',
+    'guide.policyLink': 'Política de firma de código (Code signing policy)',
     'footer.trademark': 'Marca Registrada'
   }
 };

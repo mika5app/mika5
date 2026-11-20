@@ -636,6 +636,24 @@ for (const pagina of [...PAGINAS_AUDITADAS, 'es/index.html', 'es/models.html', '
     `${pagina}: todo enlace y recurso relativo existe (${relativosRotos.join(', ') || 'ninguno roto'})`);
 }
 
+// La portada es tambien la pagina de descarga. Lleva a la vista el enlace
+// «Code signing policy» (lo exige SignPath Foundation en ambas), la politica
+// de privacidad y el repositorio publico del codigo, en los dos idiomas.
+for (const pagina of ['landing.html', 'es/index.html']) {
+  const html = fs.readFileSync(path.join(WEB, pagina), 'utf8');
+  const marcado = html.slice(0, html.indexOf('const STRINGS = {'));
+  const enlaces = [...marcado.matchAll(/<a\b[^>]*\bhref="([^"]+)"[^>]*>([^<]*)<\/a>/g)].map(m => ({ href: m[1], texto: m[2].trim() }));
+  const politica = enlaces.filter(e => e.href === 'https://github.com/mika5app/mika5/blob/main/CODE_SIGNING_POLICY.md');
+  check(politica.length === 2 && politica.every(e => e.texto.includes('Code signing policy')),
+    `${pagina}: el enlace «Code signing policy» esta en la zona de descarga y en el pie (${politica.map(e => e.texto).join(' | ')})`);
+  check(enlaces.some(e => e.href === 'https://github.com/mika5app/mika5/blob/main/PRIVACY.md' && e.texto.length > 5),
+    `${pagina}: enlaza la politica de privacidad`);
+  check(enlaces.some(e => e.href === 'https://github.com/mika5app/mika5' && e.texto.length > 5),
+    `${pagina}: enlaza el repositorio publico del codigo`);
+}
+check(fs.existsSync(path.join(ROOT, 'CODE_SIGNING_POLICY.md')) && fs.existsSync(path.join(ROOT, 'PRIVACY.md')),
+  'los dos documentos enlazados existen en la raiz del repositorio');
+
 // llms.txt: lo que enlaza del propio sitio son las URLs del sitemap, ni una mas.
 const llms = fs.readFileSync(path.join(WEB, 'llms.txt'), 'utf8');
 const enlacesPropios = [...llms.matchAll(/\]\((https:\/\/mika5\.xyz\/[^)]*)\)/g)].map(m => m[1]);
