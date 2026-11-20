@@ -2,7 +2,7 @@
 
 > Free AI desktop app that runs 100% on your computer. Local RAG, projects, per-chat knowledge, vision models. Powered by Ollama.
 
-MIKA5 Community 0.3.1 runs on Windows 10+, macOS 12+ and Linux. It is free and distributed under AGPL-3.0.
+MIKA5 Community 0.3.2 runs on Windows 10+, macOS 12+ and Linux. It is free and distributed under AGPL-3.0.
 
 ## Pages
 
@@ -18,4 +18,4 @@ MIKA5 Community 0.3.1 runs on Windows 10+, macOS 12+ and Linux. It is free and d
 
 ## Downloads
 
-- [MIKA5 Community 0.3.1](https://github.com/mika5app/mika5-releases/releases/tag/v0.3.1): Installers for Windows, macOS and Linux.
+- [MIKA5 Community 0.3.2](https://github.com/mika5app/mika5-releases/releases/tag/v0.3.2): Installers for Windows, macOS and Linux.

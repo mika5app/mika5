@@ -132,10 +132,44 @@ function construir(pagina, htmlFuente) {
     return clave !== undefined && es[clave] !== undefined ? es[clave] : null;
   };
   const sinTraducir = [];
+  // El resto de los datos estructurados también se escribe en español aquí.
+  // El conmutador del navegador lo hace al cambiar de idioma, pero un buscador
+  // o un motor de respuestas lee el HTML sin ejecutar scripts: sin esto, /es/
+  // declaraba `inLanguage: "en"` y migas en inglés que apuntaban a las páginas
+  // inglesas. Una clave que falte detiene la generación.
+  const enEspanol = new Map(PAGINAS.map(p => [p.en, p.es]));
+  const exigir = (clave) => {
+    if (meta(clave) === undefined) throw new Error(`${pagina.fuente}: falta ${pagina.prefijo}.meta.${clave} en español`);
+    return meta(clave);
+  };
+  const MIGAS = ['crumbHome', 'crumbGuide'];
   cuerpo = cuerpo.replace(/(<script type="application\/ld\+json">)([\s\S]*?)(<\/script>)/g, (todo, abre, json, cierra) => {
     const datos = JSON.parse(json);
     let tocado = false;
     for (const nodo of datos['@graph'] || [datos]) {
+      if (nodo['@type'] === 'Article' || nodo['@type'] === 'TechArticle') {
+        nodo.headline = exigir('ldHeadline');
+        nodo.description = exigir('description');
+        nodo.inLanguage = 'es';
+        for (const campo of ['url', 'mainEntityOfPage']) {
+          if (enEspanol.has(nodo[campo])) nodo[campo] = enEspanol.get(nodo[campo]);
+        }
+        tocado = true;
+      }
+      if (nodo['@type'] === 'BreadcrumbList') {
+        nodo.itemListElement.forEach((miga, i) => {
+          if (MIGAS[i] === undefined || !enEspanol.has(miga.item)) {
+            throw new Error(`${pagina.fuente}: miga ${i + 1} sin equivalente en español`);
+          }
+          miga.name = exigir(MIGAS[i]);
+          miga.item = enEspanol.get(miga.item);
+        });
+        tocado = true;
+      }
+      if (nodo['@type'] === 'SoftwareApplication') {
+        nodo.description = exigir('description');
+        tocado = true;
+      }
       if (nodo['@type'] !== 'FAQPage') continue;
       for (const pregunta of nodo.mainEntity) {
         const q = traducir(pregunta.name);
@@ -153,7 +187,7 @@ function construir(pagina, htmlFuente) {
   // La página vive un nivel más abajo: los recursos compartidos se piden al
   // padre, y «inicio» es la portada en español.
   const subir = (texto) => texto
-    .replace(/\b(href|src)="(icon-64\.png|icon-180\.png|chat-widget\.js)"/g, '$1="../$2"')
+    .replace(/\b(href|src)="(icon-64\.png|icon-180\.png|favicon\.ico|favicon\.svg|favicon-16\.png|favicon-32\.png)"/g, '$1="../$2"')
     .replace(/\bhref="\/"/g, 'href="/es/"');
   return subir(cuerpo) + diccionario + subir(resto);
 }

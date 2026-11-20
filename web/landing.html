@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- MIKA5 Landing v0.3.1 -->
+<!-- MIKA5 Landing v0.3.2 -->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -7,13 +7,16 @@
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <meta name="color-scheme" content="dark">
     <title>MIKA5 | AI on your machine. Under your control.</title>
-    <meta name="description" content="MIKA5 is a free AI desktop app that runs 100% on your computer. Local RAG, projects, per-chat knowledge, vision models. Powered by Ollama. No cloud, no subscriptions, no data collection.">
+    <meta name="description" content="Free, local-first AI desktop app with built-in RAG, projects and optional cloud providers. Runs on your machine with Ollama. Windows, macOS and Linux. AGPL-3.0.">
     <meta name="robots" content="index, follow">
     <link rel="canonical" href="https://mika5.xyz/">
     <link rel="alternate" hreflang="en" href="https://mika5.xyz/">
     <link rel="alternate" hreflang="es" href="https://mika5.xyz/es/">
     <link rel="alternate" hreflang="x-default" href="https://mika5.xyz/">
-    <link rel="icon" type="image/png" sizes="64x64" href="icon-64.png">
+    <link rel="icon" href="favicon.ico" sizes="any">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
     <link rel="apple-touch-icon" href="icon-180.png">
 
     <meta name="author" content="MIKA5">
@@ -22,7 +25,7 @@
 
     <!-- Open Graph -->
     <meta property="og:title" content="MIKA5 — AI on your machine. Under your control.">
-    <meta property="og:description" content="Free AI desktop app. Local RAG, projects, vision models. Powered by Ollama. No cloud, no subscriptions.">
+    <meta property="og:description" content="Local-first, multi-model AI workspace with built-in RAG, project organization and optional cloud providers. Free and open source.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://mika5.xyz/">
     <meta property="og:image" content="https://mika5.xyz/og-image.png">
@@ -35,7 +38,7 @@
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="MIKA5 — AI on your machine. Under your control.">
-    <meta name="twitter:description" content="Free AI desktop app. Local RAG, projects, vision models. Powered by Ollama. No cloud, no subscriptions.">
+    <meta name="twitter:description" content="Local-first, multi-model AI workspace with built-in RAG, project organization and optional cloud providers. Free and open source.">
     <meta name="twitter:image" content="https://mika5.xyz/og-image.png">
 
     <!-- Structured Data: SoftwareApplication + Organization + FAQ -->
@@ -50,6 +53,7 @@
           "url": "https://mika5.xyz/",
           "logo": "https://mika5.xyz/icon.png",
           "sameAs": [
+            "https://github.com/mika5app/mika5",
             "https://github.com/mika5app/mika5-releases"
           ]
         },
@@ -64,15 +68,15 @@
         {
           "@type": "SoftwareApplication",
           "@id": "https://mika5.xyz/#app",
-          "name": "MIKA5",
+          "name": "MIKA5 Community",
           "applicationCategory": "DesktopEnhancement",
           "operatingSystem": "Windows 10+, macOS 12+, Linux",
-          "description": "Free AI desktop app that runs 100% on your computer. Local RAG, projects, per-chat knowledge, vision models. Powered by Ollama.",
+          "description": "Free, local-first AI desktop app with built-in RAG, projects and optional cloud providers. Runs on your machine with Ollama. Windows, macOS and Linux. AGPL-3.0.",
           "url": "https://mika5.xyz/",
-          "downloadUrl": "https://github.com/mika5app/mika5-releases/releases/tag/v0.3.1",
+          "downloadUrl": "https://github.com/mika5app/mika5-releases/releases/tag/v0.3.2",
       "datePublished": "2026-08-04",
-          "softwareVersion": "0.3.1",
-          "license": "https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/LICENSE",
+          "softwareVersion": "0.3.2",
+          "license": "https://github.com/mika5app/mika5-releases/releases/download/v0.3.2/LICENSE",
           "offers": {
             "@type": "Offer",
             "price": "0",
@@ -91,14 +95,6 @@
           ]
         },
         {
-          "@type": "BreadcrumbList",
-          "itemListElement": [
-            { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://mika5.xyz/" },
-            { "@type": "ListItem", "position": 2, "name": "Model Guide", "item": "https://mika5.xyz/models.html" },
-            { "@type": "ListItem", "position": 3, "name": "White Paper", "item": "https://mika5.xyz/whitepaper.html" }
-          ]
-        },
-        {
           "@type": "FAQPage",
           "mainEntity": [
             {
@@ -106,7 +102,7 @@
               "name": "Is MIKA5 free?",
               "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "Yes. MIKA5 is 100% free, open-source under AGPL-3.0, and runs entirely on your machine with no subscriptions or hidden costs."
+                "text": "Yes. MIKA5 is free and open source under AGPL-3.0, with no subscriptions or hidden costs. It runs on your machine; cloud providers are optional."
               }
             },
             {
@@ -138,7 +134,23 @@
               "name": "Does MIKA5 collect any data or telemetry?",
               "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "No. MIKA5 has zero telemetry, zero tracking, and zero data collection. All conversations and documents stay on your machine in a local SQLite database."
+                "text": "No. MIKA5 has no telemetry and no tracking. Conversations and documents stay on your machine in a local SQLite database, and only leave it when you choose a cloud provider and confirm the request."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "How do I get past the Windows and macOS warnings on first launch?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "MIKA5 is not code-signed yet, so the system asks you to confirm once. On Windows, click “More info” in the SmartScreen window, check that the file is the MIKA5 installer and click “Run anyway”. On macOS, open the app once, then go to System Settings → Privacy & Security and click “Open Anyway” next to MIKA5. If Smart App Control is on in Windows, unsigned apps cannot be installed."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "How is MIKA5 different from ChatGPT?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "ChatGPT is OpenAI's cloud service: your conversations are processed on OpenAI's servers and you need an account. MIKA5 is a desktop app that runs open models on your own computer through Ollama or llama.cpp, keeps conversations and documents in a local database and needs no account. Cloud providers, OpenAI included, are optional: you use your own API key and confirm what is sent before anything leaves your machine."
               }
             }
           ]
@@ -149,7 +161,6 @@
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
     <!-- Fetch the two other pages when a link to them is about to be used.
          Browsers without speculation rules ignore this block. -->
@@ -334,6 +345,9 @@
         /* Coming soon */
         .coming-soon { opacity: 0.45; cursor: not-allowed; }
     </style>
+    <!-- Compiled by `npm run build:web-css`; after the page styles, where the
+         Tailwind CDN used to insert its own, so the cascade is unchanged. -->
+    <link rel="stylesheet" href="/tailwind.css">
 </head>
 <body>
 <a href="#main-content" class="skip-link visually-hidden" data-i18n="landing.nav.skip">Skip to main content</a>
@@ -344,7 +358,7 @@
         <div class="flex items-center gap-3 shrink-0">
             <img src="icon-64.png" width="28" height="28" alt="MIKA5" class="w-7 h-7 rounded-lg">
             <span class="text-xl font-bold tracking-tight font-heading">MIKA5</span>
-            <span class="version-tag badge px-2 py-0.5 rounded-full ml-1 hidden lg:inline-block">v0.3.1</span>
+            <span class="version-tag badge px-2 py-0.5 rounded-full ml-1 hidden lg:inline-block">v0.3.2</span>
         </div>
         <nav class="hidden md:flex items-center gap-4 lg:gap-7 min-w-0 text-sm font-medium text-[#9CA3AF]">
             <a href="#features" class="hover:text-white transition-colors" data-i18n="nav.features">Features</a>
@@ -373,12 +387,12 @@
 <!-- Mobile menu overlay -->
 <dialog id="mobile-menu" aria-label="Navigation menu" data-i18n-attr="aria-label:landing.nav.menuLabel" class="fixed inset-0 z-40 bg-[#0B0F14]/95 flex-col items-center justify-center gap-8 text-xl">
     <button id="mobile-menu-close" type="button" class="absolute top-6 right-6 text-white text-3xl" aria-label="Close menu" data-i18n-attr="aria-label:landing.nav.closeMenu">&times;</button>
-    <a href="#features" class="text-white hover:text-[#7C3AED] transition-colors" data-i18n="nav.features">Features</a>
-    <a href="#download" class="text-white hover:text-[#7C3AED] transition-colors" data-i18n="nav.download">Download</a>
-    <a href="#quickstart" class="text-white hover:text-[#7C3AED] transition-colors" data-i18n="nav.quickstart">Quick Start</a>
-    <a href="models.html" class="text-white hover:text-[#7C3AED] transition-colors" data-i18n="nav.modelguide">Model Guide</a>
-    <a href="whitepaper.html" class="text-white hover:text-[#7C3AED] transition-colors" data-i18n="nav.whitepaper">White Paper</a>
-    <a href="https://github.com/mika5app/mika5-releases" target="_blank" rel="noopener" class="text-white hover:text-[#7C3AED] transition-colors" data-i18n="nav.github">GitHub</a>
+    <a href="#features" class="text-white hover:text-[#A78BFA] transition-colors" data-i18n="nav.features">Features</a>
+    <a href="#download" class="text-white hover:text-[#A78BFA] transition-colors" data-i18n="nav.download">Download</a>
+    <a href="#quickstart" class="text-white hover:text-[#A78BFA] transition-colors" data-i18n="nav.quickstart">Quick Start</a>
+    <a href="models.html" class="text-white hover:text-[#A78BFA] transition-colors" data-i18n="nav.modelguide">Model Guide</a>
+    <a href="whitepaper.html" class="text-white hover:text-[#A78BFA] transition-colors" data-i18n="nav.whitepaper">White Paper</a>
+    <a href="https://github.com/mika5app/mika5-releases" target="_blank" rel="noopener" class="text-white hover:text-[#A78BFA] transition-colors" data-i18n="nav.github">GitHub</a>
     <button type="button" class="text-sm font-bold px-4 py-2 rounded-full border border-white/10 text-[#9CA3AF] hover:text-white hover:border-white/30 transition-all" id="mobile-lang-toggle">ES</button>
 </dialog>
 
@@ -389,7 +403,7 @@
         <div class="flex-1 space-y-8">
             <div class="flex items-center gap-2">
                 <span class="pulse-dot w-2 h-2 rounded-full bg-green-400 inline-block"></span>
-                <span class="text-xs uppercase tracking-widest text-green-400 font-bold" data-i18n="hero.badge">v0.3.1 — Windows · macOS · Linux</span>
+                <span class="text-xs uppercase tracking-widest text-green-400 font-bold" data-i18n="hero.badge">v0.3.2 — Windows · macOS · Linux</span>
             </div>
             <h1 class="text-5xl md:text-[4.2rem] font-bold leading-[1.08] tracking-tight">
                 <span data-i18n="hero.h1a">AI on your machine.</span><br>
@@ -443,7 +457,7 @@
                                 </div>
                             </div>
                             <!-- RAG indicator -->
-                            <div class="flex items-center gap-1.5 min-w-0 text-[0.625rem] text-[#7C3AED]">
+                            <div class="flex items-center gap-1.5 min-w-0 text-[0.625rem] text-[#A78BFA]">
                                 <svg aria-hidden="true" class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                                 <span class="truncate" data-i18n="landing.mockup.ragHit">RAG: 3 relevant fragments found</span>
                             </div>
@@ -617,11 +631,11 @@
 
     <hr class="border-white/5">
 
-    <!-- ─── WHAT'S NEW IN v0.3.1 ──────────────────────────────── -->
+    <!-- ─── WHAT'S NEW IN v0.3.2 ──────────────────────────────── -->
     <section id="whatsnew" class="py-24 space-y-12">
         <div class="text-center space-y-4">
-            <h2 class="text-4xl md:text-5xl font-heading" data-i18n="new.title">What's new in v0.3.1</h2>
-            <p class="text-xl text-[#9CA3AF] max-w-2xl mx-auto" data-i18n="new.subtitle">This release is about the interface and about being explicit: knowing which model answered, what leaves your machine, and where you are working.</p>
+            <h2 class="text-4xl md:text-5xl font-heading" data-i18n="new.title">What's new in v0.3.2</h2>
+            <p class="text-xl text-[#9CA3AF] max-w-2xl mx-auto" data-i18n="new.subtitle">MIKA5 now finds llama.cpp and BitNet (experimental) with the models already on your machine and starts them when you pick one, every provider reports whether it is ready and what to do if not, long documents are searched in full, and the app can tell you when a new version is out. Below, what 0.3.1 introduced, all still here.</p>
         </div>
         <div class="grid md:grid-cols-2 gap-x-12 gap-y-5 max-w-4xl mx-auto">
             <div class="flex gap-4">
@@ -736,18 +750,18 @@
                     <h3 class="font-heading font-semibold text-white" data-i18n="dl.win.name">Windows</h3>
                     <p class="text-xs text-[#8B95A5] mt-1" data-i18n="dl.win.desc">Windows 10 / 11 · x64</p>
                 </div>
-                <span class="version-tag badge px-2 py-0.5 rounded-full">v0.3.1</span>
+                <span class="version-tag badge px-2 py-0.5 rounded-full">v0.3.2</span>
                 <div class="w-full space-y-2 mt-1">
-                    <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/MIKA5-Setup-0.3.1-win-x64.exe"
+                    <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.2/MIKA5-Setup-0.3.2-win-x64.exe"
                        class="block w-full bg-[#7C3AED] text-white text-xs font-semibold py-2 rounded-xl text-center hover:brightness-110 transition-all" data-i18n="dl.win.installer">
                         Download Installer (.exe)
                     </a>
-                    <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/MIKA5-Portable-0.3.1-win-x64.exe"
+                    <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.2/MIKA5-Portable-0.3.2-win-x64.exe"
                        class="block w-full bg-white/5 border border-white/10 text-[#9CA3AF] text-xs font-semibold py-2 rounded-xl text-center hover:bg-white/10 transition-all" data-i18n="dl.win.portable">
                         Portable (.exe)
                     </a>
                 </div>
-                <p class="text-[0.625rem] leading-relaxed text-[#8B95A5] text-left w-full" data-i18n="dl.win.warning">Not signed with Authenticode: SmartScreen may warn on first run. Check that the file name carries 0.3.1 and compare its SHA-256 against SHA256SUMS.txt before installing.</p>
+                <p class="text-[0.625rem] leading-relaxed text-[#8B95A5] text-left w-full" data-i18n="dl.win.warning">Not signed with Authenticode: SmartScreen may warn on first run. Check that the file name carries 0.3.2 and compare its SHA-256 against SHA256SUMS.txt before installing.</p>
             </div>
 
             <!-- macOS -->
@@ -759,13 +773,13 @@
                     <h3 class="font-heading font-semibold text-white" data-i18n="dl.mac.name">macOS</h3>
                     <p class="text-xs text-[#8B95A5] mt-1" data-i18n="dl.mac.desc">Apple Silicon · Intel x64</p>
                 </div>
-                <span class="version-tag badge px-2 py-0.5 rounded-full">v0.3.1</span>
+                <span class="version-tag badge px-2 py-0.5 rounded-full">v0.3.2</span>
                 <div class="w-full space-y-2 mt-1">
-                    <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/MIKA5-0.3.1-mac-arm64.dmg"
+                    <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.2/MIKA5-0.3.2-mac-arm64.dmg"
                        class="block w-full bg-[#7C3AED] text-white text-xs font-semibold py-2 rounded-xl text-center hover:brightness-110 transition-all" data-i18n="dl.mac.arm">
                         Apple Silicon (.dmg)
                     </a>
-                    <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/MIKA5-0.3.1-mac-x64.dmg"
+                    <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.2/MIKA5-0.3.2-mac-x64.dmg"
                        class="block w-full bg-white/5 border border-white/10 text-[#9CA3AF] text-xs font-semibold py-2 rounded-xl text-center hover:bg-white/10 transition-all" data-i18n="dl.mac.intel">
                         Intel x64 (.dmg)
                     </a>
@@ -782,18 +796,18 @@
                     <h3 class="font-heading font-semibold text-white" data-i18n="dl.linux.name">Linux</h3>
                     <p class="text-xs text-[#8B95A5] mt-1" data-i18n="dl.linux.desc">x64 · AppImage · deb · rpm</p>
                 </div>
-                <span class="version-tag badge px-2 py-0.5 rounded-full">v0.3.1</span>
+                <span class="version-tag badge px-2 py-0.5 rounded-full">v0.3.2</span>
                 <div class="w-full space-y-2 mt-1">
-                    <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/MIKA5-0.3.1-linux-x86_64.AppImage"
+                    <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.2/MIKA5-0.3.2-linux-x86_64.AppImage"
                        class="block w-full bg-[#7C3AED] text-white text-xs font-semibold py-2 rounded-xl text-center hover:brightness-110 transition-all" data-i18n="dl.linux.appimage">
                         AppImage (universal)
                     </a>
                     <div class="flex gap-2">
-                        <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/MIKA5-0.3.1-linux-amd64.deb"
+                        <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.2/MIKA5-0.3.2-linux-amd64.deb"
                            class="flex-1 bg-white/5 border border-white/10 text-[#9CA3AF] text-xs font-semibold py-2 rounded-xl text-center hover:bg-white/10 transition-all">
                             .deb
                         </a>
-                        <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/MIKA5-0.3.1-linux-x86_64.rpm"
+                        <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.2/MIKA5-0.3.2-linux-x86_64.rpm"
                            class="flex-1 bg-white/5 border border-white/10 text-[#9CA3AF] text-xs font-semibold py-2 rounded-xl text-center hover:bg-white/10 transition-all">
                             .rpm
                         </a>
@@ -815,22 +829,22 @@
         <div class="max-w-4xl mx-auto">
             <div class="terminal rounded-xl p-5 text-xs space-y-2">
                 <p class="text-[#7D8797]" data-i18n="dl.verify.comment1"># Verify download integrity</p>
-                <p><span class="prompt">PS&gt;</span> <code class="text-white">Get-FileHash "MIKA5-Setup-0.3.1-win-x64.exe" -Algorithm SHA256</code> <span class="comment" data-i18n="landing.verify.win"># Windows</span></p>
-                <p><span class="prompt">$</span> <code class="text-white">shasum -a 256 MIKA5-0.3.1-mac-arm64.dmg</code> <span class="comment" data-i18n="landing.verify.mac"># macOS</span></p>
-                <p><span class="prompt">$</span> <code class="text-white">sha256sum MIKA5-0.3.1-linux-x86_64.AppImage</code> <span class="comment" data-i18n="landing.verify.linux"># Linux</span></p>
+                <p><span class="prompt">PS&gt;</span> <code class="text-white">Get-FileHash "MIKA5-Setup-0.3.2-win-x64.exe" -Algorithm SHA256</code> <span class="comment" data-i18n="landing.verify.win"># Windows</span></p>
+                <p><span class="prompt">$</span> <code class="text-white">shasum -a 256 MIKA5-0.3.2-mac-arm64.dmg</code> <span class="comment" data-i18n="landing.verify.mac"># macOS</span></p>
+                <p><span class="prompt">$</span> <code class="text-white">sha256sum MIKA5-0.3.2-linux-x86_64.AppImage</code> <span class="comment" data-i18n="landing.verify.linux"># Linux</span></p>
                 <p class="text-[#8B95A5]" data-i18n="dl.verify.comment2"># Compare with the checksums published in SHA256SUMS.txt</p>
             </div>
             <p class="text-xs text-[#8B95A5] mt-4 leading-relaxed">
                 <span data-i18n="dl.extras.label">Source and verification:</span>
-                <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/MIKA5-0.3.1-source.tar.gz" target="_blank" rel="noopener" class="text-[#A78BFA] hover:text-white underline underline-offset-2 transition-colors" data-i18n="dl.extras.source">Corresponding source (.tar.gz)</a>
+                <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.2/MIKA5-0.3.2-source.tar.gz" target="_blank" rel="noopener" class="text-[#A78BFA] hover:text-white underline underline-offset-2 transition-colors" data-i18n="dl.extras.source">Corresponding source (.tar.gz)</a>
                 <span class="text-[#7D8797]">·</span>
-                <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/SHA256SUMS.txt" target="_blank" rel="noopener" class="text-[#A78BFA] hover:text-white underline underline-offset-2 transition-colors">SHA256SUMS.txt</a>
+                <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.2/SHA256SUMS.txt" target="_blank" rel="noopener" class="text-[#A78BFA] hover:text-white underline underline-offset-2 transition-colors">SHA256SUMS.txt</a>
                 <span class="text-[#7D8797]">·</span>
-                <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/BUILDING.md" target="_blank" rel="noopener" class="text-[#A78BFA] hover:text-white underline underline-offset-2 transition-colors">BUILDING.md</a>
+                <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.2/BUILDING.md" target="_blank" rel="noopener" class="text-[#A78BFA] hover:text-white underline underline-offset-2 transition-colors">BUILDING.md</a>
                 <span class="text-[#7D8797]">·</span>
-                <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/COMMUNITY.md" target="_blank" rel="noopener" class="text-[#A78BFA] hover:text-white underline underline-offset-2 transition-colors">COMMUNITY.md</a>
+                <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.2/COMMUNITY.md" target="_blank" rel="noopener" class="text-[#A78BFA] hover:text-white underline underline-offset-2 transition-colors">COMMUNITY.md</a>
                 <span class="text-[#7D8797]">·</span>
-                <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/BUILD-METADATA.json" target="_blank" rel="noopener" class="text-[#A78BFA] hover:text-white underline underline-offset-2 transition-colors">BUILD-METADATA.json</a>
+                <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.2/BUILD-METADATA.json" target="_blank" rel="noopener" class="text-[#A78BFA] hover:text-white underline underline-offset-2 transition-colors">BUILD-METADATA.json</a>
             </p>
             <p class="text-xs text-[#7D8797] mt-2 leading-relaxed" data-i18n="dl.extras.note">The release publishes 15 assets and SHA256SUMS.txt lists 14 of them: a checksum file cannot contain its own hash. The two macOS .zip builds are published but not linked here, because the .dmg is the recommended download for the same architectures.</p>
         </div>
@@ -895,7 +909,7 @@
     <section id="pro" class="py-16 text-center">
         <div class="max-w-lg mx-auto p-8 rounded-2xl border border-white/10 bg-[#111827]/60 backdrop-blur space-y-4">
             <h2 class="text-2xl font-heading" data-i18n="notify.title">MIKA5 Pro is in development</h2>
-            <p class="text-sm text-[#9CA3AF]" data-i18n="notify.desc">Team collaboration, cloud sync and advanced RAG are in development. None of them exists in Community v0.3.1. Get notified when Pro launches.</p>
+            <p class="text-sm text-[#9CA3AF]" data-i18n="notify.desc">Team collaboration, cloud sync and advanced RAG are in development. None of them exists in Community v0.3.2. Get notified when Pro launches.</p>
             <form id="notifyForm"
       action="https://buttondown.com/api/emails/embed-subscribe/mika5"
       method="post"
@@ -978,7 +992,7 @@
                         <div class="step-num rounded-full flex items-center justify-center shrink-0" aria-hidden="true">3</div>
                         <div class="space-y-2">
                             <p class="font-medium" data-i18n="qs.win.s3.title">Install and launch MIKA5</p>
-                            <p class="text-sm text-[#9CA3AF]" data-i18n="qs.win.s3.desc">Run the MIKA5-Setup-0.3.1-win-x64.exe installer, then open MIKA5 from the Start Menu or Desktop shortcut.</p>
+                            <p class="text-sm text-[#9CA3AF]" data-i18n="qs.win.s3.desc">Run the MIKA5-Setup-0.3.2-win-x64.exe installer, then open MIKA5 from the Start Menu or Desktop shortcut.</p>
                         </div>
                     </li>
                 </ol>
@@ -1082,12 +1096,12 @@
                             <p class="font-medium" data-i18n="qs.linux.s3.title">Install MIKA5</p>
                             <div class="terminal rounded-xl p-4 text-xs space-y-1">
                                 <p class="comment" data-i18n="landing.qs.appimageNote"># AppImage (no install needed):</p>
-                                <p><span class="prompt">$</span> <code>chmod +x MIKA5-0.3.1-linux-x86_64.AppImage</code></p>
-                                <p><span class="prompt">$</span> <code>./MIKA5-0.3.1-linux-x86_64.AppImage</code></p>
+                                <p><span class="prompt">$</span> <code>chmod +x MIKA5-0.3.2-linux-x86_64.AppImage</code></p>
+                                <p><span class="prompt">$</span> <code>./MIKA5-0.3.2-linux-x86_64.AppImage</code></p>
                                 <p class="comment" data-i18n="landing.qs.debNote"># Or Debian/Ubuntu:</p>
-                                <p><span class="prompt">$</span> <code>sudo dpkg -i MIKA5-0.3.1-linux-amd64.deb</code></p>
+                                <p><span class="prompt">$</span> <code>sudo dpkg -i MIKA5-0.3.2-linux-amd64.deb</code></p>
                                 <p class="comment" data-i18n="landing.qs.rpmNote"># Or Fedora/RHEL:</p>
-                                <p><span class="prompt">$</span> <code>sudo rpm -i MIKA5-0.3.1-linux-x86_64.rpm</code></p>
+                                <p><span class="prompt">$</span> <code>sudo rpm -i MIKA5-0.3.2-linux-x86_64.rpm</code></p>
                             </div>
                         </div>
                     </li>
@@ -1156,7 +1170,7 @@
         <div class="max-w-3xl mx-auto space-y-3">
             <details class="glass-card rounded-2xl px-6 py-4">
                 <summary class="cursor-pointer font-medium text-white" data-i18n="faq.q1">Is MIKA5 free?</summary>
-                <p class="mt-3 text-sm text-[#9CA3AF]" data-i18n="faq.a1">Yes. MIKA5 is 100% free, open-source under AGPL-3.0, and runs entirely on your machine with no subscriptions or hidden costs.</p>
+                <p class="mt-3 text-sm text-[#9CA3AF]" data-i18n="faq.a1">Yes. MIKA5 is free and open source under AGPL-3.0, with no subscriptions or hidden costs. It runs on your machine; cloud providers are optional.</p>
             </details>
             <details class="glass-card rounded-2xl px-6 py-4">
                 <summary class="cursor-pointer font-medium text-white" data-i18n="faq.q2">Does MIKA5 require an internet connection?</summary>
@@ -1172,7 +1186,15 @@
             </details>
             <details class="glass-card rounded-2xl px-6 py-4">
                 <summary class="cursor-pointer font-medium text-white" data-i18n="faq.q5">Does MIKA5 collect any data or telemetry?</summary>
-                <p class="mt-3 text-sm text-[#9CA3AF]" data-i18n="faq.a5">No. MIKA5 has zero telemetry, zero tracking, and zero data collection. All conversations and documents stay on your machine in a local SQLite database.</p>
+                <p class="mt-3 text-sm text-[#9CA3AF]" data-i18n="faq.a5">No. MIKA5 has no telemetry and no tracking. Conversations and documents stay on your machine in a local SQLite database, and only leave it when you choose a cloud provider and confirm the request.</p>
+            </details>
+            <details class="glass-card rounded-2xl px-6 py-4">
+                <summary class="cursor-pointer font-medium text-white" data-i18n="faq.q6">How do I get past the Windows and macOS warnings on first launch?</summary>
+                <p class="mt-3 text-sm text-[#9CA3AF]" data-i18n="faq.a6">MIKA5 is not code-signed yet, so the system asks you to confirm once. On Windows, click “More info” in the SmartScreen window, check that the file is the MIKA5 installer and click “Run anyway”. On macOS, open the app once, then go to System Settings → Privacy &amp; Security and click “Open Anyway” next to MIKA5. If Smart App Control is on in Windows, unsigned apps cannot be installed.</p>
+            </details>
+            <details class="glass-card rounded-2xl px-6 py-4">
+                <summary class="cursor-pointer font-medium text-white" data-i18n="faq.q7">How is MIKA5 different from ChatGPT?</summary>
+                <p class="mt-3 text-sm text-[#9CA3AF]" data-i18n="faq.a7">ChatGPT is OpenAI's cloud service: your conversations are processed on OpenAI's servers and you need an account. MIKA5 is a desktop app that runs open models on your own computer through Ollama or llama.cpp, keeps conversations and documents in a local database and needs no account. Cloud providers, OpenAI included, are optional: you use your own API key and confirm what is sent before anything leaves your machine.</p>
             </details>
         </div>
     </section>
@@ -1194,7 +1216,7 @@
                 <span data-i18n="cta.github">View on GitHub</span>
             </a>
         </div>
-        <p class="text-sm text-[#8B95A5]" data-i18n="cta.tagline">v0.3.1 · Windows · macOS · Linux · Free &amp; Open Source</p>
+        <p class="text-sm text-[#8B95A5]" data-i18n="cta.tagline">v0.3.2 · Windows · macOS · Linux · Free &amp; Open Source</p>
     </section>
 
 
@@ -1209,7 +1231,7 @@
                 MIKA5
             </div>
             <p class="text-xs" data-i18n="footer.tagline">AI on your machine. Under your control.</p>
-            <p class="text-xs text-[#7D8797]" data-i18n="footer.copyright">v0.3.1 · © 2026 MIKA5 · AGPL-3.0</p>
+            <p class="text-xs text-[#7D8797]" data-i18n="footer.copyright">v0.3.2 · © 2026 MIKA5 · AGPL-3.0</p>
         </div>
         <div class="flex flex-col md:flex-row gap-8 text-sm">
             <div class="space-y-2">
@@ -1235,7 +1257,7 @@
                 <p class="text-[#7D8797] text-xs uppercase tracking-widest" data-i18n="footer.legal">Legal</p>
                 <div class="space-y-1.5">
                     <a href="#privacy" class="block hover:text-white transition-colors" data-i18n="footer.privacy">Privacy</a>
-                    <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.1/LICENSE" target="_blank" rel="noopener" class="block hover:text-white transition-colors" data-i18n="footer.license">License (AGPL-3.0)</a>
+                    <a href="https://github.com/mika5app/mika5-releases/releases/download/v0.3.2/LICENSE" target="_blank" rel="noopener" class="block hover:text-white transition-colors" data-i18n="footer.license">License (AGPL-3.0)</a>
                     <a href="https://github.com/mika5app/mika5/blob/main/CODE_SIGNING_POLICY.md" target="_blank" rel="noopener" class="block hover:text-white transition-colors" data-i18n="footer.codeSigning">Code signing policy</a>
                     <a href="https://github.com/mika5app/mika5/blob/main/PRIVACY.md" target="_blank" rel="noopener" class="block hover:text-white transition-colors" data-i18n="footer.privacyPolicy">Privacy policy</a>
                     <span class="block" data-i18n="footer.trademark">Trademark</span>
@@ -1264,7 +1286,7 @@ const STRINGS = {
     'notify.emailLabel': 'Email address',
     'faq.title': 'Frequently asked questions',
     'faq.q1': 'Is MIKA5 free?',
-    'faq.a1': 'Yes. MIKA5 is 100% free, open-source under AGPL-3.0, and runs entirely on your machine with no subscriptions or hidden costs.',
+    'faq.a1': 'Yes. MIKA5 is free and open source under AGPL-3.0, with no subscriptions or hidden costs. It runs on your machine; cloud providers are optional.',
     'faq.q2': 'Does MIKA5 require an internet connection?',
     'faq.a2': 'No. MIKA5 works fully offline with local Ollama models. Cloud AI providers (OpenAI, Anthropic, Groq) are optional and clearly indicated.',
     'faq.q3': 'What is the built-in RAG engine?',
@@ -1272,7 +1294,11 @@ const STRINGS = {
     'faq.q4': 'What platforms does MIKA5 support?',
     'faq.a4': 'MIKA5 is available for Windows 10+ (installer and portable), macOS (Intel and Apple Silicon DMG), and Linux (AppImage, .deb, .rpm).',
     'faq.q5': 'Does MIKA5 collect any data or telemetry?',
-    'faq.a5': 'No. MIKA5 has zero telemetry, zero tracking, and zero data collection. All conversations and documents stay on your machine in a local SQLite database.',
+    'faq.a5': 'No. MIKA5 has no telemetry and no tracking. Conversations and documents stay on your machine in a local SQLite database, and only leave it when you choose a cloud provider and confirm the request.',
+    'faq.q6': 'How do I get past the Windows and macOS warnings on first launch?',
+    'faq.a6': 'MIKA5 is not code-signed yet, so the system asks you to confirm once. On Windows, click “More info” in the SmartScreen window, check that the file is the MIKA5 installer and click “Run anyway”. On macOS, open the app once, then go to System Settings → Privacy & Security and click “Open Anyway” next to MIKA5. If Smart App Control is on in Windows, unsigned apps cannot be installed.',
+    'faq.q7': 'How is MIKA5 different from ChatGPT?',
+    'faq.a7': 'ChatGPT is OpenAI\'s cloud service: your conversations are processed on OpenAI\'s servers and you need an account. MIKA5 is a desktop app that runs open models on your own computer through Ollama or llama.cpp, keeps conversations and documents in a local database and needs no account. Cloud providers, OpenAI included, are optional: you use your own API key and confirm what is sent before anything leaves your machine.',
     'guide.title': 'First launch: getting past the Windows and macOS warnings',
     'guide.intro': 'MIKA5 is not code-signed yet, so the system asks you to confirm the first time. It takes three steps, and only once.',
     'guide.win.title': 'Windows — “Windows protected your PC”',
@@ -1333,7 +1359,7 @@ const STRINGS = {
     'nav.downloadbtn': 'Download Free',
 
     // Hero
-    'hero.badge': 'v0.3.1 — Windows · macOS · Linux',
+    'hero.badge': 'v0.3.2 — Windows · macOS · Linux',
     'hero.h1a': 'AI on your machine.',
     'hero.h1b': 'Under your control.',
     'hero.subtitle': 'A local-first, multi-model AI workspace with built-in RAG, project organization and optional cloud providers — in English and Spanish. Community is free and AGPL-3.0.',
@@ -1386,9 +1412,9 @@ const STRINGS = {
     // Download
     'dl.title': 'Download MIKA5',
     'dl.subtitle': 'Free. No account. No license key.',
-    // --- new.* (novedades de v0.3.1) ---
-    'new.title': 'What\'s new in v0.3.1',
-    'new.subtitle': 'This release is about the interface and about being explicit: knowing which model answered, what leaves your machine, and where you are working.',
+    // --- new.* (novedades de v0.3.2) ---
+    'new.title': 'What\'s new in v0.3.2',
+    'new.subtitle': 'MIKA5 now finds llama.cpp and BitNet (experimental) with the models already on your machine and starts them when you pick one, every provider reports whether it is ready and what to do if not, long documents are searched in full, and the app can tell you when a new version is out. Below, what 0.3.1 introduced, all still here.',
     'new.header.title': 'Stable providers and model selection',
     'new.header.desc': 'Provider availability and model selection remain consistent while requests can be cancelled safely.',
     'new.cloud.title': 'Ollama local and cloud, with explicit consent',
@@ -1416,7 +1442,7 @@ const STRINGS = {
     'new.more': 'Architecture and security detail in the',
     'new.more.link': 'White Paper',
     // --- dl.*.warning / dl.extras.* (avisos por plataforma y enlaces secundarios) ---
-    'dl.win.warning': 'Not signed with Authenticode: SmartScreen may warn on first run. Check that the file name carries 0.3.1 and compare its SHA-256 against SHA256SUMS.txt before installing.',
+    'dl.win.warning': 'Not signed with Authenticode: SmartScreen may warn on first run. Check that the file name carries 0.3.2 and compare its SHA-256 against SHA256SUMS.txt before installing.',
     'dl.mac.warning': 'Not notarized by Apple and not distributed through the App Store. macOS asks for manual authorization on first launch. The .zip builds exist in the release but the .dmg is the recommended download.',
     'dl.linux.warning': 'x86-64 only; no ARM build is published. AppImage runs without installing (chmod +x and launch); .deb is for Debian and Ubuntu; .rpm is for Fedora and RHEL.',
     'dl.extras.label': 'Source and verification:',
@@ -1448,7 +1474,7 @@ const STRINGS = {
     'qs.win.s1.desc': 'Download from ollama.com and install it. It runs a local server at 127.0.0.1:11434.',
     'qs.win.s2.title': 'Pull a model + the embedding model',
     'qs.win.s3.title': 'Install and launch MIKA5',
-    'qs.win.s3.desc': 'Run the MIKA5-Setup-0.3.1-win-x64.exe installer, then open MIKA5 from the Start Menu or Desktop shortcut.',
+    'qs.win.s3.desc': 'Run the MIKA5-Setup-0.3.2-win-x64.exe installer, then open MIKA5 from the Start Menu or Desktop shortcut.',
     'qs.win.req.title': 'System Requirements',
     'qs.win.req.1': 'Windows 10 or 11 (64-bit)',
     'qs.win.req.2': '8 GB RAM minimum (16 GB recommended)',
@@ -1494,11 +1520,11 @@ const STRINGS = {
     'cta.title2': 'your terms.',
     'cta.download': 'Download MIKA5 — Free',
     'cta.github': 'View on GitHub',
-    'cta.tagline': 'v0.3.1 · Windows · macOS · Linux · Free & Open Source',
+    'cta.tagline': 'v0.3.2 · Windows · macOS · Linux · Free & Open Source',
 
     // Footer
     'notify.title': 'MIKA5 Pro is in development',
-    'notify.desc': 'Team collaboration, cloud sync and advanced RAG are in development. None of them exists in Community v0.3.1. Get notified when Pro launches.',
+    'notify.desc': 'Team collaboration, cloud sync and advanced RAG are in development. None of them exists in Community v0.3.2. Get notified when Pro launches.',
     'notify.btn': 'Notify me',
     'notify.privacy': 'No spam. Unsubscribe anytime.',
     'footer.tagline': 'AI on your machine. Under your control.',
@@ -1512,7 +1538,7 @@ const STRINGS = {
     'footer.whitepaper': 'White Paper',
     'footer.releases': 'Releases',
     'footer.issues': 'Issues',
-    'footer.copyright': 'v0.3.1 · © 2026 MIKA5 · AGPL-3.0',
+    'footer.copyright': 'v0.3.2 · © 2026 MIKA5 · AGPL-3.0',
     'footer.privacy': 'Privacy',
     'footer.license': 'License (AGPL-3.0)',
     'footer.source': 'Source code',
@@ -1537,7 +1563,7 @@ const STRINGS = {
     'notify.emailLabel': 'Correo electrónico',
     'faq.title': 'Preguntas frecuentes',
     'faq.q1': '¿MIKA5 es gratis?',
-    'faq.a1': 'Sí. MIKA5 es 100% gratuito, de código abierto bajo AGPL-3.0, y funciona por completo en tu equipo, sin suscripciones ni costes ocultos.',
+    'faq.a1': 'Sí. MIKA5 es gratuito y de código abierto bajo AGPL-3.0, sin suscripciones ni costes ocultos. Funciona en tu equipo; los proveedores en la nube son opcionales.',
     'faq.q2': '¿MIKA5 necesita conexión a Internet?',
     'faq.a2': 'No. MIKA5 funciona por completo sin conexión con modelos locales de Ollama. Los proveedores de IA en la nube (OpenAI, Anthropic, Groq) son opcionales y se indican con claridad.',
     'faq.q3': '¿Qué es el motor RAG integrado?',
@@ -1545,7 +1571,11 @@ const STRINGS = {
     'faq.q4': '¿En qué plataformas funciona MIKA5?',
     'faq.a4': 'MIKA5 está disponible para Windows 10+ (instalador y portable), macOS (DMG para Intel y Apple Silicon) y Linux (AppImage, .deb, .rpm).',
     'faq.q5': '¿MIKA5 recoge datos o telemetría?',
-    'faq.a5': 'No. MIKA5 no tiene telemetría, ni rastreo, ni recogida de datos. Todas las conversaciones y documentos se quedan en tu equipo, en una base de datos SQLite local.',
+    'faq.a5': 'No. MIKA5 no tiene telemetría ni rastreo. Las conversaciones y los documentos se quedan en tu equipo, en una base de datos SQLite local, y solo salen de él cuando eliges un proveedor en la nube y confirmas la petición.',
+    'faq.q6': '¿Cómo paso los avisos de Windows y macOS en el primer arranque?',
+    'faq.a6': 'MIKA5 todavía no tiene firma de código, así que el sistema te pide confirmar una vez. En Windows, pulsa «Más información» en la ventana de SmartScreen, comprueba que el archivo es el instalador de MIKA5 y pulsa «Ejecutar de todas formas». En macOS, abre la app una vez, ve a Ajustes del Sistema → Privacidad y seguridad y pulsa «Abrir igualmente» junto a MIKA5. Si Smart App Control está activado en Windows, no se pueden instalar apps sin firma.',
+    'faq.q7': '¿En qué se diferencia MIKA5 de ChatGPT?',
+    'faq.a7': 'ChatGPT es el servicio en la nube de OpenAI: tus conversaciones se procesan en sus servidores y necesitas una cuenta. MIKA5 es una aplicación de escritorio que ejecuta modelos abiertos en tu propio equipo con Ollama o llama.cpp, guarda conversaciones y documentos en una base de datos local y no necesita cuenta. Los proveedores en la nube, OpenAI incluido, son opcionales: usas tu propia clave de API y confirmas lo que se envía antes de que nada salga de tu equipo.',
     'guide.title': 'Primer arranque: cómo pasar los avisos de Windows y macOS',
     'guide.intro': 'MIKA5 todavía no tiene firma de código, así que el sistema te pide confirmar la primera vez. Son tres pasos, una sola vez.',
     'guide.win.title': 'Windows — «Windows protegió su PC»',
@@ -1606,7 +1636,7 @@ const STRINGS = {
     'nav.downloadbtn': 'Descargar Gratis',
 
     // Hero
-    'hero.badge': 'v0.3.1 — Windows · macOS · Linux',
+    'hero.badge': 'v0.3.2 — Windows · macOS · Linux',
     'hero.h1a': 'IA en tu máquina.',
     'hero.h1b': 'Bajo tu control.',
     'hero.subtitle': 'Un espacio de trabajo de IA local-first y multimodelo, con RAG integrado, organización por proyectos y proveedores cloud opcionales — en español e inglés. Community es gratis y AGPL-3.0.',
@@ -1659,9 +1689,9 @@ const STRINGS = {
     // Download
     'dl.title': 'Descargar MIKA5',
     'dl.subtitle': 'Gratis. Sin cuenta. Sin clave de licencia.',
-    // --- new.* (novedades de v0.3.1) ---
-    'new.title': 'Novedades de v0.3.1',
-    'new.subtitle': 'Esta versión va de la interfaz y de ser explícita: saber qué modelo respondió, qué sale de tu equipo y dónde estás trabajando.',
+    // --- new.* (novedades de v0.3.2) ---
+    'new.title': 'Novedades de v0.3.2',
+    'new.subtitle': 'MIKA5 ahora encuentra llama.cpp y BitNet (experimental) con los modelos que ya tienes en el equipo y los arranca al elegir uno, cada proveedor dice si está listo y qué hacer si no, los documentos largos se buscan completos y la aplicación te avisa cuando hay una versión nueva. Debajo, lo que trajo 0.3.1, que sigue todo aquí.',
     'new.header.title': 'Proveedores y selección de modelos estables',
     'new.header.desc': 'La disponibilidad de proveedores y la selección de modelos se mantienen coherentes, con cancelación segura de solicitudes.',
     'new.cloud.title': 'Ollama local y cloud, con consentimiento explícito',
@@ -1689,7 +1719,7 @@ const STRINGS = {
     'new.more': 'Detalle de arquitectura y seguridad en el',
     'new.more.link': 'White Paper',
     // --- dl.*.warning / dl.extras.* (avisos por plataforma y enlaces secundarios) ---
-    'dl.win.warning': 'Sin firma Authenticode: SmartScreen puede avisar en la primera ejecución. Comprueba que el nombre del archivo lleva 0.3.1 y compara su SHA-256 contra SHA256SUMS.txt antes de instalar.',
+    'dl.win.warning': 'Sin firma Authenticode: SmartScreen puede avisar en la primera ejecución. Comprueba que el nombre del archivo lleva 0.3.2 y compara su SHA-256 contra SHA256SUMS.txt antes de instalar.',
     'dl.mac.warning': 'Sin notarizar por Apple y no distribuido por la App Store. macOS pide autorización manual en el primer arranque. Las compilaciones .zip existen en la release, pero el .dmg es la descarga recomendada.',
     'dl.linux.warning': 'Sólo x86-64; no se publica compilación para ARM. AppImage se ejecuta sin instalar (chmod +x y lanzar); el .deb es para Debian y Ubuntu; el .rpm para Fedora y RHEL.',
     'dl.extras.label': 'Fuente y verificación:',
@@ -1721,7 +1751,7 @@ const STRINGS = {
     'qs.win.s1.desc': 'Descarga desde ollama.com e instálalo. Ejecuta un servidor local en 127.0.0.1:11434.',
     'qs.win.s2.title': 'Descargar un modelo + el modelo de embeddings',
     'qs.win.s3.title': 'Instalar e iniciar MIKA5',
-    'qs.win.s3.desc': 'Ejecuta el instalador MIKA5-Setup-0.3.1-win-x64.exe, luego abre MIKA5 desde el Menú de Inicio o el acceso directo del escritorio.',
+    'qs.win.s3.desc': 'Ejecuta el instalador MIKA5-Setup-0.3.2-win-x64.exe, luego abre MIKA5 desde el Menú de Inicio o el acceso directo del escritorio.',
     'qs.win.req.title': 'Requisitos del sistema',
     'qs.win.req.1': 'Windows 10 u 11 (64-bit)',
     'qs.win.req.2': '8 GB RAM mínimo (16 GB recomendado)',
@@ -1767,11 +1797,11 @@ const STRINGS = {
     'cta.title2': 'tus términos.',
     'cta.download': 'Descargar MIKA5 — Gratis',
     'cta.github': 'Ver en GitHub',
-    'cta.tagline': 'v0.3.1 · Windows · macOS · Linux · Gratis y Open Source',
+    'cta.tagline': 'v0.3.2 · Windows · macOS · Linux · Gratis y Open Source',
 
     // Footer
     'notify.title': 'MIKA5 Pro está en desarrollo',
-    'notify.desc': 'La colaboración en equipo, la sincronización en la nube y el RAG avanzado están en desarrollo. Nada de eso existe en Community v0.3.1. Recibe un aviso cuando se lance Pro.',
+    'notify.desc': 'La colaboración en equipo, la sincronización en la nube y el RAG avanzado están en desarrollo. Nada de eso existe en Community v0.3.2. Recibe un aviso cuando se lance Pro.',
     'notify.btn': 'Notificarme',
     'notify.privacy': 'Sin spam. Cancela cuando quieras.',
     'footer.tagline': 'IA en tu máquina. Bajo tu control.',
@@ -1785,7 +1815,7 @@ const STRINGS = {
     'footer.whitepaper': 'White Paper',
     'footer.releases': 'Versiones',
     'footer.issues': 'Problemas',
-    'footer.copyright': 'v0.3.1 · © 2026 MIKA5 · AGPL-3.0',
+    'footer.copyright': 'v0.3.2 · © 2026 MIKA5 · AGPL-3.0',
     'footer.privacy': 'Privacidad',
     'footer.license': 'Licencia (AGPL-3.0)',
     'footer.source': 'Código fuente',
@@ -1828,14 +1858,16 @@ function aplicarMetadata(lang) {
     if (nodo && valor !== undefined) nodo.setAttribute(par[1], valor);
   });
 
-  // JSON-LD: se reescribe solo la descripcion, conservando el resto del objeto.
+  // JSON-LD: el objeto raiz solo contiene @graph, asi que la descripcion se
+  // reescribe en el nodo SoftwareApplication, conservando el resto.
   var ld = document.querySelector('script[type="application/ld+json"]');
   var desc = i18nTexto(lang, 'landing.meta.description');
   if (ld && desc !== undefined) {
     try {
       var datos = JSON.parse(ld.textContent);
-      datos.description = desc;
-      datos.inLanguage = lang;
+      (datos['@graph'] || []).forEach(function(nodo) {
+        if (nodo['@type'] === 'SoftwareApplication') nodo.description = desc;
+      });
       ld.textContent = JSON.stringify(datos, null, 2);
     } catch (e) { /* JSON-LD invalido: se deja como esta */ }
   }
@@ -1920,7 +1952,5 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 });
 </script>
-
-<script src="chat-widget.js" defer></script>
 </body>
 </html>

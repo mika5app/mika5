@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none" role="img">
+  <title>MIKA5 symbol</title>
+  <desc>A letter M whose last leg ends in a node, placed inside a laptop outline.</desc>
+  <g fill="none" stroke="#7C3AED" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="40" y="50" width="176" height="130" rx="20"/>
+    <path d="M66 150 V80 L108 132 L150 80 C150 110 166 126 186 116"/>
+  </g>
+  <circle cx="186" cy="116" r="11.5" fill="#22D3EE"/>
+  <path fill="#7C3AED" fill-rule="evenodd" d="M29 191h198a9 9 0 0 1 9 9v6a9 9 0 0 1-9 9H29a9 9 0 0 1-9-9v-6a9 9 0 0 1 9-9zm79 8h40a3.5 3.5 0 0 1 0 7h-40a3.5 3.5 0 0 1 0-7z"/>
+</svg>

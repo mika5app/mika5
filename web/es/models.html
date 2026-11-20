@@ -13,7 +13,10 @@
     <link rel="alternate" hreflang="en" href="https://mika5.xyz/models.html">
     <link rel="alternate" hreflang="es" href="https://mika5.xyz/es/models.html">
     <link rel="alternate" hreflang="x-default" href="https://mika5.xyz/models.html">
-    <link rel="icon" type="image/png" sizes="64x64" href="../icon-64.png">
+    <link rel="icon" href="../favicon.ico" sizes="any">
+    <link rel="icon" type="image/svg+xml" href="../favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="../favicon-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="../favicon-16.png">
     <link rel="apple-touch-icon" href="../icon-180.png">
     <meta name="author" content="MIKA5">
     <meta name="theme-color" content="#0B0F14">
@@ -43,17 +46,17 @@
   "@graph": [
     {
       "@type": "Article",
-      "headline": "MIKA5 Model Guide — Local models, hardware and use cases",
-      "description": "How to choose local AI models for MIKA5: exact Ollama tags, verified download sizes, hardware requirements and use cases. No benchmark scores.",
-      "url": "https://mika5.xyz/models.html",
+      "headline": "Guía de modelos de MIKA5 — Modelos locales, hardware y casos de uso",
+      "description": "Cómo elegir modelos de IA locales para MIKA5: tags exactos de Ollama, tamaños de descarga verificados, requisitos de hardware y casos de uso. Sin puntuaciones de benchmark.",
+      "url": "https://mika5.xyz/es/models.html",
       "author": {
         "@id": "https://mika5.xyz/#org"
       },
       "publisher": {
         "@id": "https://mika5.xyz/#org"
       },
-      "inLanguage": "en",
-      "mainEntityOfPage": "https://mika5.xyz/models.html"
+      "inLanguage": "es",
+      "mainEntityOfPage": "https://mika5.xyz/es/models.html"
     },
     {
       "@type": "BreadcrumbList",
@@ -61,14 +64,14 @@
         {
           "@type": "ListItem",
           "position": 1,
-          "name": "Home",
-          "item": "https://mika5.xyz/"
+          "name": "Inicio",
+          "item": "https://mika5.xyz/es/"
         },
         {
           "@type": "ListItem",
           "position": 2,
-          "name": "Model Guide",
-          "item": "https://mika5.xyz/models.html"
+          "name": "Guía de modelos",
+          "item": "https://mika5.xyz/es/models.html"
         }
       ]
     },
@@ -117,7 +120,6 @@
       }]
     }
     </script>
-    <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
     <style>
         body { background: #0B0F14; color: #F9FAFB; font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; overflow-wrap: break-word; }
@@ -191,6 +193,9 @@
         /* Readable line length for running text; cards and tables keep their width. */
         main p, main li { max-width: 60ch; }
     </style>
+    <!-- Compiled by `npm run build:web-css`; after the page styles, where the
+         Tailwind CDN used to insert its own, so the cascade is unchanged. -->
+    <link rel="stylesheet" href="/tailwind.css">
 </head>
 <body>
 <a href="#main-content" class="skip-link visually-hidden" data-i18n="models.nav.skip">Saltar al contenido principal</a>
@@ -1554,6 +1559,5 @@ document.addEventListener('DOMContentLoaded', function() {
   if (idioma) idioma.addEventListener('click', toggleLang);
 });
 </script>
-<script src="../chat-widget.js" defer></script>
 </body>
 </html>
