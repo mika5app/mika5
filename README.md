@@ -11,9 +11,13 @@ MIKA5 Community 0.3.2 is a desktop application for local and optional cloud AI, 
 
 ## What's new in 0.3.2
 
-- BitNet (bitnet.cpp) joins Ollama and llama.cpp as a local runtime.
-- Ordinary messages are no longer blocked in a conversation that holds an image; this affected every provider except Alibaba Cloud Model Studio.
-- llama.cpp and BitNet report a loading or stopped server accurately and show how to start it.
+- BitNet (bitnet.cpp) joins Ollama and llama.cpp as an experimental local runtime.
+- MIKA5 finds `llama-server` and the GGUF models already on the machine, including the ones Ollama downloaded, and starts the engine when you pick a model. An engine executable runs only after you approve it, and nothing is downloaded or installed without confirmation.
+- Every provider reports the same readiness states (needs setup, starting, loading model, ready, error) with a suggested action. A local engine is ready only after one real answer.
+- Long documents: every fragment in scope is searched for the words of the question, instead of sending only the first ones.
+- Conversations no longer stop at a message count; what is sent is bounded by the model's context.
+- "Check for a new version" compares with the latest published release. It only informs; nothing is downloaded or installed.
+- Fixed: ordinary messages blocked in conversations with an image, attached documents dropped by "analyse…", and a wrong provider name and model library for llama.cpp and BitNet.
 
 ## What 0.3.1 introduced
 
@@ -111,4 +115,4 @@ The existing `deploy-landing.yml` deploys `web/` on updates to `main`. Release d
 
 ## License
 
-MIKA5 Community is licensed under [AGPL-3.0](LICENSE). Distributed releases include corresponding source and build instructions. Trademark rights are separate; see [TRADEMARK.md](TRADEMARK.md). Future Pro/Cloud editions and services are not included in Community.
+MIKA5 Community is licensed under [AGPL-3.0](LICENSE). See also the [privacy policy](PRIVACY.md) and the [code signing policy](CODE_SIGNING_POLICY.md); builds are not code-signed yet. Distributed releases include corresponding source and build instructions. Trademark rights are separate; see [TRADEMARK.md](TRADEMARK.md). Future Pro/Cloud editions and services are not included in Community.

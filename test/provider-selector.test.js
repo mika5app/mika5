@@ -714,8 +714,26 @@ async function ejecutar(win) {
 
   const fuentes = ['src/main/main.js', 'src/renderer/app.js', 'src/main/preload.js']
     .map(rel => fs.readFileSync(path.join(__dirname, '..', rel), 'utf8')).join('\n');
-  check(!/autoUpdater|checkForUpdates/.test(fuentes),
-    'no hay comprobación de actualizaciones en el código: nada puede bloquear la ventana por ese camino');
+  // MIKA5 avisa de una versión nueva, pero no instala nada: sin `autoUpdater`
+  // no hay descarga ni instalación automática que pueda bloquear la ventana.
+  check(!/autoUpdater/.test(fuentes),
+    'no hay instalación automática de actualizaciones en el código');
+  // La consulta es una petición saliente, así que sólo ocurre por decisión del
+  // usuario: al pulsar el botón, o al abrir si activó el aviso. Esta ventana
+  // arranca con un perfil nuevo, sin esa decisión tomada.
+  const appJs = fs.readFileSync(path.join(__dirname, '../src/renderer/app.js'), 'utf8');
+  const alArrancar = appJs.slice(appJs.indexOf('async function checkForUpdatesOnStartup'),
+    appJs.indexOf('// --- Motor local'));
+  check(/getAppState\(UPDATE_AUTO_KEY\)\) !== '1'\) return;/.test(alArrancar),
+    'al abrir, la consulta de versión sólo sale si el usuario activó el aviso');
+  const mainJs = fs.readFileSync(path.join(__dirname, '../src/main/main.js'), 'utf8');
+  check((mainJs.match(/consultarActualizacion\(/g) || []).length === 1
+    && /ipcMain\.handle\("app:checkForUpdates"/.test(mainJs),
+    'el proceso principal sólo consulta la versión cuando el renderer lo pide por su canal');
+  const consultaSrc = fs.readFileSync(path.join(__dirname, '../src/main/update-check.js'), 'utf8')
+    .replace(/^\s*\/\/.*$/gm, '');
+  check(!/child_process|spawn\(|execFile|writeFile|shell\.|download/i.test(consultaSrc),
+    'el aviso de versión no descarga, no escribe y no ejecuta nada');
 
   // La versión instalada y la disponible son cosas distintas: MIKA5 sólo
   // conoce la instalada y así lo dice, en vez de inventar una comparación.

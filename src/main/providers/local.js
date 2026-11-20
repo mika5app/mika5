@@ -6,7 +6,7 @@
 // el registro `PROVIDERS`. El objeto conserva sus propiedades, sus firmas y su
 // comportamiento: este módulo sólo cambia dónde vive el código.
 
-const { ollamaApi } = require('../ollama');
+const { ollamaApi, resolverBaseOllama, ollamaHostEsElPorDefecto } = require('../ollama');
 const { assertVisionSupported, normalizeChatResult } = require('../provider-capabilities');
 const { probeDeError, probeDeExito, sanearMensaje } = require('../provider-errors');
 const { formatBytes, detectCapabilities, probeOllamaVision } = require('../provider-runtime');
@@ -17,8 +17,30 @@ const adaptadorLocal = {
   name: 'Ollama (Local)',
   privacy: 'private',
   requiresKey: false,
+  // Catálogo oficial de este proveedor, para que el usuario explore modelos.
+  // Cada proveedor tiene el suyo: ninguno hereda el de otro.
+  libraryUrl: 'https://ollama.com/library',
   visualCapabilities: {
     vision: true
+  },
+
+  // Ollama es un servicio externo: normalmente ya está en marcha y MIKA5 sólo
+  // lo reutiliza. Si está instalado y parado, se puede arrancar con su propio
+  // `ollama serve`, que es el mecanismo que documenta. No se arranca cuando el
+  // usuario lo ha configurado para escuchar en otro sitio: con `OLLAMA_HOST`
+  // fuera de bucle local MIKA5 lanzaría un servidor expuesto a la red, y con
+  // otro puerto uno que escucharía donde MIKA5 no consulta. Tampoco se
+  // sobrescribe esa variable para forzarlo: es una decisión del usuario.
+  engine: {
+    tipo: 'external-service',
+    ejecutable: 'ollama',
+    requiereModelo: false,
+    unidadesDelSistema: ['/etc/systemd/system/ollama.service'],
+    baseUrl: () => resolverBaseOllama(process.env.MIKA5_OLLAMA_BASE),
+    arrancable: ({ env }) => !env.MIKA5_OLLAMA_BASE && ollamaHostEsElPorDefecto(env.OLLAMA_HOST),
+    argumentos: () => ['serve'],
+    paquete: { winget: 'Ollama.Ollama', brew: 'ollama' },
+    guia: 'https://ollama.com/download'
   },
 
   async chat({ model, messages, images, signal }) {

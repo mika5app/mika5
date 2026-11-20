@@ -20,6 +20,7 @@ function abortError() {
 function controlledFetch(state) {
   return (_url, options = {}) => {
     state.calls += 1;
+    state.urls = [...(state.urls || []), String(_url)];
     state.signal = options.signal;
     return new Promise((_resolve, reject) => {
       if (options.signal?.aborted) {
@@ -44,7 +45,16 @@ async function assertAdapterCancellation(providerId, params) {
       error.name === 'AbortError' && error.code === 'USER_CANCELED'
     ));
     assert(state.signal?.aborted, `${providerId} fetch must observe the aborted signal`);
-    assert.strictEqual(state.calls, 1, `${providerId} must not retry explicit cancellation`);
+    // Un motor con la ventana pequeña mide la entrada (dos consultas a su
+    // propio servidor) antes de conversar. Cancelar durante esa medida no
+    // repite ninguna petición y la conversación no llega a enviarse.
+    const midiendo = Boolean(PROVIDERS[providerId].engine?.contexto);
+    assert.strictEqual(new Set(state.urls).size, state.urls.length, `${providerId} must not retry explicit cancellation`);
+    assert.strictEqual(state.calls, midiendo ? 2 : 1, `${providerId} must not retry explicit cancellation`);
+    if (midiendo) {
+      assert(!state.urls.some(url => url.endsWith('/chat/completions')),
+        `${providerId} must not send the chat once the request was canceled`);
+    }
   } finally {
     global.fetch = previousFetch;
   }

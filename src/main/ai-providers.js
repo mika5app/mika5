@@ -54,6 +54,9 @@ const {
   normalizeAlibabaAssistantOutput
 } = require('./providers/alibaba-config');
 const { PROVIDER_API_VERSION, ProviderRegistry } = require('./provider-registry');
+const { ESTADO_MOTOR, GestorDeMotores, validarRutaDeMotor } = require('./local-engines');
+const { descubrirModelos, comprobarRequisitos } = require('./engine-discovery');
+const { GestorDeDescargas } = require('./model-download');
 
 
 
@@ -369,7 +372,9 @@ function detectUserIntentDetailed(input = {}) {
     add('image-variation', 12, 'generate-new-visual-from-reference');
     variationSignals.push('reference-based-version');
   }
-  const editVerb = /\b(edita|editar|cambia|cambiar|cambio|modifica|modificar|quita|quitar|remueve|remover|elimina|eliminar|agrega|agregar|anade|anadir|sustituye|sustituir|reemplaza|reemplazar|pon|poner|coloca|colocar|hazle|hazlo|dejalo|vuelvelo|mueve|mover|agranda|agrandar|reduce|reducir|alinea|alinear|redisena|redisenar|moderniza|modernizar|renueva|renovar|actualiza|actualizar)\b|hacer(?:la|lo)?\s+mas/;
+  // «modernízalo», «cámbiala», «editarlos»: el pronombre pegado al verbo no
+  // cambia lo que se pide, y sin contemplarlo la petición pasaba por análisis.
+  const editVerb = /\b(edita|editar|cambia|cambiar|cambio|modifica|modificar|quita|quitar|remueve|remover|elimina|eliminar|agrega|agregar|anade|anadir|sustituye|sustituir|reemplaza|reemplazar|pon|poner|coloca|colocar|hazle|hazlo|dejalo|vuelvelo|mueve|mover|agranda|agrandar|reduce|reducir|alinea|alinear|redisena|redisenar|moderniza|modernizar|renueva|renovar|actualiza|actualizar)(?:lo|la|los|las)?\b|hacer(?:la|lo)?\s+mas/;
   if (editVerb.test(normalizedText) && visualContext.hasVisualContext) add('image-edit', 9, 'edit-operation');
   else if (visualContext.hasVisualContext && hasApproximateVisualEditVerb(normalizedText)) add('image-edit', 7, 'approximate-edit-verb');
   if (/\bfondo\b/.test(normalizedText)) {
@@ -383,7 +388,7 @@ function detectUserIntentDetailed(input = {}) {
   if (/\b(quita|remueve|elimina)\b.*\bfondo\b/.test(normalizedText)) editSubtypes.push('background-removal');
   if (/\b(agrega|anade|pon)\b/.test(normalizedText)) editSubtypes.push('element-addition');
   if (/\b(reemplaza|sustituye)\b/.test(normalizedText)) editSubtypes.push('element-replacement');
-  if (/\b(moderno|hazlo|dejalo|vuelvelo|redisena|redisenar|moderniza|modernizar|renueva|renovar|actualiza|actualizar)\b/.test(normalizedText)) editSubtypes.push('style-change');
+  if (/\b(moderno|hazlo|dejalo|vuelvelo|redisena|redisenar|moderniza|modernizar|renueva|renovar|actualiza|actualizar)(?:lo|la|los|las)?\b/.test(normalizedText)) editSubtypes.push('style-change');
   if (/\b(agranda|reduce|mas grande|mas pequeno)\b/.test(normalizedText)) editSubtypes.push('resize');
   if (/\b(mueve|alinea|mismo plano|en linea|de frente)\b/.test(normalizedText)) editSubtypes.push('layout-adjustment');
 
@@ -523,7 +528,11 @@ function buildImageVariationPlan({ text = '', detailed, visualContext, lastVisua
 }
 
 function buildVisionAnalysisPlan({ text = '', visualContext } = {}) {
-  return { mode: 'vision-analysis', objective: text, constraints: ['describe-only-do-not-edit'], needsClarification: !visualContext?.hasVisualContext, visualContext };
+  // Sin restricciones: analizar una imagen no lleva ninguna. Aquí había una
+  // etiqueta interna («describe-only-do-not-edit») que acababa dentro del
+  // mensaje enviado al modelo, y el modelo la repetía al usuario como si fuera
+  // una prohibición suya.
+  return { mode: 'vision-analysis', objective: text, constraints: [], needsClarification: !visualContext?.hasVisualContext, visualContext };
 }
 
 function buildImageGenerationPlan({ text = '', visualContext = null } = {}) {
@@ -579,6 +588,11 @@ function buildModelPromptFromPlan(plan) {
       'No devuelvas instrucciones ni texto explicativo; genera únicamente la imagen.'
     ].join('\n');
   }
+  // Para analizar una imagen el modelo recibe lo que escribió el usuario, tal
+  // cual. El plan es un dato interno del routing: convertirlo en texto y
+  // mandarlo en lugar del mensaje sustituía las palabras del usuario por jerga
+  // de MIKA5.
+  if (plan?.mode === 'vision-analysis') return String(plan.objective || '');
   const lines = [`Tarea visual: ${plan.mode}.`];
   if (plan.objective) lines.push(`Objetivo: ${plan.objective}`);
   if (plan.operations?.length) lines.push(`Operaciones: ${plan.operations.join(', ')}.`);
@@ -827,6 +841,145 @@ function resolverUiState({ configured, reachable, authenticated, errorCode } = {
   if (reachable === true) return UI_STATE.CONNECTED;
   return UI_STATE.UNKNOWN;
 }
+/**
+ * Preparación de un proveedor: la pregunta «¿puedo conversar ya, y si no, qué
+ * hago?». Es una vista sobre la disponibilidad, no un segundo modelo: los ocho
+ * estados de `UI_STATE` siguen diciendo QUÉ pasó, y esto dice en qué punto del
+ * camino está el usuario, igual para un motor local que para una API remota.
+ */
+const READINESS = Object.freeze({
+  AVAILABLE: 'available',
+  NEEDS_SETUP: 'needs-setup',
+  STARTING: 'starting',
+  LOADING_MODEL: 'loading-model',
+  READY: 'ready',
+  UNAVAILABLE: 'unavailable',
+  ERROR: 'error'
+});
+
+/** Acción correctiva que la interfaz puede ofrecer. Conjunto cerrado. */
+const READINESS_ACTION = Object.freeze({
+  CONFIGURE_KEY: 'configure-key',
+  CONFIGURE_PROVIDER: 'configure-provider',
+  CONFIGURE_ENGINE: 'configure-engine',
+  APPROVE_ENGINE: 'approve-engine',
+  INSTALL_ENGINE: 'install-engine',
+  START_ENGINE: 'start-engine',
+  START_SERVICE: 'start-service',
+  DOWNLOAD_MODEL: 'download-model',
+  RETRY: 'retry'
+});
+
+/**
+ * Lo que MIKA5 puede afirmar de un modelo frente a un motor. `unverified` no
+ * es un «probablemente sí»: es que nadie lo ha comprobado.
+ */
+const COMPATIBILITY = Object.freeze({
+  COMPATIBLE: 'compatible',
+  INCOMPATIBLE: 'incompatible',
+  UNVERIFIED: 'unverified'
+});
+
+/**
+ * En qué punto está un motor local. Es lo que se le enseña al usuario en vez
+ * de «sin conexión», que para un motor que MIKA5 gestiona no dice nada: un
+ * motor parado a la espera de un modelo y un motor roto no son lo mismo.
+ */
+const ENGINE_STATUS = Object.freeze({
+  NOT_INSTALLED: 'not-installed',
+  NEEDS_APPROVAL: 'needs-approval',
+  NEEDS_MODEL: 'needs-model',
+  STOPPED: 'stopped',
+  STARTING: 'starting',
+  LOADING: 'loading',
+  READY: 'ready',
+  ERROR: 'error'
+});
+
+/** Versión del criterio con que se guardan los veredictos de compatibilidad. */
+const VERDICTS_VERSION = 2;
+
+/** Repositorio de Hugging Face: `usuario/modelo`, con cuantización opcional. */
+const HF_REPO_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,95}\/[A-Za-z0-9][A-Za-z0-9._-]{0,95}(?::[A-Za-z0-9._-]{1,40})?$/;
+
+/** Lo que impide arrancar un motor, traducido a estado y acción. */
+function readinessDeMotor(codigo, tipo) {
+  const R = READINESS;
+  const A = READINESS_ACTION;
+  switch (codigo) {
+    case null:
+    case undefined:
+      return { readiness: R.UNAVAILABLE, action: A.START_ENGINE };
+    case 'ENGINE_NOT_INSTALLED':
+      // Un motor gestionable se resuelve eligiendo su ejecutable; un servicio
+      // externo hay que instalarlo, y MIKA5 no descarga nada por su cuenta.
+      return { readiness: R.NEEDS_SETUP, action: tipo === 'managed' ? A.CONFIGURE_ENGINE : A.INSTALL_ENGINE };
+    case 'ENGINE_APPROVAL_REQUIRED':
+      return { readiness: R.NEEDS_SETUP, action: A.APPROVE_ENGINE };
+    case 'ENGINE_MODEL_REQUIRED':
+    case 'ENGINE_MODEL_MISSING':
+    case 'ENGINE_MODEL_INVALID':
+      return { readiness: R.NEEDS_SETUP, action: A.CONFIGURE_ENGINE };
+    case 'ENGINE_SERVICE_MANAGED':
+    case 'ENGINE_EXTERNALLY_CONFIGURED':
+    case 'ENGINE_AUTOSTART_DISABLED':
+      return { readiness: R.UNAVAILABLE, action: A.START_SERVICE };
+    case 'ENGINE_MODEL_UNSUPPORTED':
+      // El motor no entiende ese modelo: volver a arrancarlo con el mismo no
+      // lleva a nada. Lo que toca es elegir otro.
+      return { readiness: R.ERROR, action: A.CONFIGURE_ENGINE };
+    default:
+      // Puerto ocupado, proceso que salió, plazo agotado: el intento falló.
+      return { readiness: R.ERROR, action: A.START_ENGINE };
+  }
+}
+
+/**
+ * `motor` es null para un proveedor sin motor local. Si lo tiene:
+ *   tipo         'managed' | 'external-service'
+ *   state        estado del proceso que MIKA5 pudo haber arrancado
+ *   errorCode    por qué falló el último arranque
+ *   diagnostico  qué impide arrancarlo ahora (null: nada)
+ */
+function resolverReadiness(disp, motor = null) {
+  const R = READINESS;
+  const A = READINESS_ACTION;
+  const r = (readiness, action = null) => ({ readiness, action });
+
+  if (motor && motor.state === ESTADO_MOTOR.STARTING && disp.reachable !== true) return r(R.STARTING);
+  // `llama-server` contesta 503 mientras carga el modelo: el servidor está,
+  // el modelo todavía no. No es un error, es una espera.
+  if (motor && disp.reachable === true && disp.httpStatus === 503) return r(R.LOADING_MODEL);
+  if (disp.ready) return r(R.READY);
+  if (disp.canAttempt) return r(R.AVAILABLE);
+
+  switch (disp.uiState) {
+    case UI_STATE.CONFIGURATION_REQUIRED:
+      if (disp.errorCode === 'PROVIDER_UNKNOWN') return r(R.ERROR);
+      return r(R.NEEDS_SETUP, disp.errorCode === 'PROVIDER_CREDENTIAL_REQUIRED' ? A.CONFIGURE_KEY : A.CONFIGURE_PROVIDER);
+    case UI_STATE.AUTHENTICATION_REJECTED:
+    case UI_STATE.AUTHORIZATION_FORBIDDEN:
+      return r(R.NEEDS_SETUP, A.CONFIGURE_KEY);
+    case UI_STATE.RATE_LIMITED:
+      return r(R.UNAVAILABLE, A.RETRY);
+    case UI_STATE.OFFLINE:
+      if (!motor) return r(R.UNAVAILABLE, A.RETRY);
+      return readinessDeMotor(
+        motor.state === ESTADO_MOTOR.FAILED ? motor.errorCode : motor.diagnostico,
+        motor.tipo
+      );
+    case UI_STATE.PROVIDER_ERROR:
+      return r(R.ERROR, A.RETRY);
+    case UI_STATE.CONNECTED:
+      // Contestó y no hay catálogo. En Ollama eso es «no has descargado
+      // ningún modelo», que el usuario sí puede resolver.
+      if (motor && motor.tipo === 'external-service') return r(R.NEEDS_SETUP, A.DOWNLOAD_MODEL);
+      return r(R.UNAVAILABLE, A.RETRY);
+    default:
+      return r(R.UNAVAILABLE, A.RETRY);
+  }
+}
+
 // Registro canónico de proveedores. Cada adaptador vive en su propio módulo;
 // aquí sólo se componen, conservando el orden observable.
 const PROVIDERS = {
@@ -913,8 +1066,26 @@ function providerSupportsVisionRouting(providerId) {
 }
 
 class AIProviderManager {
-  constructor(db) {
+  constructor(db, opciones = {}) {
     this.db = db;
+    // Inyectable para que las pruebas no arranquen procesos reales.
+    this.motores = opciones.motores || new GestorDeMotores();
+    this.descargas = opciones.descargas || new GestorDeDescargas();
+    // Carpeta de los modelos que MIKA5 descarga. Sin ella no se ofrece descarga.
+    this.modelsDir = opciones.modelsDir || null;
+    // Carpeta donde MIKA5 instala motores ya compilados, uno por proveedor.
+    this.enginesDir = opciones.enginesDir || null;
+    this._preparaciones = new Map();
+    if (this.enginesDir) {
+      const rutas = this.motores._platform === 'win32' ? path.win32 : path.posix;
+      for (const id of registroDeProveedores.ids()) {
+        const spec = registroDeProveedores.getAdapter(id).engine;
+        if (spec && spec.tipo === 'managed') this.motores.carpetasDeMotor[id] = rutas.join(this.enginesDir, id);
+      }
+    }
+    this._fallosRegistrados = new Map();
+    this._pruebas = new Map();
+    this.engineConfigs = {};
     this.currentProvider = 'local';
     this.apiKeys = {};
     this.providerConfigs = {
@@ -985,7 +1156,11 @@ class AIProviderManager {
     const stmt = this.db.prepare('INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)');
     stmt.run('ai_provider', providerId);
 
-    return { provider: providerId, privacy: descriptor.traits.privacy };
+    return {
+      provider: providerId,
+      privacy: descriptor.traits.privacy,
+      libraryUrl: descriptor.adapter.libraryUrl || null
+    };
   }
 
   getProvider() {
@@ -999,6 +1174,7 @@ class AIProviderManager {
       name: descriptor.displayName,
       privacy,
       requiresKey: descriptor.traits.requiresKey,
+      libraryUrl: descriptor.adapter.libraryUrl || null,
       privacyLabel: privacy === 'private' ? 'Privado' : 'Cloud',
       credentialStorage: canPersistCredentials() ? 'protected' : 'session',
       credentialSessionOnly: Object.values(this.apiKeys).some(Boolean) && !canPersistCredentials(),
@@ -1085,6 +1261,7 @@ class AIProviderManager {
       sanitize: this.sanitizeCloud
     };
     
+    await this._prepararMotorParaChat(providerId, params.model, params.signal);
     const result = await provider.chat(paramsWithKey);
     if (providerId === ALIBABA_PROVIDER_ID && result?.blockedToolUse) {
       // Sin un plan generativo activo, una herramienta visual jamás se ejecuta:
@@ -1127,9 +1304,15 @@ class AIProviderManager {
   getCapabilities(providerId = this.currentProvider) {
     const contract = getProviderContract(providerId);
     const visual = getProviderVisualCapabilities(providerId);
+    // Un motor con la ventana pequeña declara cuánto texto admite. La interfaz
+    // lo usa para elegir menos fragmentos y menos historial; null = sin límite propio.
+    const ventana = this._engineSpec(providerId)?.contexto || null;
     return {
       provider: providerId,
       ...contract,
+      contextBudget: ventana
+        ? { knowledgeChars: ventana.knowledgeChars, historyChars: ventana.historyChars }
+        : null,
       defaultVisionModel: visual.defaultVisionModel,
       defaultImageModel: visual.defaultImageModel
     };
@@ -1201,6 +1384,30 @@ class AIProviderManager {
     // adjunta en el turno sigue viajando por el camino de chat, donde la barrera
     // de visión decide si el modelo la acepta. Pedir una imagen nueva desde
     // cero («dibuja un gato») conserva su aviso: ahí la intención es inequívoca.
+    // «Analiza el documento» no es analizar una imagen. El verbo dispara la
+    // intención visual, pero sin ninguna imagen —ni adjunta ni en el contexto
+    // del chat— no hay nada visual que analizar: es una conversación normal,
+    // y el usuario puede estar hablando de un documento que acaba de adjuntar.
+    if (effectiveIntent === 'vision-analysis' && !visualContext.hasVisualContext) {
+      effectiveIntent = 'normal-chat';
+    }
+    // Lo mismo cuando la única imagen es una ANTERIOR del chat. Un artículo
+    // («el», «la») basta para que el contexto visual recupere esa imagen, y
+    // «analiza el documento en la base de conocimiento» acababa enviándola: en
+    // un proveedor sin visión el mensaje ni salía («no procesa imágenes») y en
+    // uno con visión se analizaba una foto vieja en vez del documento. Una
+    // imagen del historial sólo se reutiliza si el usuario habla de algo
+    // visual; no si habla de un documento, si acaba de adjuntar uno, o si el
+    // proveedor no ve imágenes. La adjunta en este turno no se toca.
+    if (effectiveIntent === 'vision-analysis' && visualContext.source !== 'current-attachment') {
+      const texto = detailed.normalizedText;
+      const hablaDeAlgoVisual = /\b(imagen|imagenes|foto|fotos|fotografia|captura|capturas|pantalla|pantallazo|screenshot|logo|logotipo|dibujo|ilustracion|grafico|grafica|diagrama|picture|image|photo)\b/.test(texto);
+      const hablaDeUnDocumento = /\b(documento|documentos|archivo|archivos|fichero|ficheros|pdf|docx|word|excel|texto|contrato|informe|reporte|base de conocimiento|document|file)\b/.test(texto);
+      if (!hablaDeAlgoVisual
+        && (hablaDeUnDocumento || params?.hasTextAttachments === true || !providerSupportsVisionRouting(providerId))) {
+        effectiveIntent = 'normal-chat';
+      }
+    }
     const capabilities = getProviderVisualCapabilities(providerId);
     if (!capabilities.imageGeneration
       && ['image-edit', 'image-variation', 'ambiguous-visual', 'image-ambiguous'].includes(effectiveIntent)) {
@@ -1281,8 +1488,14 @@ class AIProviderManager {
     if (options && !/\n1\./.test(routed.message || '')) {
       routed.message += '\nPuedo:\n1. Analizar la imagen actual\n2. Generar una nueva imagen basada en tu instrucción';
     }
+    // El usuario pidió cambiar o crear una imagen y este proveedor sólo sabe
+    // mirarlas. Se le dice con claridad, en vez de dejar que el modelo prometa
+    // —o niegue con una excusa inventada— algo que no depende de él.
+    const pidioGenerar = GENERATIVE_VISUAL_MODES.includes(detailed.intent)
+      || GENERATIVE_VISUAL_MODES.includes(detailed.generationCandidate);
     return {
       ...routed,
+      imageEditUnavailable: Boolean(pidioGenerar && !capabilities.imageGeneration),
       capabilities,
       detailed,
       visualContext,
@@ -1422,7 +1635,7 @@ class AIProviderManager {
         // quede sería tirar esa evidencia: un mensaje de texto no distingue un
         // ECONNREFUSED de un 503.
         const probe = (sonda && sonda.probe) || probeDeError(fallo);
-        registrarFalloDeProveedor(providerId, 'status', fallo, probe.errorCode);
+        this._registrarFalloUnaVez(providerId, 'status', fallo, probe.errorCode);
         // Una sonda que falla sin código reconocible sigue significando que no
         // se pudo hablar con el servidor: para eso está la sonda.
         if (probe.reachable === null) probe.reachable = false;
@@ -1473,12 +1686,731 @@ class AIProviderManager {
 
     return cerrar({ modelsAvailable: models.length, models, errorCode });
   }
+  // --- Motores locales -----------------------------------------------------
+
+  /** Declaración de motor del adaptador, o null si el proveedor no tiene. */
+  _engineSpec(providerId) {
+    const adapter = registroDeProveedores.getAdapter(providerId);
+    return (adapter && adapter.engine) || null;
+  }
+
+  /**
+   * Ejecutable y modelo que el usuario eligió para un motor gestionable. Vive
+   * en `app_state`, junto al resto de preferencias, y se lee una sola vez.
+   */
+  getEngineConfig(providerId) {
+    const spec = this._engineSpec(providerId);
+    if (!spec) return {};
+    if (!this.engineConfigs[providerId]) {
+      let guardado = {};
+      try {
+        const fila = this.db.prepare('SELECT key, value FROM app_state WHERE key IN (?)')
+          .all(`engine_${providerId}`)[0];
+        const leido = fila ? JSON.parse(fila.value) : null;
+        if (leido && typeof leido === 'object' && !Array.isArray(leido)) {
+          if (typeof leido.executable === 'string') guardado.executable = leido.executable;
+          if (typeof leido.model === 'string') guardado.model = leido.model;
+          if (typeof leido.modelId === 'string') guardado.modelId = leido.modelId;
+          if (leido.launch && typeof leido.launch === 'object' && !Array.isArray(leido.launch)) {
+            guardado.launch = {};
+            for (const [ruta, variante] of Object.entries(leido.launch)) {
+              if (Number.isInteger(variante) && variante >= 0 && variante < 8) guardado.launch[ruta] = variante;
+            }
+          }
+          if (leido.verified && typeof leido.verified === 'object' && !Array.isArray(leido.verified)) {
+            // Los «incompatible» guardados con el criterio anterior no valen:
+            // entonces cualquier cierre del motor marcaba el modelo, y el
+            // cierre habitual era quedarse sin memoria gráfica, no un modelo
+            // que no sirve. Se descartan; los «compatible» sí son evidencia.
+            const vigentes = leido.verdicts === VERDICTS_VERSION;
+            guardado.verified = {};
+            for (const [ruta, veredicto] of Object.entries(leido.verified)) {
+              if (veredicto === COMPATIBILITY.COMPATIBLE
+                || (vigentes && veredicto === COMPATIBILITY.INCOMPATIBLE)) guardado.verified[ruta] = veredicto;
+            }
+          }
+          if (leido.approval && typeof leido.approval.path === 'string'
+            && /^[0-9a-f]{64}$/.test(String(leido.approval.sha256))) {
+            guardado.approval = { path: leido.approval.path, sha256: leido.approval.sha256 };
+          }
+        }
+      } catch (_) {
+        guardado = {};
+      }
+      this.engineConfigs[providerId] = guardado;
+    }
+    return { ...this.engineConfigs[providerId] };
+  }
+
+  _guardarEngineConfig(providerId, config) {
+    config.verdicts = VERDICTS_VERSION;
+    this.engineConfigs[providerId] = config;
+    this.db.prepare('INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)')
+      .run(`engine_${providerId}`, JSON.stringify(config));
+  }
+
+  /**
+   * Guarda una ruta de motor. La ruta viene de un diálogo nativo del proceso
+   * principal o de lo que el propio proceso principal descubrió, y aun así se
+   * valida aquí: nombre de ejecutable de la lista cerrada, fichero existente,
+   * modelo con cabecera GGUF.
+   */
+  setEngineFile(providerId, tipo, ruta, modelId = null) {
+    const spec = this._engineSpec(providerId);
+    if (!spec || spec.tipo !== 'managed') throw new Error('ENGINE_NOT_MANAGED');
+    const validada = validarRutaDeMotor(tipo, ruta, spec, {
+      fs: this.motores._fs, platform: this.motores._platform
+    });
+    const config = this.getEngineConfig(providerId);
+    config[tipo] = validada;
+    if (tipo === 'model') {
+      // Nombre con el que se le presenta al usuario. Para un fichero elegido a
+      // mano, el del propio fichero.
+      config.modelId = modelId || this._idDeMotor(spec, validada.split(/[\\/]/).pop().replace(/\.gguf$/i, ''));
+      // Un fichero que el usuario elige a mano vuelve a intentarse aunque
+      // antes fallara: puede que el fallo no fuera del modelo.
+      if (!modelId && config.verified) delete config.verified[validada];
+    }
+    this._guardarEngineConfig(providerId, config);
+    return this.describeEngine(providerId);
+  }
+
+  /**
+   * Modelos GGUF de este equipo. Recorrer el disco no es gratis, así que el
+   * resultado se conserva unos segundos: la interfaz pregunta en bucle
+   * mientras un motor arranca.
+   */
+  discoverEngineModels({ refresh = false } = {}) {
+    const ahora = Date.now();
+    if (!refresh && this._modelosDescubiertos && ahora - this._modelosDescubiertos.cuando < 30000) {
+      return this._modelosDescubiertos.modelos;
+    }
+    let modelos = [];
+    try {
+      modelos = descubrirModelos({
+        fs: this.motores._fs, env: this.motores._env, platform: this.motores._platform,
+        carpetasPropias: [this.modelsDir]
+      });
+    } catch (_) {
+      modelos = [];
+    }
+    this._modelosDescubiertos = { cuando: ahora, modelos };
+    return modelos;
+  }
+
+  /**
+   * Modelos que puede ofrecer un motor: los descubiertos más el elegido a
+   * mano, cada uno con su veredicto de compatibilidad. Los que se sabe que no
+   * sirven para este motor no se ofrecen.
+   */
+  _modelosDeMotor(providerId, opciones) {
+    const spec = this._engineSpec(providerId);
+    const config = this.getEngineConfig(providerId);
+    const modelos = this.discoverEngineModels(opciones).map(m => ({ ...m }));
+    if (config.model && !modelos.some(m => m.path === config.model)) {
+      // Un fichero elegido a mano: se nombra por su fichero.
+      modelos.unshift({
+        id: config.model.split(/[\\/]/).pop().replace(/\.gguf$/i, ''),
+        path: config.model, source: 'manual', size: 0, architecture: null
+      });
+    }
+    const comprobado = config.verified || {};
+    return modelos
+      .map(m => ({
+        ...m,
+        // Tres identidades que no se mezclan: el motor que lo ejecuta va en el
+        // identificador, el nombre del modelo en `label` y su procedencia en
+        // `source`. Un GGUF que descargó Ollama servido por llama.cpp es
+        // «llama.cpp · llama3.2:3b», con origen Ollama.
+        id: this._idDeMotor(spec, m.id),
+        label: m.id,
+        // Manda la evidencia: lo que pasó al cargarlo en este equipo. Si no la
+        // hay, lo que el propio fichero declara. Nunca una suposición.
+        compatibility: comprobado[m.path] || (spec && spec.compatibilidad ? spec.compatibilidad(m) : COMPATIBILITY.UNVERIFIED),
+        // Arranque que funcionó la última vez con este modelo en este equipo.
+        launch: (config.launch || {})[m.path]
+      }))
+      .filter(m => m.compatibility !== COMPATIBILITY.INCOMPATIBLE);
+  }
+
+  /** Identificador de un modelo servido por un motor: «motor · modelo». */
+  _idDeMotor(spec, nombre) {
+    return `${(spec && spec.etiqueta) || 'motor'} · ${nombre}`;
+  }
+
+  /** Nombre con que se enseña el modelo configurado, buscado por su fichero. */
+  _modeloConfigurado(providerId) {
+    const config = this.getEngineConfig(providerId);
+    if (!config.model) return null;
+    return this._modelosDeMotor(providerId).find(m => m.path === config.model) || null;
+  }
+
+  /** Apunta lo que pasó al cargar un modelo: es la única prueba real. */
+  _registrarCompatibilidad(providerId, ruta, veredicto) {
+    if (!ruta) return;
+    const config = this.getEngineConfig(providerId);
+    if (config.verified && config.verified[ruta] === veredicto) return;
+    config.verified = { ...(config.verified || {}), [ruta]: veredicto };
+    this._guardarEngineConfig(providerId, config);
+  }
+
+  /** Lo que la pantalla de configuración del motor necesita enseñar. */
+  describeEngine(providerId, opciones) {
+    const spec = this._engineSpec(providerId);
+    if (!spec) return null;
+    const config = this.getEngineConfig(providerId);
+    const diagnostico = this.motores.diagnosticar(spec, config);
+    const instalacion = this.motores.planDeInstalacion(spec);
+    const modelos = spec.tipo === 'managed' ? this._modelosDeMotor(providerId, opciones) : [];
+    return {
+      ...this.motores.estado(providerId),
+      providerId,
+      managed: spec.tipo === 'managed',
+      requiresModel: spec.requiereModelo === true,
+      executable: this.motores.localizar(spec, config),
+      executables: this.motores.descubrir(spec),
+      executableChosen: Boolean(config.executable),
+      executableApproved: Boolean(this.engineIdentity(providerId)?.approved),
+      // Dónde escucha el motor: sólo se enseña en la configuración avanzada.
+      endpoint: (() => { try { return new URL(spec.baseUrl()).host; } catch (_) { return null; } })(),
+      installKind: spec.instalacion || null,
+      // Para un motor que se compila: qué herramientas hay y cuáles faltan.
+      requirements: comprobarRequisitos(spec.requisitos, {
+        fs: this.motores._fs, env: this.motores._env, platform: this.motores._platform
+      }),
+      // Al renderer sólo va el nombre y el origen: la ruta se queda aquí.
+      models: modelos.map(m => ({ id: m.id, label: m.label, source: m.source, size: m.size, compatibility: m.compatibility })),
+      // Sistema detectado: decide qué instalador se ofrece.
+      platform: this.motores._platform,
+      arch: process.arch,
+      canInstall: Boolean(instalacion),
+      installer: instalacion ? instalacion.gestor : null,
+      guideUrl: spec.guia || null,
+      canDownload: spec.descargaHf === true,
+      catalog: this.engineCatalog(providerId),
+      // Para «Instalar y comenzar»: qué falta y cuánto ocupa.
+      setup: this.engineSetupPlan(providerId),
+      setupStatus: this.engineSetupStatus(providerId),
+      experimental: spec.experimental === true,
+      download: this.descargas.estado(),
+      canStart: diagnostico.ok,
+      errorCode: diagnostico.ok ? null : diagnostico.errorCode,
+      // `estado()` trae la ruta del modelo cargado; al renderer va el nombre.
+      model: (spec.tipo === 'managed' ? this._modeloConfigurado(providerId)?.id : null) || null
+    };
+  }
+
+  /**
+   * Qué ejecutable arrancaría MIKA5 y si el usuario ya lo aprobó. Es lo que
+   * enseña el diálogo de aprobación: la ruta real y la huella del contenido.
+   */
+  engineIdentity(providerId) {
+    const spec = this._engineSpec(providerId);
+    if (!spec) return null;
+    const config = this.getEngineConfig(providerId);
+    const identidad = this.motores.identidad(this.motores.localizar(spec, config));
+    if (!identidad) return null;
+    return {
+      ...identidad,
+      approved: Boolean(config.approval
+        && config.approval.path === identidad.path && config.approval.sha256 === identidad.sha256)
+    };
+  }
+
+  /**
+   * Registra la aprobación del usuario para el ejecutable que se le enseñó.
+   * Se exige la huella que vio: si el fichero cambió entre el diálogo y este
+   * momento, no se aprueba otra cosa en su lugar.
+   */
+  approveEngine(providerId, sha256Visto) {
+    const identidad = this.engineIdentity(providerId);
+    if (!identidad || identidad.sha256 !== sha256Visto) throw new Error('ENGINE_APPROVAL_REQUIRED');
+    const config = this.getEngineConfig(providerId);
+    config.approval = { path: identidad.path, sha256: identidad.sha256 };
+    this._guardarEngineConfig(providerId, config);
+    this.motores.reiniciarFallo(providerId);
+    return this.describeEngine(providerId);
+  }
+
+  /** Elige uno de los ejecutables DESCUBIERTOS. Una ruta ajena se rechaza. */
+  selectEngineExecutable(providerId, ruta) {
+    const spec = this._engineSpec(providerId);
+    if (!spec || !this.motores.descubrir(spec).includes(ruta)) throw new Error('ENGINE_EXECUTABLE_NOT_ALLOWED');
+    return this.setEngineFile(providerId, 'executable', ruta);
+  }
+
+  /**
+   * Elige un modelo por su nombre y deja el motor arrancando con él. Si MIKA5
+   * tenía el motor en marcha con otro modelo, lo cambia. Un servidor que
+   * arrancó el usuario no se toca: su modelo es el que él cargó.
+   */
+  async selectEngineModel(providerId, modelId) {
+    const spec = this._engineSpec(providerId);
+    if (!spec || spec.tipo !== 'managed') throw new Error('ENGINE_NOT_MANAGED');
+    // Elegir un modelo arranca el motor: sin ejecutable aprobado no se elige.
+    if (!this.engineIdentity(providerId)?.approved) throw new Error('ENGINE_APPROVAL_REQUIRED');
+    const modelo = this._modelosDeMotor(providerId).find(m => m.id === modelId);
+    if (!modelo) throw new Error('ENGINE_MODEL_MISSING');
+    this.setEngineFile(providerId, 'model', modelo.path, modelo.id);
+    await this._asegurarMotor(providerId);
+    return this.getReadiness(providerId);
+  }
+
+  /** Pone en marcha el motor con el modelo configurado, cambiándolo si hace falta. */
+  async _asegurarMotor(providerId) {
+    const spec = this._engineSpec(providerId);
+    const config = this.getEngineConfig(providerId);
+    let estado = this.motores.estado(providerId);
+    if (estado.owned && estado.model !== config.model) {
+      await this.motores.detener(providerId);
+      estado = this.motores.estado(providerId);
+    }
+    if (estado.owned) return estado;
+    const disp = await this.getAvailability(providerId);
+    if (disp.reachable === true) return estado;
+    this.motores.reiniciarFallo(providerId);
+    this._pruebas.delete(providerId);
+    return this.motores.iniciar(providerId, spec, this._configDeArranque(providerId), {
+      variante: (config.launch || {})[config.model] || 0
+    });
+  }
+
+  /**
+   * Configuración con la que se lanza el proceso del motor. El alias viaja
+   * como argumento y vuelve en las respuestas del servidor: con un carácter no
+   * ASCII —el «·» del identificador, o una tilde en el nombre del fichero— un
+   * servidor antiguo devuelve HTTP 500 al listar el modelo. Medido con el
+   * motor real de BitNet. Se pasa sólo ASCII.
+   */
+  _configDeArranque(providerId) {
+    const config = this.getEngineConfig(providerId);
+    const vigente = this._modeloConfigurado(providerId);
+    const alias = String(vigente ? vigente.id : (config.modelId || '')).replace(/[^\x20-\x7E]+/g, '-');
+    return { ...config, modelId: alias || undefined };
+  }
+
+  /**
+   * Una inferencia mínima contra el motor propio recién cargado. Se lanza una
+   * sola vez por arranque y no bloquea: quien consulta ve «cargando» hasta
+   * que contesta. `resultado` es null mientras está en curso.
+   */
+  _probarInferencia(providerId, estado) {
+    const clave = `${estado.model}#${estado.variant}`;
+    const previa = this._pruebas.get(providerId);
+    if (previa && previa.clave === clave) return previa;
+    const prueba = { clave, resultado: null };
+    this._pruebas.set(providerId, prueba);
+    const adapter = registroDeProveedores.getAdapter(providerId);
+    fetch(`${adapter.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'default', messages: [{ role: 'user', content: 'ok' }], max_tokens: 1, stream: false }),
+      signal: AbortSignal.timeout(120000)
+    }).then(async (res) => {
+      // Hay servidores que listan el modelo antes de terminar de cargarlo y
+      // contestan 503 a la inferencia mientras tanto: medido con el motor real
+      // de BitNet. Eso no es un fallo, es «todavía no»: se olvida esta prueba
+      // para que la siguiente consulta la repita. El techo lo pone el plazo
+      // de carga del gestor de motores.
+      if (res.status === 503) {
+        if (this._pruebas.get(providerId) === prueba) this._pruebas.delete(providerId);
+        return;
+      }
+      const datos = res.ok ? await res.json().catch(() => null) : null;
+      prueba.resultado = Boolean(datos && Array.isArray(datos.choices) && datos.choices.length);
+    }).catch(() => {
+      prueba.resultado = false;
+    });
+    return prueba;
+  }
+
+  /**
+   * Antes de un chat con un motor gestionable: si el modelo pedido es uno de
+   * los descubiertos, el motor se arranca con él y se espera a que conteste.
+   * Así «elegir modelo y escribir» basta, sin pasos intermedios.
+   */
+  async _prepararMotorParaChat(providerId, model, signal) {
+    const spec = this._engineSpec(providerId);
+    if (!spec || spec.tipo !== 'managed') return;
+    const config = this.getEngineConfig(providerId);
+    if (!this.engineIdentity(providerId)?.approved) return;
+    const adapter = registroDeProveedores.getAdapter(providerId);
+    const elegido = this._modelosDeMotor(providerId).find(m => m.id === model);
+    const estado = this.motores.estado(providerId);
+    const cambio = elegido && elegido.path !== config.model;
+    if (!cambio && !estado.owned && (await adapter.status()).ok) return;
+    if (!elegido && !config.model) return;
+    if (elegido) this.setEngineFile(providerId, 'model', elegido.path, elegido.id);
+    await this._asegurarMotor(providerId);
+
+    const limite = Date.now() + 600000;
+    while (Date.now() < limite) {
+      if (signal && signal.aborted) {
+        const cancelado = new Error('Solicitud cancelada por el usuario');
+        cancelado.name = 'AbortError';
+        cancelado.code = 'USER_CANCELED';
+        throw cancelado;
+      }
+      if ((await adapter.status()).ok) {
+        this.motores.marcarVivo(providerId);
+        return;
+      }
+      const actual = this.motores.estado(providerId);
+      if (actual.state === ESTADO_MOTOR.FAILED) {
+        const motivo = actual.errorCode === 'ENGINE_OUT_OF_MEMORY'
+          ? 'Este equipo no tiene memoria suficiente para este modelo. Prueba con uno más pequeño o cierra otros programas.'
+          : actual.errorCode === 'ENGINE_START_TIMEOUT'
+            ? 'El modelo tardó demasiado en cargar. Prueba con uno más pequeño.'
+            : 'El motor no pudo cargar este modelo. Prueba con otro.';
+        const fallo = new Error(`${adapter.name}: ${motivo}`);
+        fallo.code = actual.errorCode;
+        throw fallo;
+      }
+      if (!actual.owned) return;
+      await delay(500);
+    }
+    throw new Error(`${adapter.name}: el motor local tardó demasiado en cargar el modelo.`);
+  }
+
+  /** Motor ya compilado que MIKA5 puede instalar en ESTE sistema, o null. */
+  _runtimeDisponible(providerId) {
+    const spec = this._engineSpec(providerId);
+    if (!spec || !this.enginesDir) return null;
+    return (spec.runtimes || []).find(r => r.platform === this.motores._platform && r.arch === process.arch) || null;
+  }
+
+  /**
+   * Qué haría «Instalar y comenzar» para este proveedor: qué falta, cuánto
+   * ocupa y si se puede hacer en este sistema. No descarga nada.
+   */
+  engineSetupPlan(providerId) {
+    const spec = this._engineSpec(providerId);
+    if (!spec || spec.tipo !== 'managed') return null;
+    const config = this.getEngineConfig(providerId);
+    const tieneMotor = Boolean(this.motores.localizar(spec, config));
+    const runtime = tieneMotor ? null : this._runtimeDisponible(providerId);
+    const tieneModelo = this._modelosDeMotor(providerId).length > 0;
+    const modelo = tieneModelo || !this.modelsDir ? null : (spec.catalogo || [])[0] || null;
+    const pasos = [];
+    if (runtime) pasos.push({ kind: 'engine', label: spec.etiqueta, size: runtime.size });
+    if (modelo) pasos.push({ kind: 'model', label: modelo.label, size: modelo.size, license: modelo.license });
+    return {
+      // Se puede preparar si hay motor (o se puede instalar) y hay modelo (o se puede descargar).
+      possible: (tieneMotor || Boolean(runtime)) && (tieneModelo || Boolean(modelo)),
+      engineMissing: !tieneMotor,
+      engineAvailable: tieneMotor || Boolean(runtime),
+      steps: pasos,
+      totalSize: pasos.reduce((suma, p) => suma + p.size, 0)
+    };
+  }
+
+  /** Estado de la preparación en curso o de la última. */
+  engineSetupStatus(providerId) {
+    const p = this._preparaciones.get(providerId);
+    if (!p) return { state: 'idle' };
+    const descarga = this.descargas.estado();
+    return {
+      state: p.state, step: p.step, errorCode: p.errorCode || null,
+      received: p.state === 'running' && descarga.state === 'downloading' ? descarga.received : 0,
+      total: p.state === 'running' && descarga.state === 'downloading' ? descarga.total : 0
+    };
+  }
+
+  /**
+   * «Instalar y comenzar», ya autorizado por el usuario: instala el motor si
+   * falta, descarga un modelo si no hay ninguno, y arranca. Cada descarga se
+   * comprueba contra el tamaño y el SHA-256 declarados antes de usarse.
+   * Devuelve enseguida; el avance se consulta con `engineSetupStatus()`.
+   */
+  prepareEngine(providerId) {
+    const spec = this._engineSpec(providerId);
+    const plan = this.engineSetupPlan(providerId);
+    if (!spec || !plan || !plan.possible) return { ok: false, errorCode: 'ENGINE_SETUP_UNAVAILABLE' };
+    const previa = this._preparaciones.get(providerId);
+    if (previa && previa.state === 'running') return { ok: true, already: true };
+    const preparacion = { state: 'running', step: null, errorCode: null };
+    this._preparaciones.set(providerId, preparacion);
+
+    const descargar = (entrada, dir) => new Promise((resolve) => {
+      const r = this.descargas.iniciar({ providerId, entrada, dir, alTerminar: resolve });
+      if (!r.ok) resolve({ state: 'failed', errorCode: r.errorCode });
+      else if (r.already) resolve({ state: 'done' });
+    });
+    const fallar = (codigo) => { preparacion.state = 'failed'; preparacion.errorCode = codigo; };
+
+    (async () => {
+      const runtime = plan.engineMissing ? this._runtimeDisponible(providerId) : null;
+      if (runtime) {
+        preparacion.step = 'engine';
+        const fin = await descargar(runtime, this.motores.carpetasDeMotor[providerId]);
+        if (fin.state !== 'done') return fallar(fin.errorCode || 'MODEL_DOWNLOAD_FAILED');
+        // El usuario autorizó instalar exactamente este motor, y lo descargado
+        // coincide con su huella: esa es su aprobación. Si el fichero cambia
+        // después, deja de valer como la de cualquier otro ejecutable.
+        this.motores.descubrir(spec, { fresca: true });
+        const identidad = this.engineIdentity(providerId);
+        if (!identidad || identidad.sha256 !== runtime.sha256) return fallar('ENGINE_APPROVAL_REQUIRED');
+        this.approveEngine(providerId, identidad.sha256);
+      }
+      if (!this.engineIdentity(providerId)?.approved) return fallar('ENGINE_APPROVAL_REQUIRED');
+
+      if (!this._modelosDeMotor(providerId, { refresh: true }).length) {
+        const modelo = (spec.catalogo || [])[0];
+        if (!modelo) return fallar('ENGINE_MODEL_REQUIRED');
+        preparacion.step = 'model';
+        const fin = await descargar(modelo, this.modelsDir);
+        if (fin.state !== 'done') return fallar(fin.errorCode || 'MODEL_DOWNLOAD_FAILED');
+      }
+
+      // Arrancar con un modelo compatible: el ya elegido, o el primero que haya.
+      preparacion.step = 'start';
+      this._modelosDescubiertos = null;
+      const modelos = this._modelosDeMotor(providerId, { refresh: true });
+      const elegido = this._modeloConfigurado(providerId) || modelos[0];
+      if (!elegido) return fallar('ENGINE_MODEL_REQUIRED');
+      await this.selectEngineModel(providerId, elegido.id);
+      preparacion.state = 'done';
+      return undefined;
+    })().catch(() => fallar('ENGINE_SPAWN_FAILED'));
+
+    return { ok: true, already: false };
+  }
+
+  /** Catálogo del motor: qué puede descargarse y qué está ya en el equipo. */
+  engineCatalog(providerId) {
+    const spec = this._engineSpec(providerId);
+    if (!spec || !this.modelsDir) return [];
+    return (spec.catalogo || []).map(entrada => ({
+      id: entrada.id, label: entrada.label, size: entrada.size, license: entrada.license, repo: entrada.repo,
+      installed: this.descargas.yaDescargado(this.modelsDir, entrada)
+    }));
+  }
+
+  /**
+   * Descarga ya autorizada de un modelo del catálogo. El renderer manda el
+   * identificador de la entrada; el origen, el tamaño y la huella salen del
+   * adaptador, nunca de fuera.
+   */
+  downloadCatalogModel(providerId, catalogId) {
+    const spec = this._engineSpec(providerId);
+    const entrada = spec && (spec.catalogo || []).find(e => e.id === catalogId);
+    if (!entrada || !this.modelsDir) return { ok: false, errorCode: 'MODEL_DOWNLOAD_INVALID' };
+    return this.descargas.iniciar({
+      providerId, entrada, dir: this.modelsDir,
+      // Al terminar, el modelo nuevo tiene que aparecer sin esperar a la caché.
+      alTerminar: () => { this._modelosDescubiertos = null; }
+    });
+  }
+
+  /** Instalación ya autorizada por el usuario, con el gestor de paquetes oficial. */
+  async installEngine(providerId) {
+    const spec = this._engineSpec(providerId);
+    if (!spec) throw new Error('ENGINE_NOT_MANAGED');
+    const resultado = await this.motores.instalar(spec);
+    return { ...resultado, engine: this.describeEngine(providerId, { refresh: true }) };
+  }
+
+  /**
+   * Descarga ya autorizada: el propio `llama-server` baja el GGUF de Hugging
+   * Face a su caché y lo carga. MIKA5 no descarga nada por su cuenta.
+   */
+  async downloadEngineModel(providerId, repo) {
+    const spec = this._engineSpec(providerId);
+    if (!spec || !spec.descargaHf) throw new Error('ENGINE_DOWNLOAD_UNSUPPORTED');
+    if (!HF_REPO_RE.test(String(repo || ''))) throw new Error('ENGINE_MODEL_INVALID');
+    const disp = await this.getAvailability(providerId);
+    if (disp.reachable === true && !this.motores.estado(providerId).owned) throw new Error('ENGINE_PORT_IN_USE');
+    await this.motores.detener(providerId);
+    const config = { ...this.getEngineConfig(providerId), hf: repo, modelId: repo };
+    await this.motores.iniciar(providerId, spec, config, { sinPlazo: true });
+    return this.getReadiness(providerId);
+  }
+
+  /**
+   * Disponibilidad más preparación. Con `autoStart`, un motor local parado y
+   * arrancable se pone en marcha: es el único efecto lateral, y sólo ocurre
+   * para el proveedor que se consulta, nunca para todos.
+   *
+   * Un motor que ya falló no se reintenta solo: la interfaz consulta en bucle
+   * mientras arranca, y reintentar aquí relanzaría el proceso sin fin. El
+   * reintento es una acción del usuario, `startEngine()`.
+   */
+  async getReadiness(providerId = this.currentProvider, { autoStart = false } = {}) {
+    const disp = await this.getAvailability(providerId);
+    const spec = this._engineSpec(providerId);
+    if (!spec) return { ...disp, ...resolverReadiness(disp, null), engine: null };
+
+    if (disp.reachable === true) this.motores.marcarVivo(providerId);
+    const config = this.getEngineConfig(providerId);
+    if (autoStart && disp.reachable === false
+      && this.motores.estado(providerId).state === ESTADO_MOTOR.IDLE
+      && this.motores.diagnosticar(spec, config).ok) {
+      await this.motores.iniciar(providerId, spec, this._configDeArranque(providerId), {
+        variante: (config.launch || {})[config.model] || 0
+      });
+    }
+
+    const estado = this.motores.estado(providerId);
+    const diagnostico = this.motores.diagnosticar(spec, config);
+    const motor = {
+      tipo: spec.tipo,
+      state: estado.state,
+      errorCode: estado.errorCode,
+      diagnostico: diagnostico.ok ? null : diagnostico.errorCode
+    };
+    let preparacion = resolverReadiness(disp, motor);
+
+    // Evidencia de compatibilidad. Que el servidor liste el modelo no prueba
+    // que sepa generar con él: para un motor propio se hace UNA inferencia
+    // mínima antes de darlo por listo. Sólo entonces es «compatible».
+    let probando = false;
+    if (spec.tipo === 'managed' && estado.model && estado.model === config.model) {
+      if (estado.owned && disp.ready && !estado.ready) {
+        const prueba = this._probarInferencia(providerId, estado);
+        if (prueba.resultado === true) {
+          this.motores.marcarListo(providerId);
+          this._registrarCompatibilidad(providerId, estado.model, COMPATIBILITY.COMPATIBLE);
+          // Se recuerda con qué arranque funcionó, para no repetir los que fallan.
+          // Se relee la configuración: el registro anterior acaba de guardarla.
+          const vigente = this.getEngineConfig(providerId);
+          if (Number.isInteger(estado.variant) && (vigente.launch || {})[estado.model] !== estado.variant) {
+            vigente.launch = { ...(vigente.launch || {}), [estado.model]: estado.variant };
+            this._guardarEngineConfig(providerId, vigente);
+          }
+        } else if (prueba.resultado === false) {
+          this.motores.fallar(providerId, 'ENGINE_INFERENCE_FAILED');
+        } else {
+          probando = true;
+        }
+      } else if (estado.state === ESTADO_MOTOR.FAILED && estado.errorCode === 'ENGINE_MODEL_UNSUPPORTED') {
+        // Sólo cuando el motor DICE que no entiende el modelo. Quedarse sin
+        // memoria es un límite del equipo, y un cierre sin causa conocida no
+        // demuestra nada: ninguno de los dos hace incompatible al modelo.
+        this._registrarCompatibilidad(providerId, estado.model, COMPATIBILITY.INCOMPATIBLE);
+      }
+    }
+    if (probando || this.motores.estado(providerId).state !== estado.state) {
+      // El estado cambió en esta misma consulta: se recalcula con el nuevo.
+      const actual = this.motores.estado(providerId);
+      motor.state = actual.state;
+      motor.errorCode = actual.errorCode;
+      Object.assign(estado, actual);
+      if (probando) {
+        // Servidor en pie, inferencia aún sin confirmar: sigue cargando.
+        disp.ready = false;
+        preparacion = { readiness: READINESS.LOADING_MODEL, action: null };
+      } else if (actual.state === ESTADO_MOTOR.FAILED) {
+        disp.ready = false;
+        preparacion = readinessDeMotor(actual.errorCode, spec.tipo);
+      }
+    }
+
+    // Un motor gestionable ofrece los modelos que hay en el equipo, esté o no
+    // en marcha: elegir uno es lo que lo arranca. Un servidor que lanzó el
+    // usuario es distinto: tiene cargado su modelo y MIKA5 no puede cambiarlo,
+    // así que ahí manda su catálogo.
+    const esExterno = disp.reachable === true && !estado.owned;
+    if (spec.tipo === 'managed' && !esExterno && this.engineIdentity(providerId)?.approved) {
+      const modelos = this._modelosDeMotor(providerId);
+      if (modelos.length) {
+        disp.models = modelos.map(m => ({
+          name: m.id, label: m.label, origin: m.source, size: m.size, digest: m.id,
+          sizeFormatted: m.size ? formatBytes(m.size) : '', compatibility: m.compatibility
+        }));
+        disp.modelsAvailable = modelos.length;
+        // Siempre se puede elegir: también tras un fallo, porque la salida de
+        // «este modelo no carga» es precisamente elegir otro.
+        disp.canAttempt = true;
+        if (disp.reachable === false && estado.state === ESTADO_MOTOR.IDLE) {
+          preparacion = { readiness: READINESS.AVAILABLE, action: null };
+        }
+      }
+    }
+
+    // Modelo que el motor tiene (o tendría) cargado, por su fichero. Si ese
+    // fichero ya no se ofrece —no existe, o se supo incompatible— no hay
+    // modelo elegido: la interfaz no debe enseñar otro en su lugar como si
+    // estuviese listo.
+    const configurado = spec.tipo === 'managed' && !esExterno ? this._modeloConfigurado(providerId) : null;
+    const aprobado = spec.tipo !== 'managed' || Boolean(this.engineIdentity(providerId)?.approved);
+    let status = null;
+    if (spec.tipo === 'managed') {
+      const E = ENGINE_STATUS;
+      if (preparacion.readiness === READINESS.READY) status = E.READY;
+      else if (preparacion.readiness === READINESS.LOADING_MODEL) status = E.LOADING;
+      else if (preparacion.readiness === READINESS.STARTING) status = E.STARTING;
+      else if (estado.state === ESTADO_MOTOR.FAILED) status = E.ERROR;
+      // El motor propio está en marcha y contesta, pero con un error: no está
+      // detenido, está fallando.
+      else if (estado.owned && preparacion.readiness === READINESS.ERROR) status = E.ERROR;
+      else if (!this.motores.localizar(spec, config)) status = E.NOT_INSTALLED;
+      else if (!aprobado) status = E.NEEDS_APPROVAL;
+      else if (!disp.modelsAvailable) status = E.NEEDS_MODEL;
+      else status = E.STOPPED;
+    }
+
+    return {
+      ...disp,
+      ...preparacion,
+      engine: {
+        selectedModel: configurado ? configurado.id : null,
+        // Las tres identidades, por separado, para que la interfaz no tenga
+        // que deducirlas de un nombre.
+        label: spec.etiqueta || null,
+        modelOrigin: configurado ? configurado.source : null,
+        external: esExterno,
+        status,
+        managed: spec.tipo === 'managed',
+        state: estado.state,
+        owned: estado.owned,
+        // Con el servidor contestando, lo que impediría arrancarlo no es un
+        // problema del usuario: no se le enseña.
+        // Un fallo del motor propio se dice siempre: puede haberse retirado
+        // en esta misma consulta, cuando el servidor aún contestaba.
+        errorCode: estado.state === ESTADO_MOTOR.FAILED ? estado.errorCode
+          : (disp.reachable === true ? null : motor.diagnostico)
+      }
+    };
+  }
+
+  /** Arranque pedido por el usuario: olvida el fallo anterior y lo intenta. */
+  async startEngine(providerId = this.currentProvider) {
+    const spec = this._engineSpec(providerId);
+    if (!spec) throw new Error('ENGINE_NOT_MANAGED');
+    this.motores.reiniciarFallo(providerId);
+    const disp = await this.getAvailability(providerId);
+    if (disp.reachable !== true) {
+      await this.motores.iniciar(providerId, spec, this._configDeArranque(providerId));
+    }
+    return this.getReadiness(providerId);
+  }
+
+  /** Al cerrar: se detiene lo que MIKA5 arrancó, y nada más. */
+  stopEngines() {
+    this.motores.detenerTodos();
+  }
+
+  /**
+   * Registra un fallo sin repetirlo. La interfaz consulta el estado cada pocos
+   * segundos mientras un motor arranca: escribir la misma línea en cada
+   * consulta llenaba el registro sin decir nada nuevo.
+   */
+  _registrarFalloUnaVez(providerId, operacion, error, codigo) {
+    const clave = `${providerId}:${operacion}`;
+    const previo = this._fallosRegistrados.get(clave);
+    const ahora = Date.now();
+    if (previo && previo.codigo === codigo && ahora - previo.cuando < 60000) return;
+    this._fallosRegistrados.set(clave, { codigo, cuando: ahora });
+    registrarFalloDeProveedor(providerId, operacion, error, codigo);
+  }
+
   getAllProviders() {
     return Object.entries(PROVIDERS).map(([id, config]) => ({
       id,
       name: config.name,
       privacy: config.privacy,
       requiresKey: config.requiresKey,
+      libraryUrl: config.libraryUrl || null,
       current: id === this.currentProvider,
       capabilities: this.getCapabilities(id)
     }));
@@ -1491,6 +2423,12 @@ module.exports = {
   registroDeProveedores,
   UI_STATE,
   resolverUiState,
+  READINESS,
+  READINESS_ACTION,
+  resolverReadiness,
+  HF_REPO_RE,
+  COMPATIBILITY,
+  ENGINE_STATUS,
   probeOllamaVision,
   getProviderContract,
   resolveVisionSupport,

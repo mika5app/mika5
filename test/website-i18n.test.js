@@ -546,7 +546,161 @@ check(urls.includes('https://mika5.xyz/'), 'el sitemap declara la raiz como URL 
 check(!urls.some(u => /\/landing\.html$/.test(u)),
   'el sitemap ya no duplica la landing bajo /landing.html');
 check(new Set(urls).size === urls.length, 'el sitemap no repite ninguna URL');
-check(urls.length === 3, `el sitemap declara 3 URLs, una por documento (${urls.length})`);
+check(urls.length === 6, `el sitemap declara 6 URLs, una por documento y por idioma (${urls.length})`);
+
+// =====================================================================
+// Paginas en espanol. Cada una tiene su direccion y sale ya escrita en
+// espanol: un buscador que no ejecuta el script no veia mas que ingles, y
+// /es devolvia la portada en ingles. Se generan desde el mismo diccionario.
+// =====================================================================
+{
+  const { PAGINAS, generar } = require('../scripts/build-web-es.js');
+  for (const { pagina, html } of generar()) {
+    const enDisco = fs.existsSync(path.join(WEB, pagina.salida)) ? fs.readFileSync(path.join(WEB, pagina.salida), 'utf8') : null;
+    check(enDisco === html, `web/${pagina.salida} esta al dia con web/${pagina.fuente} (node scripts/build-web-es.js)`);
+    check(/<html lang="es" data-lang="es">/.test(html) && html.includes(`<link rel="canonical" href="${pagina.es}">`)
+      && html.includes(`<meta property="og:url" content="${pagina.es}">`) && html.includes('<meta property="og:locale" content="es_ES">'),
+      `${pagina.salida}: se declara en espanol y con su propia direccion canonica`);
+    const fuente = leer(pagina.fuente);
+    const alternas = (texto) => [...texto.matchAll(/<link rel="alternate" hreflang="([^"]+)" href="([^"]+)">/g)].map(m => `${m[1]}=${m[2]}`).join(' ');
+    check(alternas(html) === `en=${pagina.en} es=${pagina.es} x-default=${pagina.en}` && alternas(fuente) === alternas(html),
+      `${pagina.fuente} y ${pagina.salida} se anuncian mutuamente con hreflang`);
+    check(urls.includes(pagina.es) && urls.includes(pagina.en), `el sitemap declara las dos direcciones de ${pagina.fuente}`);
+    // Un nivel mas abajo: los recursos compartidos se piden al padre y existen.
+    const recursos = [...html.matchAll(/\b(?:src|href)="(\.\.\/[^"]+)"/g)].map(m => m[1]);
+    check(recursos.length >= 3 && recursos.every(r => fs.existsSync(path.join(WEB, 'es', r))),
+      `${pagina.salida}: sus recursos compartidos existen (${[...new Set(recursos)].join(', ')})`);
+    // Todo nodo traducible lleva ya el texto espanol del diccionario.
+    const ini = html.indexOf('const STRINGS = {');
+    const dic = new Function(`${html.slice(ini, html.indexOf('\n};', ini) + 3)}; return STRINGS;`)();
+    const plano = (t) => t.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').trim();
+    const nodos = [...html.slice(0, ini).matchAll(/<[a-z0-9]+\b[^>]*\bdata-i18n="([^"]+)"[^>]*>([^<]*)<\//g)];
+    const enOtroIdioma = nodos.filter(m => dic.es[m[1]] !== undefined && plano(m[2]) !== plano(dic.es[m[1]])).map(m => m[1]);
+    check(nodos.length > 50 && enOtroIdioma.length === 0,
+      `${pagina.salida}: sus ${nodos.length} textos traducibles estan en espanol sin ejecutar ningun script`);
+  }
+  check(PAGINAS.length === PAGINAS_AUDITADAS.length, 'toda pagina del sitio tiene su version en espanol');
+}
+
+// =====================================================================
+// Recursos que las paginas anuncian. La imagen social estuvo anunciada en las
+// tres sin existir: el servidor respondia con el HTML de la portada y las
+// vistas previas salian rotas. Lo que se enlaza tiene que estar en web/.
+// =====================================================================
+const dimensionesPng = (rel) => {
+  const b = fs.readFileSync(path.join(WEB, rel));
+  const esPng = b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  return esPng ? { ancho: b.readUInt32BE(16), alto: b.readUInt32BE(20), bytes: b.length } : null;
+};
+const social = dimensionesPng('og-image.png');
+check(social && social.ancho === 1200 && social.alto === 630,
+  `og-image.png existe y es un PNG de 1200x630 (${social && `${social.ancho}x${social.alto}`})`);
+for (const pagina of PAGINAS_AUDITADAS) {
+  const html = leer(pagina);
+  const locales = [...html.matchAll(/<(?:img|link)\b[^>]*?\b(?:src|href)="([^"#:?]+\.png)"/g)].map(m => m[1]);
+  check(locales.length >= 3 && locales.every(r => dimensionesPng(r)),
+    `${pagina}: toda imagen local enlazada existe (${[...new Set(locales)].join(', ')})`);
+  check(/<meta property="og:image" content="https:\/\/mika5\.xyz\/og-image\.png">\s*<meta property="og:image:width" content="1200">\s*<meta property="og:image:height" content="630">/.test(html),
+    `${pagina}: la imagen social declara el tamano que tiene`);
+  // El icono de 1 MB no se descarga para pintarlo a 20 o 28 px.
+  const iconos = [...html.matchAll(/<img\b[^>]*>/g)].map(m => m[0]);
+  check(iconos.length === 2 && iconos.every(i => /src="icon-64\.png"/.test(i) && /\bwidth="\d+" height="\d+"/.test(i)),
+    `${pagina}: los iconos usan la version pequena y declaran ancho y alto`);
+  check(dimensionesPng('icon-64.png').bytes < 20000 && !/(?:src|href)="icon\.png"/.test(html),
+    `${pagina}: ya no carga el icono original`);
+  check(/scrollbar-color: var\(--scrollbar-thumb\) var\(--scrollbar-track\)/.test(html)
+    && /@supports not \(scrollbar-color: auto\)/.test(html),
+    `${pagina}: la barra de desplazamiento usa las propiedades estandar, con respaldo`);
+}
+
+// Enlaces de las seis paginas: toda ancla interna tiene destino en su pagina y
+// todo enlace o recurso relativo existe en web/. Un menu que apunta a una
+// seccion renombrada, o una pagina en espanol que pide un fichero al nivel
+// equivocado, no rompe ninguna otra comprobacion.
+for (const pagina of [...PAGINAS_AUDITADAS, 'es/index.html', 'es/models.html', 'es/whitepaper.html']) {
+  const html = fs.readFileSync(path.join(WEB, pagina), 'utf8');
+  const marcado = html.slice(0, html.indexOf('const STRINGS = {'));
+  const ids = new Set([...marcado.matchAll(/\bid="([^"]+)"/g)].map(m => m[1]));
+  const referencias = [...marcado.matchAll(/<(?:a|link|img|script)\b[^>]*?\b(?:href|src)="([^"]*)"/g)].map(m => m[1]);
+  const anclasRotas = referencias.filter(r => r.startsWith('#') && r.length > 1 && !ids.has(r.slice(1)));
+  check(anclasRotas.length === 0, `${pagina}: toda ancla interna tiene destino (${anclasRotas.join(', ') || 'ninguna rota'})`);
+  const base = path.dirname(path.join(WEB, pagina));
+  const relativosRotos = referencias.filter(r => r && !/^(#|https?:|mailto:|data:)/.test(r)).filter(r => {
+    const limpio = r.split('#')[0].split('?')[0];
+    if (limpio === '/') return false;                                   // raiz = landing.html
+    const destino = limpio.startsWith('/') ? path.join(WEB, limpio) : path.join(base, limpio);
+    const fichero = limpio.endsWith('/') ? path.join(destino, 'index.html') : destino;
+    return !fs.existsSync(fichero);
+  });
+  check(referencias.length > 10 && relativosRotos.length === 0,
+    `${pagina}: todo enlace y recurso relativo existe (${relativosRotos.join(', ') || 'ninguno roto'})`);
+}
+
+// La portada es tambien la pagina de descarga. Lleva a la vista el enlace
+// «Code signing policy» (lo exige SignPath Foundation en ambas), la politica
+// de privacidad y el repositorio publico del codigo, en los dos idiomas.
+for (const pagina of ['landing.html', 'es/index.html']) {
+  const html = fs.readFileSync(path.join(WEB, pagina), 'utf8');
+  const marcado = html.slice(0, html.indexOf('const STRINGS = {'));
+  const enlaces = [...marcado.matchAll(/<a\b[^>]*\bhref="([^"]+)"[^>]*>([^<]*)<\/a>/g)].map(m => ({ href: m[1], texto: m[2].trim() }));
+  const politica = enlaces.filter(e => e.href === 'https://github.com/mika5app/mika5/blob/main/CODE_SIGNING_POLICY.md');
+  check(politica.length === 2 && politica.every(e => e.texto.includes('Code signing policy')),
+    `${pagina}: el enlace «Code signing policy» esta en la zona de descarga y en el pie (${politica.map(e => e.texto).join(' | ')})`);
+  check(enlaces.some(e => e.href === 'https://github.com/mika5app/mika5/blob/main/PRIVACY.md' && e.texto.length > 5),
+    `${pagina}: enlaza la politica de privacidad`);
+  check(enlaces.some(e => e.href === 'https://github.com/mika5app/mika5' && e.texto.length > 5),
+    `${pagina}: enlaza el repositorio publico del codigo`);
+}
+check(fs.existsSync(path.join(ROOT, 'CODE_SIGNING_POLICY.md')) && fs.existsSync(path.join(ROOT, 'PRIVACY.md')),
+  'los dos documentos enlazados existen en la raiz del repositorio');
+
+// llms.txt: lo que enlaza del propio sitio son las URLs del sitemap, ni una mas.
+const llms = fs.readFileSync(path.join(WEB, 'llms.txt'), 'utf8');
+const enlacesPropios = [...llms.matchAll(/\]\((https:\/\/mika5\.xyz\/[^)]*)\)/g)].map(m => m[1]);
+check(/^# MIKA5\n\n> /.test(llms) && enlacesPropios.slice().sort().join() === urls.slice().sort().join(),
+  `llms.txt describe el sitio y enlaza las mismas ${urls.length} URLs que el sitemap`);
+const versionDeLaLanding = /"softwareVersion": "([\d.]+)"/.exec(leer('landing.html'))[1];
+check(llms.includes(`MIKA5 Community ${versionDeLaLanding}`) && llms.includes(`/releases/tag/v${versionDeLaLanding}`),
+  `llms.txt anuncia la misma version que la landing (${versionDeLaLanding})`);
+
+// El asistente de la landing: lo que escribe el visitante no pasa por el
+// analizador de HTML, y Enter no envia mientras se compone un caracter.
+{
+  const widget = leer('chat-widget.js');
+  const linkify = new Function('document', `${/function linkify\(text\) \{[\s\S]*?\n  \}/.exec(widget)[0]}; return linkify;`);
+  const nodo = (tipo, extra) => ({ tipo, hijos: [], appendChild(h) { this.hijos.push(h); return h; }, ...extra });
+  const doc = {
+    createDocumentFragment: () => nodo('fragmento'),
+    createTextNode: (texto) => nodo('texto', { texto }),
+    createElement: (etiqueta) => nodo(etiqueta)
+  };
+  const partes = linkify(doc)('mira <img src=x onerror=alert(1)> en https://mika5.xyz/a"b y ya').hijos;
+  check(partes.length === 3 && partes[0].tipo === 'texto' && partes[0].texto === 'mira <img src=x onerror=alert(1)> en '
+    && partes[1].tipo === 'a' && partes[1].textContent === 'https://mika5.xyz/a"b' && partes[1].rel === 'noopener'
+    && partes[2].texto === ' y ya',
+    'el asistente pinta el texto escrito como texto y los enlaces como nodos, nunca como HTML');
+  check(!/innerHTML = linkify/.test(widget) && /div\.appendChild\(linkify\(text\)\)/.test(widget),
+    'y ningun mensaje se inserta con innerHTML');
+  check(/e\.preventDefault\(\);\s*\/\/[^\n]*\n\s*if \(e\.isComposing \|\| e\.keyCode === 229\) return;\s*handleSend\(\);/.test(widget),
+    'Enter que confirma una composicion (chino, japones, coreano) no envia el mensaje');
+  check(/@media\(prefers-reduced-motion:no-preference\)\{[^']*mika5-bounce/.test(widget)
+    && !/background:#6B7280;animation:/.test(widget),
+    'las animaciones del asistente solo corren si el sistema no pide reducir el movimiento');
+}
+{
+  const landing = leer('landing.html');
+  check(!/class="scroll-smooth"/.test(landing)
+    && /@media \(prefers-reduced-motion: no-preference\) \{\s*html \{ scroll-behavior: smooth; \}/.test(landing)
+    && /@media \(prefers-reduced-motion: no-preference\) \{\s*\.pulse-dot \{ animation:/.test(landing),
+    'la landing respeta la preferencia de menos movimiento');
+  check(/<meta name="referrer" content="strict-origin-when-cross-origin">/.test(landing)
+    && /<link rel="preconnect" href="https:\/\/fonts\.gstatic\.com" crossorigin>/.test(landing),
+    'la landing fija la politica de referencia y abre antes la conexion de las fuentes');
+  let reglas = null;
+  try { reglas = JSON.parse(/<script type="speculationrules">([\s\S]*?)<\/script>/.exec(landing)[1]); } catch (_) {}
+  check(reglas && reglas.prefetch[0].eagerness === 'moderate' && !reglas.prerender,
+    'las reglas de precarga son JSON valido y solo precargan, con cautela');
+}
 
 // Canonical exacto por pagina. Cada documento tiene la suya: comparar contra
 // la raiz habria dado por buenas models.html y whitepaper.html sin mirarlas.
@@ -667,8 +821,19 @@ for (const [archivo, html] of [['models.html', models], ['whitepaper.html', pape
   check(/href="\/"/.test(html), `${archivo}: el enlace de inicio usa la raiz canonica`);
   check(!/href="landing\.html"/.test(html), `${archivo}: ningun enlace interno a /landing.html`);
 }
-check(!/hreflang/.test(landing) && !/hreflang/.test(models) && !/hreflang/.test(paper),
-  'no se declara hreflang, que requeriria URLs por idioma');
+// hreflang solo vale si cada idioma tiene su URL. Antes no la tenia y no se
+// declaraba; ahora existen las paginas de web/es/ y cada hreflang ha de apuntar
+// a un documento que exista (la reciprocidad se comprueba mas arriba).
+for (const [archivo, html] of [['landing.html', landing], ['models.html', models], ['whitepaper.html', paper]]) {
+  const destinos = [...html.matchAll(/<link rel="alternate" hreflang="[^"]+" href="([^"]+)">/g)].map(m => m[1]);
+  const huerfanos = destinos.filter(u => {
+    const ruta = u.replace(/^https:\/\/mika5\.xyz\//, '');
+    if (ruta === '') return false;                 // raiz = landing.html
+    return !fs.existsSync(path.join(WEB, ruta.endsWith('/') ? `${ruta}index.html` : ruta));
+  });
+  check(destinos.length === 3 && destinos.every(mismoOrigen) && huerfanos.length === 0,
+    `${archivo}: cada hreflang apunta a una pagina que existe (${huerfanos.join(', ') || 'ninguna huerfana'})`);
+}
 
 // Ningun modelo puede promocionarse en la landing sin ficha en el Model Guide.
 //

@@ -886,6 +886,74 @@ try {
   assertEq(scopeErr.error, 'INVALID_CHAT_PROJECT_SCOPE', 'ragApi.query falla cerrado con alcance inválido');
   assertEq(scopeErr.chunks, [], 'y no devuelve fragmentos');
 
+
+  // ============================================
+  console.log('\n=== Documento largo: se elige por la pregunta, dentro del alcance ===');
+  // ============================================
+  // Informe de campo: con un código de cientos de artículos cargado, MIKA5
+  // contestaba que el artículo 380 «no se encuentra en los documentos». El
+  // documento estaba entero; lo que se enviaba al modelo eran sus primeros
+  // fragmentos, siempre los mismos, fuese cual fuese la pregunta.
+  {
+    const codigo = dbApi.createProject({ name: 'Código largo' });
+    const chatA = dbApi.createChat({ projectId: codigo.id, title: 'Consulta A' });
+    const chatB = dbApi.createChat({ projectId: codigo.id, title: 'Consulta B' });
+    const docCodigo = dbApi.addKnowledgeFromText({ projectId: codigo.id, title: 'Código Civil', content: 'x' });
+    const docPrivadoB = dbApi.addKnowledgeFromText({
+      projectId: codigo.id, chatId: chatB.id, title: 'Notas privadas de B', content: 'x'
+    });
+    const insertar = (itemId, indice, texto) => {
+      const item = dbApi.getKnowledgeItem(itemId);
+      dbApi.insertChunk({
+        id: `${itemId}-largo-${indice}`, projectId: item.project_id, itemId, chunkIndex: indice,
+        chunkText: texto, embeddingJson: '[1,0,0]', chatId: item.chat_id || null
+      });
+    };
+    let articulo = 1;
+    const FRAGMENTOS = 120;
+    for (let i = 0; i < FRAGMENTOS; i += 1) {
+      let texto = '';
+      for (let k = 0; k < 17; k += 1, articulo += 1) {
+        texto += `Artículo ${articulo}. Disposición ${articulo} del código, relativa a la materia ${articulo % 9}. `.padEnd(240, 'texto ');
+      }
+      insertar(docCodigo.id, i, texto);
+    }
+    insertar(docPrivadoB.id, 0, 'Artículo 380. Nota confidencial del chat B sobre el artículo 380.');
+
+    const pedir = (chatId, query, maxChars = 12000) => dbApi.listChunksRaw({
+      projectId: codigo.id, chatId, mode: 'complete', includeProjectScope: true, maxChars, query
+    });
+    const sinPregunta = pedir(chatA.id, undefined);
+    assert(sinPregunta.length > 0 && sinPregunta.every((c, i) => c.chunk_index === i)
+      && sinPregunta.length < FRAGMENTOS && !sinPregunta.some(c => /Artículo 2040\./.test(c.chunk_text)),
+      'sin pregunta se mantienen los primeros fragmentos en orden: el final del documento no llega');
+
+    const conPregunta = pedir(chatA.id, '¿Qué dice el Artículo 380?');
+    assert(conPregunta.some(c => c.title === 'Código Civil' && /Artículo 380\. Disposición 380 /.test(c.chunk_text)),
+      'con la pregunta se trae el fragmento que contiene el artículo 380');
+    assert(conPregunta.every(c => c.selection === 'relevance' && c.doc_chunks === FRAGMENTOS),
+      'cada fragmento dice que es una selección y de cuántos fragmentos sale');
+    assert(conPregunta.reduce((n, c) => n + c.chunk_text.length, 0) <= 12000,
+      'la selección respeta el presupuesto de contexto');
+    assert(conPregunta.every((c, i, lista) => i === 0 || lista[i - 1].chunk_index < c.chunk_index),
+      'los fragmentos elegidos vuelven en orden de documento');
+    assert(!conPregunta.some(c => c.title === 'Notas privadas de B'),
+      'la pregunta no trae el documento privado de otro chat, aunque también hable del artículo 380');
+    assert(pedir(chatB.id, '¿Qué dice el Artículo 380?').some(c => c.title === 'Notas privadas de B'),
+      'el chat dueño de ese documento sí lo recibe');
+
+    const ultimo = pedir(chatA.id, 'resume el artículo 2040');
+    assert(ultimo.some(c => /Artículo 2040\./.test(c.chunk_text)) && ultimo.some(c => c.chunk_index === FRAGMENTOS - 1),
+      'también se llega al último fragmento del documento, no sólo al principio');
+    assert(!pedir(chatA.id, 'artículo 38').some(c => /Artículo 380\./.test(c.chunk_text) && !/Artículo 38\./.test(c.chunk_text)),
+      '«artículo 38» no se confunde con el 380');
+    const sinAciertos = pedir(chatA.id, 'zzzqqq inexistente');
+    assertEq(JSON.stringify(sinAciertos.map(c => c.chunk_index)), JSON.stringify(sinPregunta.map(c => c.chunk_index)),
+      'una pregunta que no encuentra nada cae al orden de siempre, no a una lista vacía');
+    assertThrowsCode(() => dbApi.listChunksRaw({ projectId: gpu.id, chatId: chatA.id, query: 'artículo 380' }),
+      'INVALID_CHAT_PROJECT_SCOPE', 'una pregunta no relaja la validación del alcance');
+  }
+
 } catch (e) {
   console.error('\nFATAL:', e.message);
   console.error(e.stack);

@@ -374,17 +374,25 @@ async function expectSilentDropIsImpossible(providerId, chatParams) {
     const hola = [{ role: 'user', content: 'hola' }];
     try {
       const out = await PROVIDERS.bitnet.chat({ model: 'ggml-model-i2_s.gguf', messages: hola });
-      assert.equal(urls[0], 'http://127.0.0.1:8081/v1/chat/completions', 'BitNet habla con el 8081');
+      // Antes de conversar, BitNet le pregunta a su propio servidor cuánto
+      // ocupa la entrada y cuánta ventana tiene. Todo va al 8081, nada más.
+      assert.deepEqual([...urls].sort(), [
+        'http://127.0.0.1:8081/props', 'http://127.0.0.1:8081/tokenize', 'http://127.0.0.1:8081/v1/chat/completions'
+      ], 'BitNet habla con el 8081, y sólo con el 8081');
+      assert.equal(urls.at(-1), 'http://127.0.0.1:8081/v1/chat/completions', 'la conversación es la última petición');
+      urls.length = 0;
       assert.equal(out.provider, 'bitnet', 'la respuesta se atribuye a BitNet, no a llama.cpp');
       assert.equal(out.message.content, 'hola');
       assert.equal(out.finishReason, 'stop');
 
       const lista = await PROVIDERS.bitnet.listModels();
-      assert.equal(urls[1], 'http://127.0.0.1:8081/v1/models', 'el catálogo de BitNet sale del 8081');
+      assert.deepEqual(urls, ['http://127.0.0.1:8081/v1/models'], 'el catálogo de BitNet sale del 8081');
+      urls.length = 0;
       assert.deepEqual(lista.models.map(m => m.description), ['BitNet — ggml-model-i2_s.gguf']);
 
       const llama = await PROVIDERS.llamacpp.chat({ model: 'local', messages: hola });
-      assert.equal(urls[2], 'http://127.0.0.1:8080/v1/chat/completions', 'llama.cpp conserva el 8080');
+      assert.deepEqual(urls, ['http://127.0.0.1:8080/v1/chat/completions'],
+        'llama.cpp conserva el 8080 y no hace peticiones de más');
       assert.equal(llama.provider, 'llamacpp');
     } finally {
       global.fetch = previousFetch;
@@ -566,3 +574,104 @@ const attached = attachOpenAIImages([
 assert.equal(typeof attached[0].content, 'string', 'los mensajes previos no se tocan');
 assert(Array.isArray(attached[2].content));
 assert.equal(attached[2].content[0].text, 'segundo');
+
+// --- Imágenes: lo que recibe el modelo es lo que escribió el usuario ---
+// Informe de campo: al pedir «analiza este logo y modernízalo» el modelo
+// contestaba que tenía una restricción «describe-only-do-not-edit». No era
+// suya: era una etiqueta interna del routing que MIKA5 escribía dentro del
+// mensaje, en lugar de las palabras del usuario.
+{
+  const { AIProviderManager, registroDeProveedores } = require('../src/main/ai-providers');
+  const gestorDeRutas = new AIProviderManager({ prepare: () => ({ all: () => [], get: () => undefined, run: () => {} }) });
+  const adjunto = [{ type: 'image', mediaType: 'image/png', base64: 'AAAA', name: 'logo.png', chatId: 'c' }];
+  const FRASES = [
+    'analiza este logo y modernizalo',
+    'describe esta imagen y luego cambia el fondo',
+    'que ves en esta imagen',
+    'moderniza este logotipo',
+    'explica este diagrama'
+  ];
+  let rutasComprobadas = 0;
+  for (const providerId of registroDeProveedores.ids()) {
+    const editaImagenes = providerId === 'alibaba';
+    for (const text of FRASES) {
+      const ruta = gestorDeRutas.routeIntent({ text, providerId, chatId: 'c', attachments: adjunto, currentModel: 'm' });
+      const todo = JSON.stringify([ruta.modelPrompt, ruta.plan, ruta.message || '']);
+      assert(!/describe-only|do-not-edit/.test(todo),
+        `${providerId} / «${text}»: ninguna etiqueta interna de restricción llega al modelo`);
+      if (ruta.intent === 'vision-analysis' || ruta.intent === 'normal-chat') {
+        assert.equal(ruta.modelPrompt, text,
+          `${providerId} / «${text}»: el modelo recibe el mensaje del usuario sin reescribir`);
+        assert.equal(ruta.action, 'chat', `${providerId} / «${text}»: analizar una imagen es un chat`);
+      }
+      const pidioCambio = /moderniz|cambia/.test(text);
+      assert.equal(ruta.imageEditUnavailable, pidioCambio && !editaImagenes,
+        `${providerId} / «${text}»: ${pidioCambio && !editaImagenes ? 'se avisa de que no puede editar' : 'no se avisa de nada'}`);
+      rutasComprobadas += 1;
+    }
+  }
+  // Sin ninguna imagen, «analiza el documento» es una conversación normal.
+  // Se clasificaba como análisis de imagen por el verbo, y en esa ruta el
+  // documento adjunto se perdía antes de llegar al modelo.
+  for (const providerId of registroDeProveedores.ids()) {
+    for (const text of ['analiza el documento', 'analiza el archivo adjunto', 'analiza este contrato', 'revisa el documento y dime los riesgos']) {
+      const ruta = gestorDeRutas.routeIntent({ text, providerId, chatId: 'c', attachments: [], currentModel: 'm' });
+      assert.equal(ruta.intent, 'normal-chat', `${providerId} / «${text}» sin imagen: es chat normal, no análisis de imagen`);
+      assert.equal(ruta.action, 'chat');
+      assert.equal(ruta.modelPrompt, text, `${providerId} / «${text}»: el texto del usuario no se reescribe`);
+      rutasComprobadas += 1;
+    }
+    // Con una imagen adjunta, analizar sigue siendo análisis de imagen.
+    const conImagen = gestorDeRutas.routeIntent({ text: 'analiza esta imagen', providerId, chatId: 'c', attachments: adjunto, currentModel: 'm' });
+    assert.equal(conImagen.intent, 'vision-analysis', `${providerId}: con imagen adjunta sí es análisis de imagen`);
+    rutasComprobadas += 1;
+  }
+
+  // Un chat donde hubo una imagen. Hablar de un documento no la reutiliza:
+  // se enviaba la imagen antigua, y un proveedor sin visión ni dejaba salir
+  // el mensaje. Informe de campo con BitNet: «Analiza el documento en la base
+  // de conocimiento».
+  {
+    const anterior = { type: 'image', mediaType: 'image/png', base64: 'aW1hZ2Vu', name: 'vieja.png', chatId: 'c', updatedAt: 1 };
+    const conHistorial = (extra) => gestorDeRutas.routeIntent({
+      chatId: 'c', attachments: [], currentModel: 'm', lastUserImage: anterior, lastUploadedImage: anterior, ...extra
+    });
+    for (const providerId of registroDeProveedores.ids()) {
+      for (const text of ['Analiza el documento en la base de conocimiento', 'analiza el archivo que subí', 'explica el contrato', 'lee el pdf y resume la parte de pagos']) {
+        const ruta = conHistorial({ text, providerId });
+        assert.equal(ruta.intent, 'normal-chat', `${providerId} / «${text}» con una imagen antigua en el chat: es chat normal`);
+        assert.equal(ruta.action, 'chat');
+        assert(!ruta.visualContext?.imageRef || ruta.intent === 'normal-chat');
+        rutasComprobadas += 1;
+      }
+      // Con un documento adjunto en este turno, «analízala» habla del documento.
+      const conAdjunto = conHistorial({ text: 'analiza la información', providerId, hasTextAttachments: true });
+      assert.equal(conAdjunto.intent, 'normal-chat', `${providerId}: con un documento adjunto no se reutiliza la imagen antigua`);
+      // Hablar de la imagen anterior sigue reutilizándola donde hay visión.
+      const deLaImagen = conHistorial({ text: 'describe la imagen anterior', providerId });
+      assert.equal(deLaImagen.intent, 'vision-analysis', `${providerId}: «describe la imagen anterior» sigue siendo análisis de imagen`);
+      rutasComprobadas += 2;
+    }
+    // Un proveedor que no ve imágenes no arrastra una del historial por un artículo.
+    for (const providerId of ['bitnet', 'llamacpp']) {
+      const ruta = conHistorial({ text: 'explica la idea principal', providerId });
+      assert.equal(ruta.intent, 'normal-chat', `${providerId}: sin visión, una frase corriente no reutiliza la imagen antigua`);
+      rutasComprobadas += 1;
+    }
+    // Y la imagen adjunta en este turno no se toca, aunque se hable de un documento.
+    const adjuntaAhora = gestorDeRutas.routeIntent({
+      text: 'analiza el documento de la foto', providerId: 'openai', chatId: 'c', attachments: adjunto, currentModel: 'm'
+    });
+    assert.equal(adjuntaAhora.intent, 'vision-analysis', 'una imagen adjunta en este turno se analiza');
+    rutasComprobadas += 1;
+  }
+
+  // Alibaba sí edita: su camino no cambia.
+  const edicion = gestorDeRutas.routeIntent({
+    text: 'moderniza este logotipo', providerId: 'alibaba', chatId: 'c', attachments: adjunto, currentModel: 'm'
+  });
+  assert.equal(edicion.intent, 'image-edit');
+  assert.equal(edicion.action, 'generate-image', 'en Alibaba una edición sigue yendo a generación de imágenes');
+  assert(edicion.generationPrompt && edicion.plan.operations.includes('style-change'), 'y conserva el plan de edición');
+  console.log(`Image routing prompt tests passed (${rutasComprobadas} rutas)`);
+}

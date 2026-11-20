@@ -1,13 +1,19 @@
 <!DOCTYPE html>
-<html lang="en" class="scroll-smooth">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <meta name="color-scheme" content="dark">
     <title>MIKA5 White Paper — Local-first AI architecture, v0.3.1</title>
     <meta name="description" content="Technical white paper for MIKA5 Community v0.3.1: Electron architecture, local SQLite storage, local RAG engine, optional cloud adapters with explicit consent, security design and AGPL-3.0 distribution.">
     <meta name="robots" content="index, follow">
     <link rel="canonical" href="https://mika5.xyz/whitepaper.html">
-    <link rel="icon" type="image/png" href="icon.png">
+    <link rel="alternate" hreflang="en" href="https://mika5.xyz/whitepaper.html">
+    <link rel="alternate" hreflang="es" href="https://mika5.xyz/es/whitepaper.html">
+    <link rel="alternate" hreflang="x-default" href="https://mika5.xyz/whitepaper.html">
+    <link rel="icon" type="image/png" sizes="64x64" href="icon-64.png">
+    <link rel="apple-touch-icon" href="icon-180.png">
     <meta name="author" content="MIKA5">
     <meta name="theme-color" content="#0B0F14">
 
@@ -17,6 +23,8 @@
     <meta property="og:type" content="article">
     <meta property="og:url" content="https://mika5.xyz/whitepaper.html">
     <meta property="og:image" content="https://mika5.xyz/og-image.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
     <meta property="og:locale" content="en_US">
     <meta property="og:locale:alternate" content="es_ES">
     <meta property="og:site_name" content="MIKA5">
@@ -61,57 +69,109 @@
     }
     </script>
 
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <!-- Fetch the other pages of the site when a link to them is about to be used.
+         Browsers without speculation rules ignore this block. -->
+    <script type="speculationrules">
+    {
+      "prefetch": [{
+        "where": { "href_matches": "/*" },
+        "eagerness": "moderate"
+      }]
+    }
+    </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Space+Grotesk:wght@600;700&family=Lora:ital,wght@0,400;1,400&display=swap" rel="stylesheet">
     <style>
-        body { background: #0B0F14; color: #F9FAFB; font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }
+        body { background: #0B0F14; color: #F9FAFB; font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; overflow-wrap: break-word; }
         h1,h2,h3,h4,.font-heading { font-family: 'Space Grotesk', sans-serif; }
-        .prose { font-family: 'Lora', serif; font-size: 1.05rem; line-height: 1.85; color: #D1D5DB; }
+        .prose { font-family: 'Lora', serif; font-size: 1.05rem; line-height: 1.85; color: #D1D5DB; max-width: 60ch; }
+        .prose code { overflow-wrap: anywhere; }
         .prose p { margin-bottom: 1.4rem; }
         .prose strong { color: #F9FAFB; font-family: 'Inter', sans-serif; font-weight: 600; }
         .prose em { color: #A78BFA; }
         .prose blockquote { border-left: 3px solid #7C3AED; padding-left: 1.5rem; margin: 2rem 0; color: #9CA3AF; font-style: italic; }
-        .section-num { font-family: 'Space Grotesk', sans-serif; font-size: 0.7rem; letter-spacing: 0.15em; color: #7C3AED; text-transform: uppercase; font-weight: 700; }
+        .section-num { font-family: 'Space Grotesk', sans-serif; font-size: 0.7rem; letter-spacing: 0.15em; color: #A78BFA; text-transform: uppercase; font-weight: 700; }
         .glass { background: #111827; border: 1px solid rgba(255,255,255,0.06); }
         .accent { background: linear-gradient(90deg, #7C3AED, #6EE7B7); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
-        .toc-link { color: #6B7280; font-size: 0.82rem; transition: color 0.2s; }
+        /* Forced colours drop the gradient: without this the text stays transparent. */
+        @media (forced-colors: active) { .accent { background: none; -webkit-text-fill-color: currentColor; } }
+        .toc-link { color: #8B95A5; font-size: 0.82rem; transition: color 0.2s; }
         .toc-link:hover { color: #A78BFA; }
-        .terminal { background: #070A0E; border: 1px solid rgba(255,255,255,0.08); font-family: 'Menlo','Monaco','Cascadia Code',monospace; font-size: 0.78rem; line-height: 1.8; overflow-x: auto; }
-        .terminal .p { color: #7C3AED; }
-        .terminal .c { color: #374151; }
+        @media (pointer: coarse) {
+            #lang-toggle { min-block-size: 44px; min-inline-size: 44px; }
+            nav .toc-link { min-block-size: 44px; padding-block: 0.75rem; }
+        }
+        .terminal { background: #070A0E; border: 1px solid rgba(255,255,255,0.08); font-family: 'Menlo','Monaco','Cascadia Code',monospace; font-size: 0.78rem; line-height: 1.8; overflow-x: auto; overflow-wrap: anywhere; }
+        .terminal .p { color: #A78BFA; }
+        .terminal .c { color: #7D8797; }
+        .terminal code { font-family: inherit; }
         hr.section-divider { border: none; border-top: 1px solid rgba(255,255,255,0.06); margin: 3rem 0; }
-        .footnote { font-size: 0.78rem; color: #6B7280; line-height: 1.6; }
+        .footnote { font-size: 0.78rem; color: #8B95A5; line-height: 1.6; }
         .status-tag { font-family: 'Space Grotesk', sans-serif; font-size: 0.6rem; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700; }
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+        /* Scrollbar: standard properties. The thumb keeps at least 3:1 contrast
+           against the page background so it can be seen. */
+        :root {
+            color-scheme: dark;
+            --scrollbar-thumb: rgba(255,255,255,0.38);
+            --scrollbar-track: transparent;
+            scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+        }
+        /* scrollbar-width stays at its default: a thin thumb is too small a
+           target for some people. Engines without scrollbar-color get the
+           same colours through the legacy selectors. */
+        @supports not (scrollbar-color: auto) {
+            ::-webkit-scrollbar { width: 12px; height: 12px; }
+            ::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+            ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 6px; }
+        }
+
+        /* Smooth in-page scrolling only for people who have not asked for less motion. */
+        @media (prefers-reduced-motion: no-preference) {
+            html { scroll-behavior: smooth; }
+        }
+        /* Anchor jumps and keyboard focus stop below the sticky header. */
+        html { scroll-padding-top: 5rem; }
+        /* Shown only while it has keyboard focus. */
+        .visually-hidden:where(:not(:focus-within, :active)) {
+            position: absolute !important; clip-path: inset(50%) !important; overflow: hidden !important;
+            width: 1px !important; height: 1px !important; margin: -1px !important; padding: 0 !important;
+            border: 0 !important; white-space: nowrap !important;
+        }
+        .skip-link { position: fixed; top: 8px; left: 8px; z-index: 60; padding: 0.75rem 1rem; border-radius: 0.5rem; background: #111827; color: #F9FAFB; }
+        /* Headings break into lines of similar length; paragraphs avoid orphans. */
+        h1, h2, h3 { text-wrap: balance; }
+        p, li { text-wrap: pretty; }
     </style>
 </head>
 <body>
+<a href="#main-content" class="skip-link visually-hidden" data-i18n="whitepaper.nav.skip">Skip to main content</a>
 
 <!-- NAV -->
 <header class="sticky top-0 z-50 border-b border-white/5 bg-[#0B0F14]/90 backdrop-blur-md">
-    <div class="max-w-[860px] mx-auto px-6 h-16 flex items-center justify-between">
+    <div class="max-w-[860px] mx-auto px-6 min-h-[4rem] flex items-center justify-between">
         <a href="/" class="flex items-center gap-2 text-sm font-medium text-[#9CA3AF] hover:text-white transition-colors">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+            <svg aria-hidden="true" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
             <span data-i18n="whitepaper.nav.back">Back to MIKA5</span>
         </a>
         <div class="font-heading font-bold text-sm flex items-center gap-2">
-            <img src="icon.png" alt="MIKA5 logo" class="w-5 h-5 rounded" data-i18n-attr="alt:whitepaper.nav.logoAlt">
+            <img src="icon-64.png" width="20" height="20" alt="MIKA5 logo" class="w-5 h-5 rounded" data-i18n-attr="alt:whitepaper.nav.logoAlt">
             <span data-i18n="whitepaper.nav.title">White Paper</span>
         </div>
         <div class="flex items-center gap-3">
             <a href="models.html" class="text-sm text-[#9CA3AF] hover:text-white transition-colors hidden md:block" data-i18n="whitepaper.nav.modelGuide">Model Guide →</a>
-            <button id="lang-toggle" onclick="toggleLang()" class="text-xs font-bold px-3 py-1 rounded-full border border-white/10 text-[#9CA3AF] hover:text-white hover:border-white/30 transition-all" aria-label="Switch language to Spanish" data-i18n-attr="aria-label:whitepaper.nav.langLabel">EN</button>
+            <button id="lang-toggle" type="button" class="text-xs font-bold px-3 py-1 rounded-full border border-white/10 text-[#9CA3AF] hover:text-white hover:border-white/30 transition-all" aria-label="ES: switch language to Spanish" data-i18n-attr="aria-label:whitepaper.nav.langLabel">ES</button>
         </div>
     </div>
 </header>
 
-<main class="max-w-[860px] mx-auto px-6 pb-32">
+<main id="main-content" class="max-w-[860px] mx-auto px-6 pb-32">
 
     <!-- COVER -->
     <div class="py-20 space-y-8 border-b border-white/5">
         <div class="space-y-2">
-            <p class="text-xs uppercase tracking-widest text-[#7C3AED] font-bold font-heading" data-i18n="whitepaper.hero.label">Technical White Paper — v0.3.1</p>
+            <p class="text-xs uppercase tracking-widest text-[#A78BFA] font-bold font-heading" data-i18n="whitepaper.hero.label">Technical White Paper — v0.3.1</p>
             <h1 class="text-4xl md:text-5xl font-bold leading-tight">
                 <span data-i18n="whitepaper.hero.titleTop">MIKA5: local-first AI</span><br>
                 <span class="accent" data-i18n="whitepaper.hero.titleBottom">for the individual</span>
@@ -120,7 +180,7 @@
         <p class="text-lg text-[#9CA3AF] leading-relaxed max-w-xl font-['Lora',serif] italic" data-i18n="whitepaper.hero.subtitle">
             A technical document on how MIKA5 Community v0.3.1 is built: what runs on your machine, what only leaves it when you authorize it, and what does not exist yet.
         </p>
-        <div class="flex flex-wrap gap-6 text-sm text-[#6B7280]">
+        <div class="flex flex-wrap gap-6 text-sm text-[#8B95A5]">
             <span data-i18n="whitepaper.hero.version">Version 0.3.1 · November 2026</span>
             <span data-i18n="whitepaper.hero.license">License: AGPL-3.0</span>
             <span data-i18n="whitepaper.hero.platform">Platform: Windows · macOS · Linux</span>
@@ -128,12 +188,12 @@
 
         <!-- Abstract box -->
         <div class="glass rounded-2xl p-8">
-            <p class="text-[10px] uppercase tracking-widest text-[#6B7280] mb-4 font-heading font-bold" data-i18n="whitepaper.abstract.label">Abstract</p>
-            <p class="text-[#9CA3AF] leading-relaxed text-sm font-['Lora',serif]" data-i18n="whitepaper.abstract.body">
+            <h2 class="text-[0.625rem] uppercase tracking-widest text-[#8B95A5] mb-4 font-heading font-bold" data-i18n="whitepaper.abstract.label">Abstract</h2>
+            <p class="text-[#9CA3AF] leading-relaxed text-sm font-['Lora',serif] max-w-[60ch]" data-i18n="whitepaper.abstract.body">
                 Language models have become widely available, but access to them is largely mediated by proprietary cloud platforms that impose subscription costs, data disclosure and usage policies. MIKA5 proposes a different arrangement: an Electron desktop application that runs open-weight models on local hardware through Ollama, keeps its memory in a local SQLite database, grounds answers with a local retrieval-augmented generation engine, and treats cloud providers as an optional path that is only taken after the user selects one and authorizes what will be sent. This document describes the architecture of MIKA5 Community v0.3.1 as it is implemented, states explicitly what belongs to a future edition, and cites the source file behind each technical claim so that any reader can verify it against the published tag.
             </p>
         </div>
-        <p class="footnote" data-i18n="whitepaper.abstract.scope">
+        <p class="footnote max-w-[60ch]" data-i18n="whitepaper.abstract.scope">
             Scope of this document: everything described in sections 1 to 10 is implemented in Community v0.3.1 unless the text says otherwise. Section 11 separates what exists from what is planned. Claims about behaviour reference the source file that implements them, at tag v0.3.1.
         </p>
     </div>
@@ -141,23 +201,25 @@
     <div class="flex flex-col lg:flex-row gap-12 pt-12">
 
         <!-- TOC -->
-        <aside class="lg:w-48 shrink-0">
+        <nav class="lg:w-48 shrink-0" aria-labelledby="toc-title">
             <div class="sticky top-24 space-y-1">
-                <p class="text-[10px] uppercase tracking-widest text-[#4B5563] mb-3 font-heading" data-i18n="whitepaper.toc.label">Contents</p>
-                <a href="#s1" class="toc-link block py-1" data-i18n="whitepaper.toc.s1">1. The problem</a>
-                <a href="#s2" class="toc-link block py-1" data-i18n="whitepaper.toc.s2">2. Open models as the base</a>
-                <a href="#s3" class="toc-link block py-1" data-i18n="whitepaper.toc.s3">3. Architecture</a>
-                <a href="#s4" class="toc-link block py-1" data-i18n="whitepaper.toc.s4">4. Privacy model</a>
-                <a href="#s5" class="toc-link block py-1" data-i18n="whitepaper.toc.s5">5. RAG engine</a>
-                <a href="#s6" class="toc-link block py-1" data-i18n="whitepaper.toc.s6">6. Providers</a>
-                <a href="#s7" class="toc-link block py-1" data-i18n="whitepaper.toc.s7">7. Data model</a>
-                <a href="#s8" class="toc-link block py-1" data-i18n="whitepaper.toc.s8">8. Security design</a>
-                <a href="#s9" class="toc-link block py-1" data-i18n="whitepaper.toc.s9">9. llama.cpp</a>
-                <a href="#s10" class="toc-link block py-1" data-i18n="whitepaper.toc.s10">10. Distribution</a>
-                <a href="#s11" class="toc-link block py-1" data-i18n="whitepaper.toc.s11">11. Editions and roadmap</a>
-                <a href="#s12" class="toc-link block py-1" data-i18n="whitepaper.toc.s12">12. Conclusion</a>
+                <p id="toc-title" class="text-[0.625rem] uppercase tracking-widest text-[#7D8797] mb-3 font-heading" data-i18n="whitepaper.toc.label">Contents</p>
+                <ul class="space-y-1">
+                <li><a href="#s1" class="toc-link block py-1" data-i18n="whitepaper.toc.s1">1. The problem</a></li>
+                <li><a href="#s2" class="toc-link block py-1" data-i18n="whitepaper.toc.s2">2. Open models as the base</a></li>
+                <li><a href="#s3" class="toc-link block py-1" data-i18n="whitepaper.toc.s3">3. Architecture</a></li>
+                <li><a href="#s4" class="toc-link block py-1" data-i18n="whitepaper.toc.s4">4. Privacy model</a></li>
+                <li><a href="#s5" class="toc-link block py-1" data-i18n="whitepaper.toc.s5">5. RAG engine</a></li>
+                <li><a href="#s6" class="toc-link block py-1" data-i18n="whitepaper.toc.s6">6. Providers</a></li>
+                <li><a href="#s7" class="toc-link block py-1" data-i18n="whitepaper.toc.s7">7. Data model</a></li>
+                <li><a href="#s8" class="toc-link block py-1" data-i18n="whitepaper.toc.s8">8. Security design</a></li>
+                <li><a href="#s9" class="toc-link block py-1" data-i18n="whitepaper.toc.s9">9. llama.cpp</a></li>
+                <li><a href="#s10" class="toc-link block py-1" data-i18n="whitepaper.toc.s10">10. Distribution</a></li>
+                <li><a href="#s11" class="toc-link block py-1" data-i18n="whitepaper.toc.s11">11. Editions and roadmap</a></li>
+                <li><a href="#s12" class="toc-link block py-1" data-i18n="whitepaper.toc.s12">12. Conclusion</a></li>
+                </ul>
             </div>
-        </aside>
+        </nav>
 
         <!-- BODY -->
         <article class="flex-1 min-w-0 space-y-16">
@@ -192,7 +254,7 @@
                     <h2 class="text-2xl font-heading" data-i18n="whitepaper.foundation.title">Open-weight models as the base layer</h2>
                 </div>
                 <div class="prose">
-                    <p data-i18n-html="whitepaper.foundation.p1">MIKA5 is built on the premise that <em>open-weight language models are now capable enough for a large share of everyday work</em>. This document publishes no benchmark scores and makes no ranking claims: reported numbers move with quantization, prompt format, sampling parameters and evaluation harness, and a figure that cannot be traced to the exact build you are running does not support a decision. The <a href="models.html" class="text-[#A78BFA] hover:text-white">Model Guide</a> lists the models MIKA5 can run today with their verified sizes and hardware requirements; each model card documents its own evaluations.</p>
+                    <p data-i18n-html="whitepaper.foundation.p1">MIKA5 is built on the premise that <em>open-weight language models are now capable enough for a large share of everyday work</em>. This document publishes no benchmark scores and makes no ranking claims: reported numbers move with quantization, prompt format, sampling parameters and evaluation harness, and a figure that cannot be traced to the exact build you are running does not support a decision. The <a href="models.html" class="text-[#A78BFA] hover:text-white underline">Model Guide</a> lists the models MIKA5 can run today with their verified sizes and hardware requirements; each model card documents its own evaluations.</p>
 
                     <p data-i18n="whitepaper.foundation.p2">The argument for open weights does not rest on comparative scores. Open models can be inspected, because the weights are published and the architecture is documented. They can be fine-tuned on domain data without asking permission. They can be run at the quantization level the hardware allows, trading quality for speed. They can be used in environments with no outbound connectivity at all. And they cannot be repriced, restricted or withdrawn by a decision the user has no part in.</p>
 
@@ -221,31 +283,31 @@
 
                     <p data-i18n-html="whitepaper.architecture.p4">The renderer also carries a Content Security Policy declared in <code>src/renderer/index.html</code>. Its <code>connect-src 'none'</code> directive is the operative part: the interface cannot open network connections of its own. Every request to a model, local or remote, is made by the main process after crossing the IPC boundary, where the input is validated. If an injection ever executed inside the renderer, it would find no network path and no file system from there.</p>
 
-                    <div class="glass rounded-xl p-6 my-2 not-prose">
-                        <p class="text-[10px] uppercase tracking-widest text-[#6B7280] mb-4 font-heading" data-i18n="whitepaper.architecture.diagramLabel">Architecture diagram</p>
-                        <div class="terminal rounded-lg p-5 text-[11px] space-y-3" data-i18n-html="whitepaper.architecture.diagram">
+                    <figure class="glass rounded-xl p-6 my-2 not-prose">
+                        <figcaption class="text-[0.625rem] uppercase tracking-widest text-[#8B95A5] mb-[1.4rem] font-heading" data-i18n="whitepaper.architecture.diagramLabel">Architecture diagram</figcaption>
+                        <div class="terminal rounded-lg p-5 text-[0.6875rem] space-y-3" data-i18n-html="whitepaper.architecture.diagram">
                             <div>
-                                <p class="text-[#4B5563] mb-2"># User interface layer (renderer — context isolation, no Node, CSP connect-src none)</p>
+                                <p class="text-[#7D8797] mb-2"># User interface layer (renderer — context isolation, no Node, CSP connect-src none)</p>
                                 <p>  index.html → app.js → window.mika5.* (contextBridge)</p>
                             </div>
                             <div class="border-t border-white/5 pt-3">
-                                <p class="text-[#4B5563] mb-2"># IPC boundary (preload + ipcRenderer, validated handlers)</p>
-                                <p class="text-[#7C3AED]">  ↕ db:*, ai:*, rag:*, appState:*, app:*</p>
+                                <p class="text-[#7D8797] mb-2"># IPC boundary (preload + ipcRenderer, validated handlers)</p>
+                                <p class="text-[#A78BFA]">  ↕ db:*, ai:*, rag:*, appState:*, app:*</p>
                             </div>
                             <div class="border-t border-white/5 pt-3">
-                                <p class="text-[#4B5563] mb-2"># Core services (main process — Node.js)</p>
+                                <p class="text-[#7D8797] mb-2"># Core services (main process — Node.js)</p>
                                 <p>  main.js → db.js (SQLite / better-sqlite3, WAL)</p>
                                 <p>          → ai-providers.js (Ollama + cloud adapters)</p>
                                 <p>          → rag.js (chunking + embeddings + cosine search)</p>
                                 <p>          → network-security.js (guarded image downloads)</p>
                             </div>
                             <div class="border-t border-white/5 pt-3">
-                                <p class="text-[#4B5563] mb-2"># Local runtime</p>
+                                <p class="text-[#7D8797] mb-2"># Local runtime</p>
                                 <p>  Ollama server → GGUF weights (GPU / CPU) → 127.0.0.1:11434</p>
                                 <p>  SQLite file   → mika5.db (userData directory)</p>
                             </div>
                         </div>
-                    </div>
+                    </figure>
 
                     <p data-i18n-html="whitepaper.architecture.p5">Persistence uses <strong>better-sqlite3</strong>, a synchronous binding. Synchronous access removes a class of race conditions that arises when several asynchronous writes interleave, and SQLite itself provides transactions and a single portable file. The alternatives were rejected for concrete reasons: browser storage offers no durable file the user can copy, and a networked database would require running a server and would break the property that the application works with no network at all.</p>
 
@@ -291,28 +353,30 @@
 
                     <p data-i18n-html="whitepaper.rag.p2">The constants below are the ones in <code>src/main/rag.js</code> at v0.3.1, not illustrative values.</p>
 
-                    <p data-i18n-html="whitepaper.rag.p3"><strong>1. Chunking.</strong> Document text is split into chunks of 4,200 characters with a 700-character overlap (<code>CHUNK_CHARS</code>, <code>OVERLAP_CHARS</code>). The overlap keeps an idea that straddles a boundary present in both neighbouring chunks, so a sentence that begins near the end of one also appears near the start of the next.</p>
+                    <ol role="list">
+                    <li><p data-i18n-html="whitepaper.rag.p3"><strong>1. Chunking.</strong> Document text is split into chunks of 4,200 characters with a 700-character overlap (<code>CHUNK_CHARS</code>, <code>OVERLAP_CHARS</code>). The overlap keeps an idea that straddles a boundary present in both neighbouring chunks, so a sentence that begins near the end of one also appears near the start of the next.</p></li>
 
-                    <p data-i18n-html="whitepaper.rag.p4"><strong>2. Embedding.</strong> Each chunk goes to the Ollama embedding endpoint using <code>nomic-embed-text</code> by default, or another installed embedding model. The result is a floating-point vector whose dimensionality is a property of the chosen model, not of MIKA5: change the model and the vector width changes with it.</p>
+                    <li><p data-i18n-html="whitepaper.rag.p4"><strong>2. Embedding.</strong> Each chunk goes to the Ollama embedding endpoint using <code>nomic-embed-text</code> by default, or another installed embedding model. The result is a floating-point vector whose dimensionality is a property of the chosen model, not of MIKA5: change the model and the vector width changes with it.</p></li>
 
-                    <p data-i18n-html="whitepaper.rag.p5"><strong>3. Storage.</strong> The chunk text and its vector are written to <code>knowledge_chunks</code> as a serialised Float32 blob. A foreign key links each chunk to its <code>knowledge_items</code> row, and an optional <code>chat_id</code> column scopes it to a single conversation.</p>
+                    <li><p data-i18n-html="whitepaper.rag.p5"><strong>3. Storage.</strong> The chunk text and its vector are written to <code>knowledge_chunks</code> as a serialised Float32 blob. A foreign key links each chunk to its <code>knowledge_items</code> row, and an optional <code>chat_id</code> column scopes it to a single conversation.</p></li>
 
-                    <p data-i18n-html="whitepaper.rag.p6"><strong>4. Query.</strong> When a message is sent, the query text is embedded with the same model and compared against the stored vectors by cosine similarity. The default is the three closest chunks (<code>TOP_K_DEFAULT = 3</code>), and the caller may ask for a different number, which the engine clamps to between 1 and 10. The selected chunks are injected into the conversation as a system message before the model is called.</p>
+                    <li><p data-i18n-html="whitepaper.rag.p6"><strong>4. Query.</strong> When a message is sent, the query text is embedded with the same model and compared against the stored vectors by cosine similarity. The default is the three closest chunks (<code>TOP_K_DEFAULT = 3</code>), and the caller may ask for a different number, which the engine clamps to between 1 and 10. The selected chunks are injected into the conversation as a system message before the model is called.</p></li>
+                    </ol>
 
-                    <div class="glass rounded-xl p-6 not-prose my-2">
-                        <p class="text-[10px] uppercase tracking-widest text-[#6B7280] mb-3 font-heading" data-i18n="whitepaper.rag.diagramLabel">RAG pipeline</p>
-                        <div class="terminal rounded-lg p-5 text-[11px] space-y-1" data-i18n-html="whitepaper.rag.diagram">
+                    <figure class="glass rounded-xl p-6 not-prose my-2">
+                        <figcaption class="text-[0.625rem] uppercase tracking-widest text-[#8B95A5] mb-[1.4rem] font-heading" data-i18n="whitepaper.rag.diagramLabel">RAG pipeline</figcaption>
+                        <div class="terminal rounded-lg p-5 text-[0.6875rem] space-y-1" data-i18n-html="whitepaper.rag.diagram">
                             <p># Indexing, in the background</p>
-                            <p class="text-[#7C3AED]">  chunkText(doc, 4200 chars, 700 overlap)</p>
-                            <p class="text-[#7C3AED]">  → ollama.embed(chunk) → Float32[model width]</p>
-                            <p class="text-[#7C3AED]">  → SQLite: knowledge_chunks (text, embedding, chat_id)</p>
+                            <p class="text-[#A78BFA]">  chunkText(doc, 4200 chars, 700 overlap)</p>
+                            <p class="text-[#A78BFA]">  → ollama.embed(chunk) → Float32[model width]</p>
+                            <p class="text-[#A78BFA]">  → SQLite: knowledge_chunks (text, embedding, chat_id)</p>
                             <p class="mt-2"># Query, on every message</p>
                             <p class="text-[#34D399]">  ollama.embed(query) → Float32[model width]</p>
                             <p class="text-[#34D399]">  → cosineSimilarity(query, chunks in scope) → top 3</p>
                             <p class="text-[#34D399]">  → system message with the retrieved fragments</p>
                             <p class="text-[#34D399]">  → the model answers grounded in your documents</p>
                         </div>
-                    </div>
+                    </figure>
 
                     <p data-i18n-html="whitepaper.rag.p7">Vectors are cached in memory per scope with a five-minute time to live (<code>CACHE_TTL_MS</code>), so repeated questions inside a session do not reload embeddings from SQLite. An expired entry is refetched, which is also how a newly indexed document becomes visible to retrieval without restarting the application.</p>
 
@@ -417,13 +481,13 @@
                     <p data-i18n-html="whitepaper.llamacpp.p2">The llama.cpp server exposes an OpenAI-compatible HTTP API on <code>http://127.0.0.1:8080/v1</code>, so the adapter reuses the same request shape as the OpenAI provider without model-specific code. The adapter is implemented in v0.3.1 and is selected as <code>llama.cpp (Local)</code> in the provider list; it probes for a running server at startup.</p>
 
                     <div class="glass rounded-xl p-1 not-prose my-2">
-                        <div class="terminal rounded-lg p-5 text-[11px] space-y-2" data-i18n-html="whitepaper.llamacpp.commands">
-                            <p class="text-[#4B5563]"># Build llama.cpp</p>
-                            <p><span class="p">$</span> git clone https://github.com/ggerganov/llama.cpp &amp;&amp; cd llama.cpp</p>
-                            <p><span class="p">$</span> make <span class="c"># or cmake, for GPU support</span></p>
-                            <p class="text-[#4B5563] mt-2"># Obtain a GGUF file yourself</p>
-                            <p><span class="p">$</span> ./llama-server -m model.gguf --port 8080 -ngl 99</p>
-                            <p class="text-[#4B5563] mt-2"># Then pick llama.cpp (Local) in MIKA5</p>
+                        <div class="terminal rounded-lg p-5 text-[0.6875rem] space-y-2" data-i18n-html="whitepaper.llamacpp.commands">
+                            <p class="text-[#7D8797]"># Build llama.cpp</p>
+                            <p><span class="p">$</span> <code>git clone https://github.com/ggerganov/llama.cpp &amp;&amp; cd llama.cpp</code></p>
+                            <p><span class="p">$</span> <code>make</code> <span class="c"># or cmake, for GPU support</span></p>
+                            <p class="text-[#7D8797] mt-2"># Obtain a GGUF file yourself</p>
+                            <p><span class="p">$</span> <code>./llama-server -m model.gguf --port 8080 -ngl 99</code></p>
+                            <p class="text-[#7D8797] mt-2"># Then pick llama.cpp (Local) in MIKA5</p>
                             <p class="text-[#34D399]">MIKA5 detects the running server and lists its models</p>
                         </div>
                     </div>
@@ -468,21 +532,21 @@
                 <div class="glass rounded-2xl p-6 space-y-5 not-prose">
                     <div class="space-y-2">
                         <div class="flex items-center gap-2 flex-wrap">
-                            <span class="font-heading font-bold text-white" data-i18n="whitepaper.editions.communityName">MIKA5 Community</span>
+                            <h3 class="font-heading font-bold text-white" data-i18n="whitepaper.editions.communityName">MIKA5 Community</h3>
                             <span class="status-tag text-[#6EE7B7]" data-i18n="whitepaper.editions.statusAvailable">Available — v0.3.1</span>
                         </div>
                         <p class="text-sm text-[#9CA3AF] leading-relaxed" data-i18n="whitepaper.editions.communityBody">The desktop application described in this document, under AGPL-3.0. Local execution through Ollama or llama.cpp, projects and chats, local knowledge base and RAG, optional cloud adapters configured with your own key, explicit and revocable consent, export, and the security design of section 8. This is the only edition that exists.</p>
                     </div>
                     <div class="space-y-2 border-t border-white/5 pt-5">
                         <div class="flex items-center gap-2 flex-wrap">
-                            <span class="font-heading font-bold text-white" data-i18n="whitepaper.editions.proName">MIKA5 Pro</span>
+                            <h3 class="font-heading font-bold text-white" data-i18n="whitepaper.editions.proName">MIKA5 Pro</h3>
                             <span class="status-tag text-[#FBBF24]" data-i18n="whitepaper.editions.statusPlanned">Planned — in development</span>
                         </div>
                         <p class="text-sm text-[#9CA3AF] leading-relaxed" data-i18n="whitepaper.editions.proBody">A future edition of separate components aimed at advanced use. It does not exist in v0.3.1, no part of it ships in this release, and this document names no price and no date. Any capability attributed to Pro elsewhere should be read as intent, not as a feature you can use.</p>
                     </div>
                     <div class="space-y-2 border-t border-white/5 pt-5">
                         <div class="flex items-center gap-2 flex-wrap">
-                            <span class="font-heading font-bold text-white" data-i18n="whitepaper.editions.cloudName">MIKA5 Cloud</span>
+                            <h3 class="font-heading font-bold text-white" data-i18n="whitepaper.editions.cloudName">MIKA5 Cloud</h3>
                             <span class="status-tag text-[#FBBF24]" data-i18n="whitepaper.editions.statusPlanned">Planned — in development</span>
                         </div>
                         <p class="text-sm text-[#9CA3AF] leading-relaxed" data-i18n="whitepaper.editions.cloudBody">A future managed service. Synchronisation between machines, accounts, backups, remote agents and continuous execution are concepts belonging to that edition. None of them exists in Community v0.3.1: there is no account system, no synchronisation and no server operated by MIKA5 that your installation talks to.</p>
@@ -524,15 +588,15 @@
 
                     <p data-i18n-html="whitepaper.roadmap.plugins"><strong>Plugin system.</strong> <span class="status-tag text-[#FBBF24]">Planned</span> A sandboxed extension surface for third-party tools, providers and panels.</p>
 
-                    <p data-i18n-html="whitepaper.roadmap.sync"><strong>Synchronisation between machines.</strong> <span class="status-tag text-[#6B7280]">Not included in Community</span> Encrypted replication of projects and conversations belongs to the Cloud edition. It does not exist, and if it is ever built it will be opt-in and disclosed, never on by default.</p>
+                    <p data-i18n-html="whitepaper.roadmap.sync"><strong>Synchronisation between machines.</strong> <span class="status-tag text-[#8B95A5]">Not included in Community</span> Encrypted replication of projects and conversations belongs to the Cloud edition. It does not exist, and if it is ever built it will be opt-in and disclosed, never on by default.</p>
 
-                    <p data-i18n-html="whitepaper.roadmap.mobile"><strong>Mobile client.</strong> <span class="status-tag text-[#6B7280]">Not included in Community</span> There is no mobile application. MIKA5 v0.3.1 is a desktop application for Windows, macOS and Linux, and nothing else is published.</p>
+                    <p data-i18n-html="whitepaper.roadmap.mobile"><strong>Mobile client.</strong> <span class="status-tag text-[#8B95A5]">Not included in Community</span> There is no mobile application. MIKA5 v0.3.1 is a desktop application for Windows, macOS and Linux, and nothing else is published.</p>
 
-                    <p data-i18n-html="whitepaper.roadmap.agents"><strong>Remote or continuous agents.</strong> <span class="status-tag text-[#6B7280]">Not included in Community</span> Nothing in v0.3.1 runs without you: there are no background agents and no scheduled execution. Such capability would belong to the Cloud edition.</p>
+                    <p data-i18n-html="whitepaper.roadmap.agents"><strong>Remote or continuous agents.</strong> <span class="status-tag text-[#8B95A5]">Not included in Community</span> Nothing in v0.3.1 runs without you: there are no background agents and no scheduled execution. Such capability would belong to the Cloud edition.</p>
 
-                    <p data-i18n-html="whitepaper.roadmap.teams"><strong>Team collaboration.</strong> <span class="status-tag text-[#6B7280]">Not included in Community</span> There are no accounts, no shared workspaces and no permissions. The database is single-user by design.</p>
+                    <p data-i18n-html="whitepaper.roadmap.teams"><strong>Team collaboration.</strong> <span class="status-tag text-[#8B95A5]">Not included in Community</span> There are no accounts, no shared workspaces and no permissions. The database is single-user by design.</p>
 
-                    <p data-i18n-html="whitepaper.roadmap.vllm"><strong>Server-side runtimes such as vLLM.</strong> <span class="status-tag text-[#6B7280]">Not included in Community</span> vLLM is not part of Community v0.3.1 and there is no adapter for it. It appears here only as possible infrastructure for a future Pro or Cloud edition, which is a different product from the desktop application this document describes.</p>
+                    <p data-i18n-html="whitepaper.roadmap.vllm"><strong>Server-side runtimes such as vLLM.</strong> <span class="status-tag text-[#8B95A5]">Not included in Community</span> vLLM is not part of Community v0.3.1 and there is no adapter for it. It appears here only as possible infrastructure for a future Pro or Cloud edition, which is a different product from the desktop application this document describes.</p>
                 </div>
             </section>
 
@@ -558,19 +622,19 @@
 
                 <!-- Citation block -->
                 <div class="glass rounded-2xl p-6 space-y-2">
-                    <p class="text-[10px] uppercase tracking-widest text-[#4B5563] font-heading" data-i18n="whitepaper.refs.label">Technical references</p>
-                    <div class="space-y-1.5 footnote" data-i18n-html="whitepaper.refs.body">
-                        <p>Ollama — local model runtime · <span class="text-[#7C3AED]">ollama.com</span></p>
-                        <p>llama.cpp — GGUF inference engine in C++ · <span class="text-[#7C3AED]">github.com/ggerganov/llama.cpp</span></p>
-                        <p>Electron — desktop application framework · <span class="text-[#7C3AED]">electronjs.org</span></p>
-                        <p>Electron safeStorage — wrapper over DPAPI and Keychain · <span class="text-[#7C3AED]">electronjs.org/docs/api/safe-storage</span></p>
-                        <p>SQLite — embedded relational database · <span class="text-[#7C3AED]">sqlite.org</span></p>
-                        <p>DOMPurify — HTML sanitiser · <span class="text-[#7C3AED]">github.com/cure53/DOMPurify</span></p>
-                        <p>nomic-embed-text — default embedding model · <span class="text-[#7C3AED]">ollama.com/library/nomic-embed-text</span></p>
-                        <p>AES-256-GCM — NIST FIPS 197 and SP 800-38D, authenticated encryption</p>
-                        <p>AGPL-3.0 — licence of MIKA5 Community · <span class="text-[#7C3AED]">gnu.org/licenses/agpl-3.0</span></p>
-                        <p>MIKA5 v0.3.1 — source and releases · <span class="text-[#7C3AED]">github.com/mika5app/mika5-releases</span></p>
-                    </div>
+                    <h3 class="text-[0.625rem] uppercase tracking-widest text-[#7D8797] font-heading" data-i18n="whitepaper.refs.label">Technical references</h3>
+                    <ul role="list" class="space-y-1.5 footnote" data-i18n-html="whitepaper.refs.body">
+                        <li>Ollama — local model runtime · <span class="text-[#A78BFA]">ollama.com</span></li>
+                        <li>llama.cpp — GGUF inference engine in C++ · <span class="text-[#A78BFA]">github.com/ggerganov/llama.cpp</span></li>
+                        <li>Electron — desktop application framework · <span class="text-[#A78BFA]">electronjs.org</span></li>
+                        <li>Electron safeStorage — wrapper over DPAPI and Keychain · <span class="text-[#A78BFA]">electronjs.org/docs/api/safe-storage</span></li>
+                        <li>SQLite — embedded relational database · <span class="text-[#A78BFA]">sqlite.org</span></li>
+                        <li>DOMPurify — HTML sanitiser · <span class="text-[#A78BFA]">github.com/cure53/DOMPurify</span></li>
+                        <li>nomic-embed-text — default embedding model · <span class="text-[#A78BFA]">ollama.com/library/nomic-embed-text</span></li>
+                        <li>AES-256-GCM — NIST FIPS 197 and SP 800-38D, authenticated encryption</li>
+                        <li>AGPL-3.0 — licence of MIKA5 Community · <span class="text-[#A78BFA]">gnu.org/licenses/agpl-3.0</span></li>
+                        <li>MIKA5 v0.3.1 — source and releases · <span class="text-[#A78BFA]">github.com/mika5app/mika5-releases</span></li>
+                    </ul>
                 </div>
             </section>
 
@@ -578,10 +642,10 @@
     </div>
 </main>
 
-<footer class="border-t border-white/5 py-10 text-[#6B7280] text-sm">
+<footer class="border-t border-white/5 py-10 text-[#8B95A5] text-sm">
     <div class="max-w-[860px] mx-auto px-6 flex flex-col md:flex-row justify-between gap-4 items-center">
         <div class="flex items-center gap-2 font-heading text-white font-bold">
-            <img src="icon.png" alt="MIKA5 logo" class="w-5 h-5 rounded" data-i18n-attr="alt:whitepaper.nav.logoAlt">
+            <img src="icon-64.png" width="20" height="20" loading="lazy" alt="MIKA5 logo" class="w-5 h-5 rounded" data-i18n-attr="alt:whitepaper.nav.logoAlt">
             <span data-i18n="whitepaper.footer.brand">MIKA5 White Paper v0.3.1</span>
         </div>
         <div class="flex gap-6">
@@ -589,7 +653,7 @@
             <a href="models.html" class="hover:text-white transition-colors" data-i18n="whitepaper.footer.modelGuide">Model Guide</a>
             <a href="https://github.com/mika5app/mika5-releases" target="_blank" rel="noopener" class="hover:text-white transition-colors" data-i18n="whitepaper.footer.github">GitHub</a>
         </div>
-        <p class="text-xs text-[#4B5563]" data-i18n="whitepaper.footer.tagline">v0.3.1 · 2026 · AGPL-3.0</p>
+        <p class="text-xs text-[#7D8797]" data-i18n="whitepaper.footer.tagline">v0.3.1 · 2026 · AGPL-3.0</p>
     </div>
 </footer>
 
@@ -611,7 +675,8 @@ const STRINGS = {
     'whitepaper.nav.title': 'White Paper',
     'whitepaper.nav.modelGuide': 'Model Guide →',
     'whitepaper.nav.logoAlt': 'MIKA5 logo',
-    'whitepaper.nav.langLabel': 'Switch language to Spanish',
+    'whitepaper.nav.skip': 'Skip to main content',
+    'whitepaper.nav.langLabel': 'ES: switch language to Spanish',
     // --- whitepaper.hero.* ---
     'whitepaper.hero.label': 'Technical White Paper — v0.3.1',
     'whitepaper.hero.titleTop': 'MIKA5: local-first AI',
@@ -650,7 +715,7 @@ const STRINGS = {
     // --- whitepaper.foundation.* (seccion 2) ---
     'whitepaper.foundation.num': 'Section 2',
     'whitepaper.foundation.title': 'Open-weight models as the base layer',
-    'whitepaper.foundation.p1': 'MIKA5 is built on the premise that <em>open-weight language models are now capable enough for a large share of everyday work</em>. This document publishes no benchmark scores and makes no ranking claims: reported numbers move with quantization, prompt format, sampling parameters and evaluation harness, and a figure that cannot be traced to the exact build you are running does not support a decision. The <a href="models.html" class="text-[#A78BFA] hover:text-white">Model Guide</a> lists the models MIKA5 can run today with their verified sizes and hardware requirements; each model card documents its own evaluations.',
+    'whitepaper.foundation.p1': 'MIKA5 is built on the premise that <em>open-weight language models are now capable enough for a large share of everyday work</em>. This document publishes no benchmark scores and makes no ranking claims: reported numbers move with quantization, prompt format, sampling parameters and evaluation harness, and a figure that cannot be traced to the exact build you are running does not support a decision. The <a href="models.html" class="text-[#A78BFA] hover:text-white underline">Model Guide</a> lists the models MIKA5 can run today with their verified sizes and hardware requirements; each model card documents its own evaluations.',
     'whitepaper.foundation.p2': 'The argument for open weights does not rest on comparative scores. Open models can be inspected, because the weights are published and the architecture is documented. They can be fine-tuned on domain data without asking permission. They can be run at the quantization level the hardware allows, trading quality for speed. They can be used in environments with no outbound connectivity at all. And they cannot be repriced, restricted or withdrawn by a decision the user has no part in.',
     'whitepaper.foundation.p3': 'The ecosystem is also plural, which matters more than any single model. Meta publishes Llama under a licence permitting commercial use. Alibaba publishes Qwen with broad multilingual coverage, Spanish included. DeepSeek publishes reasoning models trained with reinforcement learning. Mistral brings European research and European language coverage. BigCode publishes StarCoder trained on a corpus with an opt-out policy for repository owners. No single organisation controls that set.',
     'whitepaper.foundation.quote': 'MIKA5 treats open-weight models not as a fallback for when cloud access fails, but as the default path between the user and the machine.',
@@ -663,7 +728,7 @@ const STRINGS = {
     'whitepaper.architecture.p3': 'The offscreen window used for PDF export is a separate case: it is created with <code>sandbox: true</code> (<code>src/main/print-export.js</code>). It renders a fixed local template and needs no privileged access, so it runs under the stricter setting.',
     'whitepaper.architecture.p4': 'The renderer also carries a Content Security Policy declared in <code>src/renderer/index.html</code>. Its <code>connect-src \'none\'</code> directive is the operative part: the interface cannot open network connections of its own. Every request to a model, local or remote, is made by the main process after crossing the IPC boundary, where the input is validated. If an injection ever executed inside the renderer, it would find no network path and no file system from there.',
     'whitepaper.architecture.diagramLabel': 'Architecture diagram',
-    'whitepaper.architecture.diagram': '<div><p class="text-[#4B5563] mb-2"># User interface layer (renderer — context isolation, no Node, CSP connect-src none)</p><p>  index.html → app.js → window.mika5.* (contextBridge)</p></div><div class="border-t border-white/5 pt-3"><p class="text-[#4B5563] mb-2"># IPC boundary (preload + ipcRenderer, validated handlers)</p><p class="text-[#7C3AED]">  ↕ db:*, ai:*, rag:*, appState:*, app:*</p></div><div class="border-t border-white/5 pt-3"><p class="text-[#4B5563] mb-2"># Core services (main process — Node.js)</p><p>  main.js → db.js (SQLite / better-sqlite3, WAL)</p><p>          → ai-providers.js (Ollama + cloud adapters)</p><p>          → rag.js (chunking + embeddings + cosine search)</p><p>          → network-security.js (guarded image downloads)</p></div><div class="border-t border-white/5 pt-3"><p class="text-[#4B5563] mb-2"># Local runtime</p><p>  Ollama server → GGUF weights (GPU / CPU) → 127.0.0.1:11434</p><p>  SQLite file   → mika5.db (userData directory)</p></div>',
+    'whitepaper.architecture.diagram': '<div><p class="text-[#7D8797] mb-2"># User interface layer (renderer — context isolation, no Node, CSP connect-src none)</p><p>  index.html → app.js → window.mika5.* (contextBridge)</p></div><div class="border-t border-white/5 pt-3"><p class="text-[#7D8797] mb-2"># IPC boundary (preload + ipcRenderer, validated handlers)</p><p class="text-[#A78BFA]">  ↕ db:*, ai:*, rag:*, appState:*, app:*</p></div><div class="border-t border-white/5 pt-3"><p class="text-[#7D8797] mb-2"># Core services (main process — Node.js)</p><p>  main.js → db.js (SQLite / better-sqlite3, WAL)</p><p>          → ai-providers.js (Ollama + cloud adapters)</p><p>          → rag.js (chunking + embeddings + cosine search)</p><p>          → network-security.js (guarded image downloads)</p></div><div class="border-t border-white/5 pt-3"><p class="text-[#7D8797] mb-2"># Local runtime</p><p>  Ollama server → GGUF weights (GPU / CPU) → 127.0.0.1:11434</p><p>  SQLite file   → mika5.db (userData directory)</p></div>',
     'whitepaper.architecture.p5': 'Persistence uses <strong>better-sqlite3</strong>, a synchronous binding. Synchronous access removes a class of race conditions that arises when several asynchronous writes interleave, and SQLite itself provides transactions and a single portable file. The alternatives were rejected for concrete reasons: browser storage offers no durable file the user can copy, and a networked database would require running a server and would break the property that the application works with no network at all.',
     'whitepaper.architecture.p6': 'Packaging is produced by electron-builder: NSIS installer and portable executable for Windows, DMG and ZIP for macOS on Apple Silicon and Intel, and AppImage, DEB and RPM for Linux. That is nine installers per release. Section 10 describes what else is published alongside them and how to verify it.',
     // --- whitepaper.privacy.* (seccion 4) ---
@@ -686,7 +751,7 @@ const STRINGS = {
     'whitepaper.rag.p5': '<strong>3. Storage.</strong> The chunk text and its vector are written to <code>knowledge_chunks</code> as a serialised Float32 blob. A foreign key links each chunk to its <code>knowledge_items</code> row, and an optional <code>chat_id</code> column scopes it to a single conversation.',
     'whitepaper.rag.p6': '<strong>4. Query.</strong> When a message is sent, the query text is embedded with the same model and compared against the stored vectors by cosine similarity. The default is the three closest chunks (<code>TOP_K_DEFAULT = 3</code>), and the caller may ask for a different number, which the engine clamps to between 1 and 10. The selected chunks are injected into the conversation as a system message before the model is called.',
     'whitepaper.rag.diagramLabel': 'RAG pipeline',
-    'whitepaper.rag.diagram': '<p># Indexing, in the background</p><p class="text-[#7C3AED]">  chunkText(doc, 4200 chars, 700 overlap)</p><p class="text-[#7C3AED]">  → ollama.embed(chunk) → Float32[model width]</p><p class="text-[#7C3AED]">  → SQLite: knowledge_chunks (text, embedding, chat_id)</p><p class="mt-2"># Query, on every message</p><p class="text-[#34D399]">  ollama.embed(query) → Float32[model width]</p><p class="text-[#34D399]">  → cosineSimilarity(query, chunks in scope) → top 3</p><p class="text-[#34D399]">  → system message with the retrieved fragments</p><p class="text-[#34D399]">  → the model answers grounded in your documents</p>',
+    'whitepaper.rag.diagram': '<p># Indexing, in the background</p><p class="text-[#A78BFA]">  chunkText(doc, 4200 chars, 700 overlap)</p><p class="text-[#A78BFA]">  → ollama.embed(chunk) → Float32[model width]</p><p class="text-[#A78BFA]">  → SQLite: knowledge_chunks (text, embedding, chat_id)</p><p class="mt-2"># Query, on every message</p><p class="text-[#34D399]">  ollama.embed(query) → Float32[model width]</p><p class="text-[#34D399]">  → cosineSimilarity(query, chunks in scope) → top 3</p><p class="text-[#34D399]">  → system message with the retrieved fragments</p><p class="text-[#34D399]">  → the model answers grounded in your documents</p>',
     'whitepaper.rag.p7': 'Vectors are cached in memory per scope with a five-minute time to live (<code>CACHE_TTL_MS</code>), so repeated questions inside a session do not reload embeddings from SQLite. An expired entry is refetched, which is also how a newly indexed document becomes visible to retrieval without restarting the application.',
     'whitepaper.rag.p8': 'Scope is part of the design rather than a setting. The cache key is built from the project, the chat and whether project-level documents are included (<code>scopeKey</code> in <code>rag.js</code>), which is what keeps knowledge bases from bleeding into each other: a document attached to one conversation is retrieved in that conversation, project documents are retrieved across the project, and Quick Chat keeps its own. Two chats can hold contradictory reference material without either one contaminating the other.',
     // --- whitepaper.providers.* (seccion 6) ---
@@ -728,7 +793,7 @@ const STRINGS = {
     'whitepaper.llamacpp.title': 'llama.cpp — a second local runtime',
     'whitepaper.llamacpp.p1': 'Ollama is the primary local runtime, but some users prefer llama.cpp directly: it exposes the quantization parameters, hardware acceleration flags, batch sizes and loading behaviour that a managed runtime deliberately hides. For someone who keeps one model resident instead of switching between several, it also carries slightly less overhead.',
     'whitepaper.llamacpp.p2': 'The llama.cpp server exposes an OpenAI-compatible HTTP API on <code>http://127.0.0.1:8080/v1</code>, so the adapter reuses the same request shape as the OpenAI provider without model-specific code. The adapter is implemented in v0.3.1 and is selected as <code>llama.cpp (Local)</code> in the provider list; it probes for a running server at startup.',
-    'whitepaper.llamacpp.commands': '<p class="text-[#4B5563]"># Build llama.cpp</p><p><span class="p">$</span> git clone https://github.com/ggerganov/llama.cpp &amp;&amp; cd llama.cpp</p><p><span class="p">$</span> make <span class="c"># or cmake, for GPU support</span></p><p class="text-[#4B5563] mt-2"># Obtain a GGUF file yourself</p><p><span class="p">$</span> ./llama-server -m model.gguf --port 8080 -ngl 99</p><p class="text-[#4B5563] mt-2"># Then pick llama.cpp (Local) in MIKA5</p><p class="text-[#34D399]">MIKA5 detects the running server and lists its models</p>',
+    'whitepaper.llamacpp.commands': '<p class="text-[#7D8797]"># Build llama.cpp</p><p><span class="p">$</span> <code>git clone https://github.com/ggerganov/llama.cpp &amp;&amp; cd llama.cpp</code></p><p><span class="p">$</span> <code>make</code> <span class="c"># or cmake, for GPU support</span></p><p class="text-[#7D8797] mt-2"># Obtain a GGUF file yourself</p><p><span class="p">$</span> <code>./llama-server -m model.gguf --port 8080 -ngl 99</code></p><p class="text-[#7D8797] mt-2"># Then pick llama.cpp (Local) in MIKA5</p><p class="text-[#34D399]">MIKA5 detects the running server and lists its models</p>',
     'whitepaper.llamacpp.p3': 'Two differences are worth stating plainly. First, llama.cpp does not manage downloads: obtaining the GGUF file and pointing the server at it is the user\'s responsibility, where <code>ollama pull</code> would have done it. Second, <strong>MIKA5 does not send images to this adapter</strong>. Its capability contract declares no vision support, so an image attachment is refused with a visible message. llama.cpp itself can serve multimodal models with the appropriate build; the limitation described here is MIKA5\'s adapter, and it is stated as a refusal rather than a silent omission.',
     // --- whitepaper.licensing.* / whitepaper.release.* (seccion 10) ---
     'whitepaper.licensing.num': 'Section 10',
@@ -767,11 +832,11 @@ const STRINGS = {
     'whitepaper.roadmap.exportkb': '<strong>Knowledge base export and import.</strong> <span class="status-tag text-[#FBBF24]">Planned</span> Moving an indexed knowledge base between machines with optional encryption. Conversation export already exists; this is about the vectors.',
     'whitepaper.roadmap.routing': '<strong>Query routing across models.</strong> <span class="status-tag text-[#A78BFA]">Experimental</span> Sending a question to a specialised model according to its type. v0.3.1 routes between text and visual operations, but does not classify a question in order to pick a chat model for it.',
     'whitepaper.roadmap.plugins': '<strong>Plugin system.</strong> <span class="status-tag text-[#FBBF24]">Planned</span> A sandboxed extension surface for third-party tools, providers and panels.',
-    'whitepaper.roadmap.sync': '<strong>Synchronisation between machines.</strong> <span class="status-tag text-[#6B7280]">Not included in Community</span> Encrypted replication of projects and conversations belongs to the Cloud edition. It does not exist, and if it is ever built it will be opt-in and disclosed, never on by default.',
-    'whitepaper.roadmap.mobile': '<strong>Mobile client.</strong> <span class="status-tag text-[#6B7280]">Not included in Community</span> There is no mobile application. MIKA5 v0.3.1 is a desktop application for Windows, macOS and Linux, and nothing else is published.',
-    'whitepaper.roadmap.agents': '<strong>Remote or continuous agents.</strong> <span class="status-tag text-[#6B7280]">Not included in Community</span> Nothing in v0.3.1 runs without you: there are no background agents and no scheduled execution. Such capability would belong to the Cloud edition.',
-    'whitepaper.roadmap.teams': '<strong>Team collaboration.</strong> <span class="status-tag text-[#6B7280]">Not included in Community</span> There are no accounts, no shared workspaces and no permissions. The database is single-user by design.',
-    'whitepaper.roadmap.vllm': '<strong>Server-side runtimes such as vLLM.</strong> <span class="status-tag text-[#6B7280]">Not included in Community</span> vLLM is not part of Community v0.3.1 and there is no adapter for it. It appears here only as possible infrastructure for a future Pro or Cloud edition, which is a different product from the desktop application this document describes.',
+    'whitepaper.roadmap.sync': '<strong>Synchronisation between machines.</strong> <span class="status-tag text-[#8B95A5]">Not included in Community</span> Encrypted replication of projects and conversations belongs to the Cloud edition. It does not exist, and if it is ever built it will be opt-in and disclosed, never on by default.',
+    'whitepaper.roadmap.mobile': '<strong>Mobile client.</strong> <span class="status-tag text-[#8B95A5]">Not included in Community</span> There is no mobile application. MIKA5 v0.3.1 is a desktop application for Windows, macOS and Linux, and nothing else is published.',
+    'whitepaper.roadmap.agents': '<strong>Remote or continuous agents.</strong> <span class="status-tag text-[#8B95A5]">Not included in Community</span> Nothing in v0.3.1 runs without you: there are no background agents and no scheduled execution. Such capability would belong to the Cloud edition.',
+    'whitepaper.roadmap.teams': '<strong>Team collaboration.</strong> <span class="status-tag text-[#8B95A5]">Not included in Community</span> There are no accounts, no shared workspaces and no permissions. The database is single-user by design.',
+    'whitepaper.roadmap.vllm': '<strong>Server-side runtimes such as vLLM.</strong> <span class="status-tag text-[#8B95A5]">Not included in Community</span> vLLM is not part of Community v0.3.1 and there is no adapter for it. It appears here only as possible infrastructure for a future Pro or Cloud edition, which is a different product from the desktop application this document describes.',
     // --- whitepaper.conclusion.* (seccion 12) ---
     'whitepaper.conclusion.num': 'Section 12',
     'whitepaper.conclusion.title': 'Conclusion',
@@ -782,7 +847,7 @@ const STRINGS = {
     'whitepaper.conclusion.p4': 'This is version 0.3.1. It is a working desktop application, not a finished product, and section 11 marks the line between the two.',
     // --- whitepaper.refs.* ---
     'whitepaper.refs.label': 'Technical references',
-    'whitepaper.refs.body': '<p>Ollama — local model runtime · <span class="text-[#7C3AED]">ollama.com</span></p><p>llama.cpp — GGUF inference engine in C++ · <span class="text-[#7C3AED]">github.com/ggerganov/llama.cpp</span></p><p>Electron — desktop application framework · <span class="text-[#7C3AED]">electronjs.org</span></p><p>Electron safeStorage — wrapper over DPAPI and Keychain · <span class="text-[#7C3AED]">electronjs.org/docs/api/safe-storage</span></p><p>SQLite — embedded relational database · <span class="text-[#7C3AED]">sqlite.org</span></p><p>DOMPurify — HTML sanitiser · <span class="text-[#7C3AED]">github.com/cure53/DOMPurify</span></p><p>nomic-embed-text — default embedding model · <span class="text-[#7C3AED]">ollama.com/library/nomic-embed-text</span></p><p>AES-256-GCM — NIST FIPS 197 and SP 800-38D, authenticated encryption</p><p>AGPL-3.0 — licence of MIKA5 Community · <span class="text-[#7C3AED]">gnu.org/licenses/agpl-3.0</span></p><p>MIKA5 v0.3.1 — source and releases · <span class="text-[#7C3AED]">github.com/mika5app/mika5-releases</span></p>',
+    'whitepaper.refs.body': '<li>Ollama — local model runtime · <span class="text-[#A78BFA]">ollama.com</span></li><li>llama.cpp — GGUF inference engine in C++ · <span class="text-[#A78BFA]">github.com/ggerganov/llama.cpp</span></li><li>Electron — desktop application framework · <span class="text-[#A78BFA]">electronjs.org</span></li><li>Electron safeStorage — wrapper over DPAPI and Keychain · <span class="text-[#A78BFA]">electronjs.org/docs/api/safe-storage</span></li><li>SQLite — embedded relational database · <span class="text-[#A78BFA]">sqlite.org</span></li><li>DOMPurify — HTML sanitiser · <span class="text-[#A78BFA]">github.com/cure53/DOMPurify</span></li><li>nomic-embed-text — default embedding model · <span class="text-[#A78BFA]">ollama.com/library/nomic-embed-text</span></li><li>AES-256-GCM — NIST FIPS 197 and SP 800-38D, authenticated encryption</li><li>AGPL-3.0 — licence of MIKA5 Community · <span class="text-[#A78BFA]">gnu.org/licenses/agpl-3.0</span></li><li>MIKA5 v0.3.1 — source and releases · <span class="text-[#A78BFA]">github.com/mika5app/mika5-releases</span></li>',
     // --- whitepaper.footer.* ---
     'whitepaper.footer.brand': 'MIKA5 White Paper v0.3.1',
     'whitepaper.footer.home': 'Home',
@@ -806,7 +871,8 @@ const STRINGS = {
     'whitepaper.nav.title': 'White Paper',
     'whitepaper.nav.modelGuide': 'Guía de modelos →',
     'whitepaper.nav.logoAlt': 'Logotipo de MIKA5',
-    'whitepaper.nav.langLabel': 'Cambiar el idioma a inglés',
+    'whitepaper.nav.skip': 'Saltar al contenido principal',
+    'whitepaper.nav.langLabel': 'EN: cambiar el idioma a inglés',
     // --- whitepaper.hero.* ---
     'whitepaper.hero.label': 'White Paper técnico — v0.3.1',
     'whitepaper.hero.titleTop': 'MIKA5: IA local-first',
@@ -845,7 +911,7 @@ const STRINGS = {
     // --- whitepaper.foundation.* (sección 2) ---
     'whitepaper.foundation.num': 'Sección 2',
     'whitepaper.foundation.title': 'Modelos de pesos abiertos como capa base',
-    'whitepaper.foundation.p1': 'MIKA5 parte de la premisa de que <em>los modelos de lenguaje de pesos abiertos ya son suficientemente capaces para buena parte del trabajo diario</em>. Este documento no publica puntuaciones de benchmark ni hace afirmaciones de ranking: las cifras publicadas cambian con la cuantización, el formato de prompt, los parámetros de muestreo y el arnés de evaluación, y un número que no se puede rastrear hasta la compilación exacta que tú ejecutas no sostiene ninguna decisión. La <a href="models.html" class="text-[#A78BFA] hover:text-white">Guía de modelos</a> enumera los modelos que MIKA5 puede ejecutar hoy con sus tamaños verificados y sus requisitos de hardware; la ficha de cada modelo documenta sus propias evaluaciones.',
+    'whitepaper.foundation.p1': 'MIKA5 parte de la premisa de que <em>los modelos de lenguaje de pesos abiertos ya son suficientemente capaces para buena parte del trabajo diario</em>. Este documento no publica puntuaciones de benchmark ni hace afirmaciones de ranking: las cifras publicadas cambian con la cuantización, el formato de prompt, los parámetros de muestreo y el arnés de evaluación, y un número que no se puede rastrear hasta la compilación exacta que tú ejecutas no sostiene ninguna decisión. La <a href="models.html" class="text-[#A78BFA] hover:text-white underline">Guía de modelos</a> enumera los modelos que MIKA5 puede ejecutar hoy con sus tamaños verificados y sus requisitos de hardware; la ficha de cada modelo documenta sus propias evaluaciones.',
     'whitepaper.foundation.p2': 'El argumento a favor de los pesos abiertos no descansa en puntuaciones comparativas. Los modelos abiertos se pueden inspeccionar, porque los pesos están publicados y la arquitectura documentada. Se pueden ajustar sobre datos de un dominio sin pedir permiso. Se pueden ejecutar en el nivel de cuantización que permita el hardware, cambiando calidad por velocidad. Se pueden usar en entornos sin ninguna conectividad de salida. Y no se les puede cambiar el precio, restringir ni retirar por una decisión en la que el usuario no participa.',
     'whitepaper.foundation.p3': 'El ecosistema es además plural, y eso importa más que cualquier modelo concreto. Meta publica Llama con una licencia que permite el uso comercial. Alibaba publica Qwen con una cobertura multilingüe amplia, español incluido. DeepSeek publica modelos de razonamiento entrenados con aprendizaje por refuerzo. Mistral aporta investigación europea y cobertura de lenguas europeas. BigCode publica StarCoder, entrenado sobre un corpus con política de exclusión voluntaria para quienes publican repositorios. Ninguna organización controla ese conjunto por sí sola.',
     'whitepaper.foundation.quote': 'MIKA5 no trata los modelos de pesos abiertos como recurso de emergencia para cuando falla el cloud, sino como el camino por defecto entre la persona y la máquina.',
@@ -858,7 +924,7 @@ const STRINGS = {
     'whitepaper.architecture.p3': 'La ventana fuera de pantalla que se usa para exportar a PDF es un caso aparte: se crea con <code>sandbox: true</code> (<code>src/main/print-export.js</code>). Renderiza una plantilla local fija y no necesita acceso privilegiado, así que corre bajo el ajuste más estricto.',
     'whitepaper.architecture.p4': 'El renderer lleva además una Content Security Policy declarada en <code>src/renderer/index.html</code>. Su directiva <code>connect-src \'none\'</code> es la parte operativa: la interfaz no puede abrir conexiones de red por su cuenta. Toda petición a un modelo, local o remoto, la hace el proceso principal después de cruzar la frontera IPC, donde se valida la entrada. Si alguna vez se ejecutara una inyección dentro del renderer, desde ahí no encontraría ni salida de red ni sistema de archivos.',
     'whitepaper.architecture.diagramLabel': 'Diagrama de arquitectura',
-    'whitepaper.architecture.diagram': '<div><p class="text-[#4B5563] mb-2"># Capa de interfaz (renderer — aislamiento de contexto, sin Node, CSP connect-src none)</p><p>  index.html → app.js → window.mika5.* (contextBridge)</p></div><div class="border-t border-white/5 pt-3"><p class="text-[#4B5563] mb-2"># Frontera IPC (preload + ipcRenderer, handlers validados)</p><p class="text-[#7C3AED]">  ↕ db:*, ai:*, rag:*, appState:*, app:*</p></div><div class="border-t border-white/5 pt-3"><p class="text-[#4B5563] mb-2"># Servicios centrales (proceso principal — Node.js)</p><p>  main.js → db.js (SQLite / better-sqlite3, WAL)</p><p>          → ai-providers.js (Ollama + adaptadores cloud)</p><p>          → rag.js (fragmentación + embeddings + búsqueda por coseno)</p><p>          → network-security.js (descargas de imagen acotadas)</p></div><div class="border-t border-white/5 pt-3"><p class="text-[#4B5563] mb-2"># Runtime local</p><p>  servidor Ollama → pesos GGUF (GPU / CPU) → 127.0.0.1:11434</p><p>  archivo SQLite  → mika5.db (directorio userData)</p></div>',
+    'whitepaper.architecture.diagram': '<div><p class="text-[#7D8797] mb-2"># Capa de interfaz (renderer — aislamiento de contexto, sin Node, CSP connect-src none)</p><p>  index.html → app.js → window.mika5.* (contextBridge)</p></div><div class="border-t border-white/5 pt-3"><p class="text-[#7D8797] mb-2"># Frontera IPC (preload + ipcRenderer, handlers validados)</p><p class="text-[#A78BFA]">  ↕ db:*, ai:*, rag:*, appState:*, app:*</p></div><div class="border-t border-white/5 pt-3"><p class="text-[#7D8797] mb-2"># Servicios centrales (proceso principal — Node.js)</p><p>  main.js → db.js (SQLite / better-sqlite3, WAL)</p><p>          → ai-providers.js (Ollama + adaptadores cloud)</p><p>          → rag.js (fragmentación + embeddings + búsqueda por coseno)</p><p>          → network-security.js (descargas de imagen acotadas)</p></div><div class="border-t border-white/5 pt-3"><p class="text-[#7D8797] mb-2"># Runtime local</p><p>  servidor Ollama → pesos GGUF (GPU / CPU) → 127.0.0.1:11434</p><p>  archivo SQLite  → mika5.db (directorio userData)</p></div>',
     'whitepaper.architecture.p5': 'La persistencia usa <strong>better-sqlite3</strong>, un binding síncrono. El acceso síncrono elimina una familia de condiciones de carrera que aparece cuando varias escrituras asíncronas se entrelazan, y SQLite aporta transacciones y un único archivo portable. Las alternativas se descartaron por motivos concretos: el almacenamiento del navegador no deja un archivo duradero que el usuario pueda copiar, y una base en red exigiría levantar un servidor y rompería la propiedad de que la aplicación funcione sin red alguna.',
     'whitepaper.architecture.p6': 'El empaquetado lo produce electron-builder: instalador NSIS y ejecutable portable para Windows, DMG y ZIP para macOS en Apple Silicon e Intel, y AppImage, DEB y RPM para Linux. Son nueve instaladores por release. La sección 10 describe qué más se publica junto a ellos y cómo verificarlo.',
     // --- whitepaper.privacy.* (sección 4) ---
@@ -881,7 +947,7 @@ const STRINGS = {
     'whitepaper.rag.p5': '<strong>3. Almacenamiento.</strong> El texto del fragmento y su vector se escriben en <code>knowledge_chunks</code> como un blob Float32 serializado. Una clave foránea enlaza cada fragmento con su fila de <code>knowledge_items</code>, y una columna opcional <code>chat_id</code> lo acota a una sola conversación.',
     'whitepaper.rag.p6': '<strong>4. Consulta.</strong> Al enviar un mensaje, el texto de la consulta se convierte en embedding con el mismo modelo y se compara con los vectores guardados por similitud del coseno. El valor por defecto son los tres fragmentos más cercanos (<code>TOP_K_DEFAULT = 3</code>); quien llama puede pedir otro número, que el motor acota entre 1 y 10. Los fragmentos elegidos se inyectan en la conversación como mensaje de sistema antes de llamar al modelo.',
     'whitepaper.rag.diagramLabel': 'Flujo del RAG',
-    'whitepaper.rag.diagram': '<p># Indexación, en segundo plano</p><p class="text-[#7C3AED]">  chunkText(doc, 4200 caracteres, 700 de solape)</p><p class="text-[#7C3AED]">  → ollama.embed(fragmento) → Float32[ancho del modelo]</p><p class="text-[#7C3AED]">  → SQLite: knowledge_chunks (texto, embedding, chat_id)</p><p class="mt-2"># Consulta, en cada mensaje</p><p class="text-[#34D399]">  ollama.embed(consulta) → Float32[ancho del modelo]</p><p class="text-[#34D399]">  → cosineSimilarity(consulta, fragmentos del ámbito) → 3 mejores</p><p class="text-[#34D399]">  → mensaje de sistema con los fragmentos recuperados</p><p class="text-[#34D399]">  → el modelo responde apoyado en tus documentos</p>',
+    'whitepaper.rag.diagram': '<p># Indexación, en segundo plano</p><p class="text-[#A78BFA]">  chunkText(doc, 4200 caracteres, 700 de solape)</p><p class="text-[#A78BFA]">  → ollama.embed(fragmento) → Float32[ancho del modelo]</p><p class="text-[#A78BFA]">  → SQLite: knowledge_chunks (texto, embedding, chat_id)</p><p class="mt-2"># Consulta, en cada mensaje</p><p class="text-[#34D399]">  ollama.embed(consulta) → Float32[ancho del modelo]</p><p class="text-[#34D399]">  → cosineSimilarity(consulta, fragmentos del ámbito) → 3 mejores</p><p class="text-[#34D399]">  → mensaje de sistema con los fragmentos recuperados</p><p class="text-[#34D399]">  → el modelo responde apoyado en tus documentos</p>',
     'whitepaper.rag.p7': 'Los vectores se cachean en memoria por ámbito con un tiempo de vida de cinco minutos (<code>CACHE_TTL_MS</code>), así que las preguntas repetidas dentro de una sesión no vuelven a cargar embeddings desde SQLite. Una entrada caducada se vuelve a leer, que es también la vía por la que un documento recién indexado pasa a ser visible para la recuperación sin reiniciar la aplicación.',
     'whitepaper.rag.p8': 'El ámbito forma parte del diseño, no es un ajuste. La clave de caché se construye con el proyecto, el chat y si se incluyen los documentos de nivel de proyecto (<code>scopeKey</code> en <code>rag.js</code>), y eso es lo que impide que unas bases de conocimiento se filtren en otras: un documento adjuntado a una conversación se recupera en esa conversación, los documentos del proyecto se recuperan en todo el proyecto y el Chat rápido conserva el suyo. Dos chats pueden contener material de referencia contradictorio sin que ninguno contamine al otro.',
     // --- whitepaper.providers.* (sección 6) ---
@@ -923,7 +989,7 @@ const STRINGS = {
     'whitepaper.llamacpp.title': 'llama.cpp — un segundo runtime local',
     'whitepaper.llamacpp.p1': 'Ollama es el runtime local principal, pero hay quien prefiere llama.cpp directamente: expone los parámetros de cuantización, las banderas de aceleración por hardware, los tamaños de lote y el comportamiento de carga que un runtime gestionado oculta a propósito. Para quien mantiene un solo modelo residente en lugar de ir cambiando entre varios, además tiene algo menos de sobrecarga.',
     'whitepaper.llamacpp.p2': 'El servidor de llama.cpp expone una API HTTP compatible con OpenAI en <code>http://127.0.0.1:8080/v1</code>, así que el adaptador reutiliza la misma forma de petición que el proveedor de OpenAI sin código específico por modelo. El adaptador está implementado en v0.3.1 y se selecciona como <code>llama.cpp (Local)</code> en la lista de proveedores; sondea al arrancar si hay un servidor en marcha.',
-    'whitepaper.llamacpp.commands': '<p class="text-[#4B5563]"># Compilar llama.cpp</p><p><span class="p">$</span> git clone https://github.com/ggerganov/llama.cpp &amp;&amp; cd llama.cpp</p><p><span class="p">$</span> make <span class="c"># o cmake, para soporte de GPU</span></p><p class="text-[#4B5563] mt-2"># Consigue tú mismo un archivo GGUF</p><p><span class="p">$</span> ./llama-server -m model.gguf --port 8080 -ngl 99</p><p class="text-[#4B5563] mt-2"># Después elige llama.cpp (Local) en MIKA5</p><p class="text-[#34D399]">MIKA5 detecta el servidor en marcha y lista sus modelos</p>',
+    'whitepaper.llamacpp.commands': '<p class="text-[#7D8797]"># Compilar llama.cpp</p><p><span class="p">$</span> <code>git clone https://github.com/ggerganov/llama.cpp &amp;&amp; cd llama.cpp</code></p><p><span class="p">$</span> <code>make</code> <span class="c"># o cmake, para soporte de GPU</span></p><p class="text-[#7D8797] mt-2"># Consigue tú mismo un archivo GGUF</p><p><span class="p">$</span> <code>./llama-server -m model.gguf --port 8080 -ngl 99</code></p><p class="text-[#7D8797] mt-2"># Después elige llama.cpp (Local) en MIKA5</p><p class="text-[#34D399]">MIKA5 detecta el servidor en marcha y lista sus modelos</p>',
     'whitepaper.llamacpp.p3': 'Conviene señalar dos diferencias con claridad. Primera: llama.cpp no gestiona descargas; conseguir el archivo GGUF y apuntar el servidor hacia él es responsabilidad del usuario, donde <code>ollama pull</code> lo habría hecho. Segunda: <strong>MIKA5 no envía imágenes a este adaptador</strong>. Su contrato de capacidades no declara soporte de visión, así que un adjunto de imagen se rechaza con un mensaje visible. El propio llama.cpp puede servir modelos multimodales con la compilación adecuada; la limitación descrita aquí es del adaptador de MIKA5, y se declara como rechazo en lugar de como omisión silenciosa.',
     // --- whitepaper.licensing.* / whitepaper.release.* (sección 10) ---
     'whitepaper.licensing.num': 'Sección 10',
@@ -962,11 +1028,11 @@ const STRINGS = {
     'whitepaper.roadmap.exportkb': '<strong>Exportar e importar bases de conocimiento.</strong> <span class="status-tag text-[#FBBF24]">Planificado</span> Mover una base de conocimiento indexada entre equipos con cifrado opcional. La exportación de conversaciones ya existe; esto va de los vectores.',
     'whitepaper.roadmap.routing': '<strong>Enrutado de consultas entre modelos.</strong> <span class="status-tag text-[#A78BFA]">Experimental</span> Enviar una pregunta a un modelo especializado según su tipo. v0.3.1 enruta entre operaciones de texto y visuales, pero no clasifica una pregunta para elegirle un modelo de chat.',
     'whitepaper.roadmap.plugins': '<strong>Sistema de extensiones.</strong> <span class="status-tag text-[#FBBF24]">Planificado</span> Una superficie de extensión en sandbox para herramientas, proveedores y paneles de terceros.',
-    'whitepaper.roadmap.sync': '<strong>Sincronización entre equipos.</strong> <span class="status-tag text-[#6B7280]">No incluido en Community</span> La replicación cifrada de proyectos y conversaciones pertenece a la edición Cloud. No existe y, si algún día se construye, será opcional y declarada, nunca activada por defecto.',
-    'whitepaper.roadmap.mobile': '<strong>Cliente móvil.</strong> <span class="status-tag text-[#6B7280]">No incluido en Community</span> No hay aplicación móvil. MIKA5 v0.3.1 es una aplicación de escritorio para Windows, macOS y Linux, y no se publica nada más.',
-    'whitepaper.roadmap.agents': '<strong>Agentes remotos o continuos.</strong> <span class="status-tag text-[#6B7280]">No incluido en Community</span> Nada en v0.3.1 se ejecuta sin ti: no hay agentes en segundo plano ni ejecución programada. Una capacidad así pertenecería a la edición Cloud.',
-    'whitepaper.roadmap.teams': '<strong>Trabajo en equipo.</strong> <span class="status-tag text-[#6B7280]">No incluido en Community</span> No hay cuentas, ni espacios compartidos, ni permisos. La base de datos es de un solo usuario por diseño.',
-    'whitepaper.roadmap.vllm': '<strong>Runtimes de servidor como vLLM.</strong> <span class="status-tag text-[#6B7280]">No incluido en Community</span> vLLM no forma parte de Community v0.3.1 y no hay ningún adaptador para él. Aparece aquí sólo como posible infraestructura de una futura edición Pro o Cloud, que es un producto distinto de la aplicación de escritorio que describe este documento.',
+    'whitepaper.roadmap.sync': '<strong>Sincronización entre equipos.</strong> <span class="status-tag text-[#8B95A5]">No incluido en Community</span> La replicación cifrada de proyectos y conversaciones pertenece a la edición Cloud. No existe y, si algún día se construye, será opcional y declarada, nunca activada por defecto.',
+    'whitepaper.roadmap.mobile': '<strong>Cliente móvil.</strong> <span class="status-tag text-[#8B95A5]">No incluido en Community</span> No hay aplicación móvil. MIKA5 v0.3.1 es una aplicación de escritorio para Windows, macOS y Linux, y no se publica nada más.',
+    'whitepaper.roadmap.agents': '<strong>Agentes remotos o continuos.</strong> <span class="status-tag text-[#8B95A5]">No incluido en Community</span> Nada en v0.3.1 se ejecuta sin ti: no hay agentes en segundo plano ni ejecución programada. Una capacidad así pertenecería a la edición Cloud.',
+    'whitepaper.roadmap.teams': '<strong>Trabajo en equipo.</strong> <span class="status-tag text-[#8B95A5]">No incluido en Community</span> No hay cuentas, ni espacios compartidos, ni permisos. La base de datos es de un solo usuario por diseño.',
+    'whitepaper.roadmap.vllm': '<strong>Runtimes de servidor como vLLM.</strong> <span class="status-tag text-[#8B95A5]">No incluido en Community</span> vLLM no forma parte de Community v0.3.1 y no hay ningún adaptador para él. Aparece aquí sólo como posible infraestructura de una futura edición Pro o Cloud, que es un producto distinto de la aplicación de escritorio que describe este documento.',
     // --- whitepaper.conclusion.* (sección 12) ---
     'whitepaper.conclusion.num': 'Sección 12',
     'whitepaper.conclusion.title': 'Conclusión',
@@ -977,7 +1043,7 @@ const STRINGS = {
     'whitepaper.conclusion.p4': 'Esta es la versión 0.3.1. Es una aplicación de escritorio que funciona, no un producto terminado, y la sección 11 marca la línea entre ambas cosas.',
     // --- whitepaper.refs.* ---
     'whitepaper.refs.label': 'Referencias técnicas',
-    'whitepaper.refs.body': '<p>Ollama — runtime local de modelos · <span class="text-[#7C3AED]">ollama.com</span></p><p>llama.cpp — motor de inferencia GGUF en C++ · <span class="text-[#7C3AED]">github.com/ggerganov/llama.cpp</span></p><p>Electron — framework de aplicaciones de escritorio · <span class="text-[#7C3AED]">electronjs.org</span></p><p>Electron safeStorage — envoltorio sobre DPAPI y Keychain · <span class="text-[#7C3AED]">electronjs.org/docs/api/safe-storage</span></p><p>SQLite — base de datos relacional embebida · <span class="text-[#7C3AED]">sqlite.org</span></p><p>DOMPurify — saneador de HTML · <span class="text-[#7C3AED]">github.com/cure53/DOMPurify</span></p><p>nomic-embed-text — modelo de embeddings por defecto · <span class="text-[#7C3AED]">ollama.com/library/nomic-embed-text</span></p><p>AES-256-GCM — NIST FIPS 197 y SP 800-38D, cifrado autenticado</p><p>AGPL-3.0 — licencia de MIKA5 Community · <span class="text-[#7C3AED]">gnu.org/licenses/agpl-3.0</span></p><p>MIKA5 v0.3.1 — código y releases · <span class="text-[#7C3AED]">github.com/mika5app/mika5-releases</span></p>',
+    'whitepaper.refs.body': '<li>Ollama — runtime local de modelos · <span class="text-[#A78BFA]">ollama.com</span></li><li>llama.cpp — motor de inferencia GGUF en C++ · <span class="text-[#A78BFA]">github.com/ggerganov/llama.cpp</span></li><li>Electron — framework de aplicaciones de escritorio · <span class="text-[#A78BFA]">electronjs.org</span></li><li>Electron safeStorage — envoltorio sobre DPAPI y Keychain · <span class="text-[#A78BFA]">electronjs.org/docs/api/safe-storage</span></li><li>SQLite — base de datos relacional embebida · <span class="text-[#A78BFA]">sqlite.org</span></li><li>DOMPurify — saneador de HTML · <span class="text-[#A78BFA]">github.com/cure53/DOMPurify</span></li><li>nomic-embed-text — modelo de embeddings por defecto · <span class="text-[#A78BFA]">ollama.com/library/nomic-embed-text</span></li><li>AES-256-GCM — NIST FIPS 197 y SP 800-38D, cifrado autenticado</li><li>AGPL-3.0 — licencia de MIKA5 Community · <span class="text-[#A78BFA]">gnu.org/licenses/agpl-3.0</span></li><li>MIKA5 v0.3.1 — código y releases · <span class="text-[#A78BFA]">github.com/mika5app/mika5-releases</span></li>',
     // --- whitepaper.footer.* ---
     'whitepaper.footer.brand': 'White Paper de MIKA5 v0.3.1',
     'whitepaper.footer.home': 'Inicio',
@@ -987,7 +1053,9 @@ const STRINGS = {
   }
 };
 
-let currentLang = localStorage.getItem('mika5-lang') || ((navigator.language || navigator.userLanguage || 'en').startsWith('es') ? 'es' : 'en');
+// A page written in one language (the generated /es/ pages) declares it in
+// data-lang, and that wins over the stored or browser preference.
+let currentLang = document.documentElement.getAttribute('data-lang') || localStorage.getItem('mika5-lang') || ((navigator.language || navigator.userLanguage || 'en').startsWith('es') ? 'es' : 'en');
 
 // Atributos que el sistema puede traducir. Lista cerrada: un data-i18n-attr
 // con cualquier otro nombre se ignora, para que el contenido nunca pueda
@@ -1084,10 +1152,22 @@ function applyLang(lang) {
 function toggleLang() {
   var next = currentLang === 'es' ? 'en' : 'es';
   localStorage.setItem('mika5-lang', next);
+  // Each language has its own address. On the live site the switch goes there;
+  // if this page is already that address (or is opened from disk) it swaps in place.
+  var otra = document.querySelector('link[rel="alternate"][hreflang="' + next + '"]');
+  var aqui = location.href.split('#')[0];
+  if (otra && /^https?:$/.test(location.protocol) && location.hostname === new URL(otra.href).hostname && otra.href !== aqui) {
+    location.href = otra.href;
+    return;
+  }
   applyLang(next);
 }
 
-document.addEventListener('DOMContentLoaded', function() { applyLang(currentLang); });
+document.addEventListener('DOMContentLoaded', function() {
+  applyLang(currentLang);
+  var idioma = document.getElementById('lang-toggle');
+  if (idioma) idioma.addEventListener('click', toggleLang);
+});
 </script>
 <script src="chat-widget.js" defer></script>
 </body>

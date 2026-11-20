@@ -20,6 +20,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // administrado y guardar una referencia; queda fuera de este parche a propósito,
 // porque implica gestión de ciclo de vida de archivos en disco.
 const ATTACHMENT_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp']);
+const { seleccionarFragmentos } = require('./knowledge-retrieval');
 const MAX_ATTACHMENTS_PER_MESSAGE = 8;
 // El proceso principal no confía en el renderer: aunque la interfaz limite los
 // archivos a 5 MB, una llamada IPC puede pedir escribir cientos de megabytes en
@@ -1406,7 +1407,7 @@ const dbApi = {
    * La consulta de alcance es la misma que la de RAG; aquí sólo se decide cuánto
    * cabe y en qué orden.
    */
-  listChunksRaw({ projectId, chatId, maxChars, mode = "selective", includeProjectScope } = {}) {
+  listChunksRaw({ projectId, chatId, maxChars, mode = "selective", includeProjectScope, query } = {}) {
     // Un alcance inválido LANZA (no devuelve [] silenciosamente): quien llama
     // tiene que poder distinguir "no hay documentos" de "el alcance es incoherente".
     // Safety limit: 100k chars for complete mode, otherwise use provided maxChars (default 24k)
@@ -1419,6 +1420,24 @@ const dbApi = {
       chatId: chatId || null,
       includeProjectScope: includeProjectScope === undefined ? true : !!includeProjectScope
     }).map(r => ({ chunk_text: r.chunk_text, chunk_index: r.chunk_index, title: r.title }));
+
+    // Cuántos fragmentos tiene cada documento: quien recibe una parte tiene
+    // que poder saber —y decir— que es una parte.
+    const totales = new Map();
+    for (const r of rows) totales.set(r.title, (totales.get(r.title) || 0) + 1);
+    for (const r of rows) r.doc_chunks = totales.get(r.title);
+
+    // Con una pregunta, se eligen los fragmentos que hablan de ella en vez de
+    // los primeros del documento. El alcance ya está aplicado: aquí sólo se
+    // ordena lo que esta solicitud tiene permiso de ver. Si la pregunta no
+    // encuentra nada, se sigue con el orden de siempre.
+    if (typeof query === "string" && query.trim()) {
+      const { fragmentos, seleccion } = seleccionarFragmentos(rows, {
+        consulta: query.slice(0, 2000),
+        limite: Math.min(maxChars || 24000, 50000)
+      });
+      if (seleccion === "relevance") return fragmentos.map(r => ({ ...r, selection: "relevance" }));
+    }
 
     if (mode === "complete") {
       // Complete mode: return chunks in order until limit reached (no round-robin bias)

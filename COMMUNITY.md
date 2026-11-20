@@ -39,10 +39,26 @@ license. See `TRADEMARK.md`.
 
 ## Source and releases
 
+The source code is developed in public at
+
+https://github.com/mika5app/mika5
+
 Official Community installers and corresponding source archives are published
 through the public MIKA5 releases repository:
 
 https://github.com/mika5app/mika5-releases
+
+Every release carries `MIKA5-<version>-source.tar.gz`, the complete source that
+produced its installers, together with `BUILDING.md`, `LICENSE` and
+`SHA256SUMS.txt`.
+
+Report problems and propose changes at
+https://github.com/mika5app/mika5-releases/issues. `CONTRIBUTING.md` explains
+how to send a change. Licenses of the bundled third-party software are listed in
+`THIRD_PARTY_NOTICES.md`.
+
+Inside the application, the version dialog (More actions → Check for a new
+version) links to the source, the issue tracker and the license.
 
 ## Current release: 0.3.2
 
@@ -51,13 +67,16 @@ source and checksums from:
 
 https://github.com/mika5app/mika5-releases/releases/tag/v0.3.2
 
-This release adds BitNet as a local runtime and fixes chat routing in
-conversations that contain images, on top of the provider handling, cloud
-consent, document/image handling and native packaging validation introduced in
-0.3.1. Ollama local and cloud models are supported;
-cloud use retains explicit privacy notices and consent. Pro and Cloud services
+This release adds BitNet as an experimental local runtime, lets MIKA5 find and
+start llama.cpp and BitNet engines with the models already on the machine,
+reports the same readiness states for every provider, searches every fragment of
+long documents, adds a new-version notice and fixes chat routing in
+conversations that contain images or documents. Ollama local and cloud models are
+supported; cloud use retains explicit privacy notices and consent. Pro and Cloud services
 remain future editions, separate from Community.
 
-Updates are manual. Close the application and keep a backup of its data before
-installing a newer version. Windows builds are not Authenticode-signed and
+MIKA5 can tell you when a newer stable version has been published, on request or
+when it opens if you turn that on; it never downloads or installs anything by
+itself. Updates are manual. Close the application and keep a backup of its data
+before installing a newer version. Windows builds are not Authenticode-signed and
 macOS builds are not notarized. Verify downloads using `SHA256SUMS.txt`.

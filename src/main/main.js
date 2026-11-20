@@ -130,7 +130,12 @@ app.whenReady().then(() => {
 
   initDb();
   // Inicializar el gestor de proveedores AI usando la instancia de DB
-  aiManager = new AIProviderManager(getDb());
+  // Los modelos que MIKA5 descarga viven en el perfil del usuario, junto a
+  // sus datos: no en la carpeta de instalación, que una actualización reemplaza.
+  aiManager = new AIProviderManager(getDb(), {
+    modelsDir: path.join(app.getPath('userData'), 'models'),
+    enginesDir: path.join(app.getPath('userData'), 'engines')
+  });
   createWindow();
 
   // --- Startup sweep: reindex docs pendientes (Fase 1 prod-safe) ---
@@ -147,6 +152,13 @@ app.whenReady().then(() => {
       console.warn("[RAG] Startup sweep error:", e?.message || e);
     }
   }, 0);
+});
+
+// Los motores locales que MIKA5 arrancó terminan con MIKA5. Los que ya estaban
+// en marcha —el Ollama del usuario, un llama-server lanzado a mano— no se tocan.
+app.on("will-quit", () => {
+  try { aiManager?.descargas.cancelar(); } catch (_) {}
+  try { aiManager?.stopEngines(); } catch (_) {}
 });
 
 app.on("window-all-closed", () => {
@@ -233,13 +245,15 @@ ipcMain.handle("rag:getFullDocumentText", async (_e, knowledgeItemId) => {
   }
 });
 // Returns chunk text with server-side truncation and round-robin distribution across documents
-ipcMain.handle("rag:listChunksRaw", (_e, projectId, chatId, maxChars, mode = 'selective', opts = {}) => {
+ipcMain.handle("rag:listChunksRaw", (_e, projectId, chatId, maxChars, mode = 'selective', opts = {}, query) => {
   try {
     return dbApi.listChunksRaw({
       projectId,
       chatId,
       maxChars,
       mode,
+      // La pregunta del usuario, para elegir los fragmentos que la responden.
+      query: typeof query === 'string' ? query : undefined,
       includeProjectScope: opts && opts.includeProjectScope !== undefined
         ? !!opts.includeProjectScope
         : undefined
@@ -414,6 +428,15 @@ ipcMain.handle("app:getVersion", () => ({
   packaged: app.isPackaged
 }));
 
+// Aviso de nueva versión. Es un canal aparte de `app:getVersion` a propósito:
+// la versión instalada se conoce siempre; la disponible sólo existe cuando
+// alguien la ha consultado, y la consulta es una petición saliente que ocurre
+// porque el usuario la pide o porque activó el aviso. Sólo informa: MIKA5 no
+// descarga ni instala actualizaciones.
+ipcMain.handle("app:checkForUpdates", () => require("./update-check").consultarActualizacion({
+  versionInstalada: require("../../package.json").version
+}));
+
 ipcMain.handle("app:saveFile", async (_, { defaultName, filters, content, encoding }) => {
   // Security: limit file size to 50MB
   const MAX_SIZE = 50 * 1024 * 1024;
@@ -544,7 +567,7 @@ ipcMain.handle('ai:save-provider-config', (_e, provider, config) => aiManager.sa
 ipcMain.handle('ai:add-provider-model', (_e, provider, model) => aiManager.addProviderModel(provider, model));
 ipcMain.handle('ai:update-provider-model', (_e, provider, modelId, model) => aiManager.updateProviderModel(provider, modelId, model));
 ipcMain.handle('ai:delete-provider-model', (_e, provider, modelId) => aiManager.deleteProviderModel(provider, modelId));
-async function runAIRequest(method, params = {}) {
+async function runAIRequest(method, params = {}, sender = null) {
   if (!params || typeof params !== 'object' || !params.providerId
     || typeof params.model !== 'string' || !params.model.trim()
     || !aiManager.getAllProviders().some(provider => provider.id === params.providerId)) {
@@ -554,16 +577,153 @@ async function runAIRequest(method, params = {}) {
   try {
     const resolved = await resolveRequestPrivacy(params.providerId, params.model, { signal: controller.signal });
     assertRequestConsent(params, resolved.privacy);
-    return await aiManager[method]({ ...params, signal: controller.signal });
+    return await aiManager[method]({
+      ...params,
+      signal: controller.signal,
+      // Avance de una respuesta que lleva varias peticiones (un documento
+      // largo leído por partes). Sólo números: nada del contenido.
+      onProgress: (avance) => {
+        if (!sender || sender.isDestroyed()) return;
+        sender.send('ai:chat-progress', {
+          requestId: params.requestId,
+          part: Number(avance?.part) || 0, parts: Number(avance?.parts) || 0, answering: avance?.answering === true
+        });
+      }
+    });
   } finally { aiRequests.finish(params.requestId); }
 }
-ipcMain.handle('ai:chat', (_e, params) => runAIRequest('chat', params));
+ipcMain.handle('ai:chat', (e, params) => runAIRequest('chat', params, e.sender));
 ipcMain.handle('ai:generate-image', (_e, params) => runAIRequest('generateImage', params));
 ipcMain.handle('ai:resolve-privacy', (_e, params = {}) => resolveRequestPrivacy(params.providerId, params.model));
 ipcMain.handle('ai:route-intent', (_e, params) => aiManager.routeIntent(params));
 ipcMain.handle('ai:list-models', () => aiManager.listModels());
 ipcMain.handle('ai:status', () => aiManager.status());
 ipcMain.handle('ai:get-availability', (_e, providerId) => aiManager.getAvailability(providerId));
+// Preparación del proveedor. `autoStart` sólo vale si es literalmente `true`:
+// es lo único de este canal que puede arrancar un proceso.
+ipcMain.handle('ai:get-readiness', (_e, providerId, opciones) =>
+  aiManager.getReadiness(providerId || undefined, { autoStart: opciones?.autoStart === true }));
+ipcMain.handle('ai:start-engine', (_e, providerId) => aiManager.startEngine(providerId || undefined));
+ipcMain.handle('ai:describe-engine', (_e, providerId) => aiManager.describeEngine(providerId, { refresh: true }));
+// Elegir entre lo que el proceso principal descubrió. El renderer manda un
+// nombre de modelo, o una ruta de ejecutable que sólo se acepta si está en la
+// lista descubierta aquí.
+ipcMain.handle('ai:select-engine-model', (_e, providerId, modelId) => aiManager.selectEngineModel(providerId, String(modelId || '')));
+ipcMain.handle('ai:select-engine-executable', (_e, providerId, ruta) => aiManager.selectEngineExecutable(providerId, String(ruta || '')));
+
+// Instalar un motor y descargar un modelo salen a Internet y escriben en el
+// equipo, así que cada uno pide autorización en un diálogo NATIVO, abierto
+// aquí y con el detalle exacto de lo que se va a hacer. Sin un «sí» explícito
+// no ocurre nada, y el renderer no puede saltarse la pregunta.
+async function autorizar(mensaje, detalle) {
+  const { response } = await dialog.showMessageBox({
+    type: 'question', buttons: ['Cancelar', 'Autorizar'], defaultId: 0, cancelId: 0,
+    title: 'MIKA5', message: mensaje, detail: detalle, noLink: true
+  });
+  return response === 1;
+}
+// Aprobar el ejecutable de un motor. El diálogo enseña la ruta real y la
+// huella del fichero, y lo aprobado es exactamente eso: si el fichero cambia
+// después, MIKA5 vuelve a preguntar antes de ejecutarlo.
+ipcMain.handle('ai:approve-engine', async (_e, providerId) => {
+  const identidad = aiManager.engineIdentity(providerId);
+  if (!identidad) return { ok: false, errorCode: 'ENGINE_NOT_INSTALLED', engine: aiManager.describeEngine(providerId) };
+  if (!identidad.approved) {
+    const autorizado = await autorizar(
+      'Permitir que MIKA5 ejecute este programa',
+      `${identidad.path}\n\nTamaño: ${identidad.size} bytes\nSHA-256: ${identidad.sha256}\n\n`
+      + 'MIKA5 lo iniciará en este equipo cuando elijas este proveedor. Autoriza sólo si reconoces '
+      + 'este programa. Si el archivo cambia, se te volverá a preguntar.'
+    );
+    if (!autorizado) return { ok: false, canceled: true, engine: aiManager.describeEngine(providerId) };
+  }
+  try {
+    return { ok: true, engine: aiManager.approveEngine(providerId, identidad.sha256) };
+  } catch (_) {
+    return { ok: false, errorCode: 'ENGINE_APPROVAL_REQUIRED', engine: aiManager.describeEngine(providerId) };
+  }
+});
+ipcMain.handle('ai:install-engine', async (_e, providerId) => {
+  const engine = aiManager.describeEngine(providerId);
+  if (!engine?.canInstall) return { ok: false, errorCode: 'ENGINE_INSTALLER_UNAVAILABLE', engine };
+  const autorizado = await autorizar(
+    'Instalar el motor local',
+    `MIKA5 usará ${engine.installer} para descargar e instalar el motor desde su repositorio oficial, `
+    + 'aceptando la licencia del paquete. Puede tardar varios minutos.'
+  );
+  if (!autorizado) return { ok: false, canceled: true, engine };
+  return aiManager.installEngine(providerId);
+});
+// Descarga de un modelo del catálogo. El renderer manda el identificador de
+// una entrada; el origen, el tamaño y la huella salen del adaptador.
+ipcMain.handle('ai:download-catalog-model', async (_e, providerId, catalogId) => {
+  const entrada = aiManager.engineCatalog(providerId).find(e => e.id === String(catalogId || ''));
+  if (!entrada) return { ok: false, errorCode: 'MODEL_DOWNLOAD_INVALID' };
+  if (entrada.installed) return { ok: true, already: true };
+  const megas = Math.round(entrada.size / (1024 * 1024));
+  const autorizado = await autorizar(
+    'Descargar un modelo',
+    `${entrada.label} (${megas} MB, licencia ${entrada.license})\n\n`
+    + `MIKA5 lo descargará de huggingface.co/${entrada.repo} a su carpeta de modelos y comprobará `
+    + 'que el archivo es exactamente el publicado antes de usarlo. Puedes cancelar la descarga en cualquier momento.'
+  );
+  if (!autorizado) return { ok: false, canceled: true };
+  return aiManager.downloadCatalogModel(providerId, entrada.id);
+});
+ipcMain.handle('ai:model-download-status', () => aiManager.descargas.estado());
+// «Instalar y comenzar»: un solo permiso para todo lo que falta. El diálogo
+// dice qué se va a descargar y cuánto ocupa; el origen y las huellas salen del
+// adaptador, nunca del renderer.
+ipcMain.handle('ai:prepare-engine', async (_e, providerId) => {
+  const plan = aiManager.engineSetupPlan(providerId);
+  if (!plan || !plan.possible) return { ok: false, errorCode: 'ENGINE_SETUP_UNAVAILABLE' };
+  if (plan.steps.length) {
+    const megas = (bytes) => `${Math.round(bytes / (1024 * 1024))} MB`;
+    const lista = plan.steps.map(p => `• ${p.kind === 'engine' ? 'Motor' : 'Modelo'}: ${p.label} (${megas(p.size)})`).join('\n');
+    const autorizado = await autorizar(
+      'Instalar y comenzar',
+      `MIKA5 descargará e instalará en este equipo:\n\n${lista}\n\nTotal: ${megas(plan.totalSize)}. `
+      + 'Cada archivo se comprueba contra su huella publicada antes de usarse. Puedes cancelar en cualquier momento.'
+    );
+    if (!autorizado) return { ok: false, canceled: true };
+  }
+  return aiManager.prepareEngine(providerId);
+});
+ipcMain.handle('ai:engine-setup-status', (_e, providerId) => aiManager.engineSetupStatus(providerId));
+ipcMain.handle('ai:cancel-model-download', () => aiManager.descargas.cancelar());
+ipcMain.handle('ai:download-engine-model', async (_e, providerId, repo) => {
+  const nombre = String(repo || '').trim();
+  const autorizado = await autorizar(
+    'Descargar un modelo',
+    `El motor local descargará «${nombre}» desde huggingface.co a su carpeta de modelos. `
+    + 'Puede ocupar varios gigabytes y tardar bastante.'
+  );
+  if (!autorizado) return { canceled: true };
+  try {
+    return { canceled: false, readiness: await aiManager.downloadEngineModel(providerId, nombre) };
+  } catch (error) {
+    return { canceled: false, errorCode: /^ENGINE_[A-Z_]+$/.test(error.message) ? error.message : 'ENGINE_SPAWN_FAILED' };
+  }
+});
+// La ruta NO llega del renderer: la elige el usuario en un diálogo nativo
+// abierto aquí. El renderer sólo dice para qué proveedor y qué tipo de fichero.
+ipcMain.handle('ai:choose-engine-file', async (_e, providerId, tipo) => {
+  if (tipo !== 'executable' && tipo !== 'model') throw new Error('ENGINE_PATH_INVALID');
+  if (!aiManager.describeEngine(providerId)?.managed) throw new Error('ENGINE_NOT_MANAGED');
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    properties: ['openFile'],
+    filters: tipo === 'model'
+      ? [{ name: 'GGUF', extensions: ['gguf'] }]
+      : (process.platform === 'win32' ? [{ name: 'llama-server', extensions: ['exe'] }] : [])
+  });
+  if (canceled || !filePaths?.[0]) return { canceled: true, engine: aiManager.describeEngine(providerId) };
+  try {
+    return { canceled: false, engine: aiManager.setEngineFile(providerId, tipo, filePaths[0]) };
+  } catch (error) {
+    // Sólo cruza el código: ni la ruta ni el mensaje interno.
+    return { canceled: false, errorCode: error.code || 'ENGINE_PATH_INVALID', engine: aiManager.describeEngine(providerId) };
+  }
+});
 // Contrato de capacidades: la interfaz lo consulta en vez de adivinar por nombre.
 ipcMain.handle('ai:get-capabilities', (_e, providerId) => aiManager.getCapabilities(providerId));
 ipcMain.handle('ai:resolve-vision', (_e, params = {}) => aiManager.resolveVision(params));
