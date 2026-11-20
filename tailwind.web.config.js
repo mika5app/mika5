@@ -12,5 +12,5 @@
 
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  content: ['./web/**/*.html', './web/chat-widget.js']
+  content: ['./web/**/*.html']
 };
