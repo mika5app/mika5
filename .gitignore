@@ -66,3 +66,9 @@ SUBAGENTS_SUMMARY.md
 
 # Logs de los gates (npm run test:all)
 .gate-logs/
+
+# Local configuration and credentials. Never committed.
+# `.env.example` is the exception: it documents the variables, without values.
+.env
+.env.*
+!.env.example
