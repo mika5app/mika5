@@ -1050,6 +1050,50 @@ const sinEstado = puntosRoadmap.filter(k => !ESTADOS_EN.test(wp.en.get(k) || '')
 check(sinEstado.length === 0, `todo punto del roadmap lleva estado (${sinEstado.join(', ') || 'ninguno sin etiqueta'})`);
 check(puntosRoadmap.length >= 19, `el roadmap clasifica ${puntosRoadmap.length} elementos`);
 
+// --- Servidor: deploy/nginx/mika5.xyz.conf ---
+// Lo que decide como responde el sitio publicado. Se probo en nginx 1.24 con
+// curl y cargando las paginas bajo su CSP; aqui se protege lo que no puede
+// romperse sin que nadie lo note.
+console.log('\n=== Configuracion de nginx del sitio ===');
+{
+  const conf = fs.readFileSync(path.join(ROOT, 'deploy', 'nginx', 'mika5.xyz.conf'), 'utf8');
+  const activo = conf.split('\n').filter(l => !/^\s*#/.test(l)).join('\n');
+  check(/location \/ \{\s*try_files \$uri \$uri\/ =404;\s*\}/.test(activo),
+    'nginx: una direccion inexistente responde 404, no la portada');
+  check(/server_name www\.mika5\.xyz;[\s\S]*?return 301 https:\/\/mika5\.xyz\$request_uri;/.test(activo)
+    && /listen 80;[\s\S]*?return 301 https:\/\/mika5\.xyz\$request_uri;/.test(activo),
+    'nginx: www y http redirigen a https://mika5.xyz');
+  check(['application/javascript', 'text/css', 'image/svg+xml', 'text/plain'].every(t => new RegExp(`gzip_types[^;]*${t.replace(/[/+]/g, '\\$&')}`).test(activo)),
+    'nginx: comprime JavaScript, CSS, SVG y texto');
+  check(/~\^text\/html\s+epoch;/.test(activo) && /expires \$mika5_expires;/.test(activo),
+    'nginx: el HTML se revalida y los estaticos llevan caducidad');
+  // add_header dentro de un location anula todas las del servidor.
+  const bloquesLocation = [...activo.matchAll(/^\s*location\b[^{;]*\{[^}]*\}/gm)].map(m => m[0]);
+  check(bloquesLocation.length > 0 && bloquesLocation.every(b => !/add_header/.test(b)),
+    'nginx: ningun location redefine cabeceras (perderia las de seguridad)');
+  for (const cabecera of ['Strict-Transport-Security', 'X-Content-Type-Options', 'Referrer-Policy', 'Content-Security-Policy', 'X-Frame-Options']) {
+    check(new RegExp(`add_header ${cabecera} "[^"]+" always;`).test(activo), `nginx: envia ${cabecera} tambien en errores`);
+  }
+  // La CSP nombra todo origen externo que las paginas cargan; un CDN nuevo en
+  // una pagina sin anadirlo aqui dejaria la pagina sin estilos o sin script.
+  const csp = /add_header Content-Security-Policy "([^"]+)"/.exec(activo)[1];
+  const directiva = (nombre) => ((new RegExp(`(?:^|; )${nombre} ([^;]+)`).exec(csp) || [])[1] || '').split(/\s+/);
+  const paginasPublicas = [...PAGINAS_AUDITADAS, 'es/index.html', 'es/models.html', 'es/whitepaper.html'];
+  for (const pagina of paginasPublicas) {
+    const html = leer(pagina);
+    const origen = (url) => new URL(url).origin;
+    const scripts = [...html.matchAll(/<script\b[^>]*\bsrc="(https:\/\/[^"]+)"/g)].map(m => origen(m[1]));
+    const estilos = [...html.matchAll(/<link\b[^>]*\brel="stylesheet"[^>]*\bhref="(https:\/\/[^"]+)"|<link\b[^>]*\bhref="(https:\/\/[^"]+)"[^>]*\brel="stylesheet"/g)].map(m => origen(m[1] || m[2]));
+    const formularios = [...html.matchAll(/<form\b[^>]*\baction="(https:\/\/[^"]+)"/g)].map(m => origen(m[1]));
+    const faltan = [
+      ...scripts.filter(o => !directiva('script-src').includes(o)),
+      ...estilos.filter(o => !directiva('style-src').includes(o)),
+      ...formularios.filter(o => !directiva('form-action').includes(o))
+    ];
+    check(faltan.length === 0, `nginx: la CSP permite lo que carga ${pagina} (${faltan.join(', ') || 'nada falta'})`);
+  }
+}
+
 console.log(`\n${'='.repeat(46)}`);
 console.log(`Website i18n tests passed (${passed} comprobaciones)`);
 console.log(`${'='.repeat(46)}`);
