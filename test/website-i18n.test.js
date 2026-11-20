@@ -654,6 +654,89 @@ for (const pagina of ['landing.html', 'es/index.html']) {
 check(fs.existsSync(path.join(ROOT, 'CODE_SIGNING_POLICY.md')) && fs.existsSync(path.join(ROOT, 'PRIVACY.md')),
   'los dos documentos enlazados existen en la raiz del repositorio');
 
+// --- Auditoria SEO/AEO: lo que leen buscadores y motores de respuesta ---
+// Un rastreador no ejecuta el conmutador de idioma: lee el HTML tal cual.
+console.log('\n=== Metadatos y datos estructurados que lee un rastreador ===');
+{
+  const ldDe = (html) => JSON.parse(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/.exec(html)[1]);
+  const nodo = (ld, tipo) => (ld['@graph'] || [ld]).find(n => n['@type'] === tipo);
+  const atributo = (html, patron) => (patron.exec(html) || [])[1];
+
+  // La cabecera inglesa dice lo mismo que el diccionario inglés; antes decía
+  // "No cloud" y "runs 100% on your computer" con proveedores cloud opcionales.
+  for (const [campo, patron] of [
+    ['description', /<meta name="description" content="([^"]*)">/],
+    ['ogDescription', /<meta property="og:description" content="([^"]*)">/],
+    ['twitterDescription', /<meta name="twitter:description" content="([^"]*)">/]
+  ]) {
+    check(atributo(landing, patron) === en.get(`landing.meta.${campo}`),
+      `landing.html: ${campo} estatico igual al del diccionario ingles`);
+  }
+  const cabecera = landing.slice(0, landing.indexOf('</head>'));
+  check(!/no cloud|100% on your computer|runs entirely on your machine/i.test(cabecera),
+    'la cabecera de la landing no niega los proveedores cloud opcionales');
+
+  const ld = ldDe(landing);
+  const app = nodo(ld, 'SoftwareApplication');
+  check(app.name === 'MIKA5 Community' && app.description === en.get('landing.meta.description'),
+    'SoftwareApplication se llama MIKA5 Community y describe lo mismo que la meta');
+  check(nodo(ld, 'Organization').sameAs.includes('https://github.com/mika5app/mika5'),
+    'Organization enlaza el repositorio del codigo en sameAs');
+  check(!nodo(ld, 'BreadcrumbList'), 'la portada no declara migas: no tiene padre');
+
+  // FAQ visible y FAQ de los datos estructurados: las mismas preguntas.
+  const visibles = [...landing.matchAll(/data-i18n="faq\.(q\d+)">([^<]*)</g)];
+  const faq = nodo(ld, 'FAQPage').mainEntity;
+  check(visibles.length === 7 && faq.length === 7
+    && faq.every((p, i) => p.name === en.get(`faq.${visibles[i][1]}`)),
+    `el FAQ visible y el de schema tienen las mismas 7 preguntas (${visibles.length}/${faq.length})`);
+  for (const clave of ['faq.q6', 'faq.a6', 'faq.q7', 'faq.a7']) {
+    check(en.has(clave) && es.has(clave) && en.get(clave) !== es.get(clave), `${clave} presente y traducida`);
+  }
+  check(/SmartScreen/.test(en.get('faq.a6')) && /Open Anyway/.test(en.get('faq.a6')),
+    'faq.a6 explica el aviso de Windows y el de macOS');
+
+  // /es/: el schema generado esta en espanol y apunta a las paginas en espanol.
+  for (const [pagina, prefijo] of [['es/index.html', 'landing'], ['es/models.html', 'models'], ['es/whitepaper.html', 'whitepaper']]) {
+    const html = leer(pagina);
+    const datos = ldDe(html);
+    const json = JSON.stringify(datos);
+    check(!/"inLanguage":"en"/.test(json), `${pagina}: ningun nodo declara inLanguage "en"`);
+    const migas = nodo(datos, 'BreadcrumbList');
+    if (migas) {
+      check(migas.itemListElement.every(m => m.item.startsWith('https://mika5.xyz/es/'))
+        && migas.itemListElement[0].name === 'Inicio',
+        `${pagina}: las migas estan en espanol y apuntan a /es/`);
+    }
+    const articulo = nodo(datos, 'Article') || nodo(datos, 'TechArticle');
+    if (articulo) {
+      check(articulo.inLanguage === 'es' && articulo.url.startsWith('https://mika5.xyz/es/'),
+        `${pagina}: el articulo declara es y su URL en espanol`);
+    }
+    const appEs = nodo(datos, 'SoftwareApplication');
+    if (appEs) {
+      check(appEs.description === es.get(`${prefijo}.meta.description`), `${pagina}: SoftwareApplication descrita en espanol`);
+    }
+  }
+
+  // Contraste AA del texto sobre el fondo de la pagina (#0B0F14). El violeta
+  // de marca #7C3AED da 3,37:1: vale para el logo, no para texto.
+  const luminancia = (hex) => {
+    const c = hex.replace('#', '').match(/../g).map(x => parseInt(x, 16) / 255)
+      .map(v => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  };
+  const contraste = (a, b) => {
+    const [x, y] = [luminancia(a), luminancia(b)].sort((m, n) => n - m);
+    return (x + 0.05) / (y + 0.05);
+  };
+  for (const pagina of PAGINAS_AUDITADAS) {
+    const colores = [...new Set([...leer(pagina).matchAll(/\btext-\[(#[0-9A-Fa-f]{6})\]/g)].map(m => m[1]))];
+    const bajos = colores.filter(c => contraste(c, '#0B0F14') < 4.5);
+    check(bajos.length === 0, `${pagina}: todo color de texto llega a 4,5:1 sobre el fondo (${bajos.join(', ') || 'ninguno bajo'})`);
+  }
+}
+
 // llms.txt: lo que enlaza del propio sitio son las URLs del sitemap, ni una mas.
 const llms = fs.readFileSync(path.join(WEB, 'llms.txt'), 'utf8');
 const enlacesPropios = [...llms.matchAll(/\]\((https:\/\/mika5\.xyz\/[^)]*)\)/g)].map(m => m[1]);

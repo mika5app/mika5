@@ -7,7 +7,7 @@
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <meta name="color-scheme" content="dark">
     <title>MIKA5 | AI on your machine. Under your control.</title>
-    <meta name="description" content="MIKA5 is a free AI desktop app that runs 100% on your computer. Local RAG, projects, per-chat knowledge, vision models. Powered by Ollama. No cloud, no subscriptions, no data collection.">
+    <meta name="description" content="Free, local-first AI desktop app with built-in RAG, projects and optional cloud providers. Runs on your machine with Ollama. Windows, macOS and Linux. AGPL-3.0.">
     <meta name="robots" content="index, follow">
     <link rel="canonical" href="https://mika5.xyz/">
     <link rel="alternate" hreflang="en" href="https://mika5.xyz/">
@@ -22,7 +22,7 @@
 
     <!-- Open Graph -->
     <meta property="og:title" content="MIKA5 — AI on your machine. Under your control.">
-    <meta property="og:description" content="Free AI desktop app. Local RAG, projects, vision models. Powered by Ollama. No cloud, no subscriptions.">
+    <meta property="og:description" content="Local-first, multi-model AI workspace with built-in RAG, project organization and optional cloud providers. Free and open source.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://mika5.xyz/">
     <meta property="og:image" content="https://mika5.xyz/og-image.png">
@@ -35,7 +35,7 @@
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="MIKA5 — AI on your machine. Under your control.">
-    <meta name="twitter:description" content="Free AI desktop app. Local RAG, projects, vision models. Powered by Ollama. No cloud, no subscriptions.">
+    <meta name="twitter:description" content="Local-first, multi-model AI workspace with built-in RAG, project organization and optional cloud providers. Free and open source.">
     <meta name="twitter:image" content="https://mika5.xyz/og-image.png">
 
     <!-- Structured Data: SoftwareApplication + Organization + FAQ -->
@@ -50,6 +50,7 @@
           "url": "https://mika5.xyz/",
           "logo": "https://mika5.xyz/icon.png",
           "sameAs": [
+            "https://github.com/mika5app/mika5",
             "https://github.com/mika5app/mika5-releases"
           ]
         },
@@ -64,10 +65,10 @@
         {
           "@type": "SoftwareApplication",
           "@id": "https://mika5.xyz/#app",
-          "name": "MIKA5",
+          "name": "MIKA5 Community",
           "applicationCategory": "DesktopEnhancement",
           "operatingSystem": "Windows 10+, macOS 12+, Linux",
-          "description": "Free AI desktop app that runs 100% on your computer. Local RAG, projects, per-chat knowledge, vision models. Powered by Ollama.",
+          "description": "Free, local-first AI desktop app with built-in RAG, projects and optional cloud providers. Runs on your machine with Ollama. Windows, macOS and Linux. AGPL-3.0.",
           "url": "https://mika5.xyz/",
           "downloadUrl": "https://github.com/mika5app/mika5-releases/releases/tag/v0.3.2",
       "datePublished": "2026-08-04",
@@ -91,14 +92,6 @@
           ]
         },
         {
-          "@type": "BreadcrumbList",
-          "itemListElement": [
-            { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://mika5.xyz/" },
-            { "@type": "ListItem", "position": 2, "name": "Model Guide", "item": "https://mika5.xyz/models.html" },
-            { "@type": "ListItem", "position": 3, "name": "White Paper", "item": "https://mika5.xyz/whitepaper.html" }
-          ]
-        },
-        {
           "@type": "FAQPage",
           "mainEntity": [
             {
@@ -106,7 +99,7 @@
               "name": "Is MIKA5 free?",
               "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "Yes. MIKA5 is 100% free, open-source under AGPL-3.0, and runs entirely on your machine with no subscriptions or hidden costs."
+                "text": "Yes. MIKA5 is free and open source under AGPL-3.0, with no subscriptions or hidden costs. It runs on your machine; cloud providers are optional."
               }
             },
             {
@@ -138,7 +131,23 @@
               "name": "Does MIKA5 collect any data or telemetry?",
               "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "No. MIKA5 has zero telemetry, zero tracking, and zero data collection. All conversations and documents stay on your machine in a local SQLite database."
+                "text": "No. MIKA5 has no telemetry and no tracking. Conversations and documents stay on your machine in a local SQLite database, and only leave it when you choose a cloud provider and confirm the request."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "How do I get past the Windows and macOS warnings on first launch?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "MIKA5 is not code-signed yet, so the system asks you to confirm once. On Windows, click “More info” in the SmartScreen window, check that the file is the MIKA5 installer and click “Run anyway”. On macOS, open the app once, then go to System Settings → Privacy & Security and click “Open Anyway” next to MIKA5. If Smart App Control is on in Windows, unsigned apps cannot be installed."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "How is MIKA5 different from ChatGPT?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "ChatGPT is OpenAI's cloud service: your conversations are processed on OpenAI's servers and you need an account. MIKA5 is a desktop app that runs open models on your own computer through Ollama or llama.cpp, keeps conversations and documents in a local database and needs no account. Cloud providers, OpenAI included, are optional: you use your own API key and confirm what is sent before anything leaves your machine."
               }
             }
           ]
@@ -373,12 +382,12 @@
 <!-- Mobile menu overlay -->
 <dialog id="mobile-menu" aria-label="Navigation menu" data-i18n-attr="aria-label:landing.nav.menuLabel" class="fixed inset-0 z-40 bg-[#0B0F14]/95 flex-col items-center justify-center gap-8 text-xl">
     <button id="mobile-menu-close" type="button" class="absolute top-6 right-6 text-white text-3xl" aria-label="Close menu" data-i18n-attr="aria-label:landing.nav.closeMenu">&times;</button>
-    <a href="#features" class="text-white hover:text-[#7C3AED] transition-colors" data-i18n="nav.features">Features</a>
-    <a href="#download" class="text-white hover:text-[#7C3AED] transition-colors" data-i18n="nav.download">Download</a>
-    <a href="#quickstart" class="text-white hover:text-[#7C3AED] transition-colors" data-i18n="nav.quickstart">Quick Start</a>
-    <a href="models.html" class="text-white hover:text-[#7C3AED] transition-colors" data-i18n="nav.modelguide">Model Guide</a>
-    <a href="whitepaper.html" class="text-white hover:text-[#7C3AED] transition-colors" data-i18n="nav.whitepaper">White Paper</a>
-    <a href="https://github.com/mika5app/mika5-releases" target="_blank" rel="noopener" class="text-white hover:text-[#7C3AED] transition-colors" data-i18n="nav.github">GitHub</a>
+    <a href="#features" class="text-white hover:text-[#A78BFA] transition-colors" data-i18n="nav.features">Features</a>
+    <a href="#download" class="text-white hover:text-[#A78BFA] transition-colors" data-i18n="nav.download">Download</a>
+    <a href="#quickstart" class="text-white hover:text-[#A78BFA] transition-colors" data-i18n="nav.quickstart">Quick Start</a>
+    <a href="models.html" class="text-white hover:text-[#A78BFA] transition-colors" data-i18n="nav.modelguide">Model Guide</a>
+    <a href="whitepaper.html" class="text-white hover:text-[#A78BFA] transition-colors" data-i18n="nav.whitepaper">White Paper</a>
+    <a href="https://github.com/mika5app/mika5-releases" target="_blank" rel="noopener" class="text-white hover:text-[#A78BFA] transition-colors" data-i18n="nav.github">GitHub</a>
     <button type="button" class="text-sm font-bold px-4 py-2 rounded-full border border-white/10 text-[#9CA3AF] hover:text-white hover:border-white/30 transition-all" id="mobile-lang-toggle">ES</button>
 </dialog>
 
@@ -443,7 +452,7 @@
                                 </div>
                             </div>
                             <!-- RAG indicator -->
-                            <div class="flex items-center gap-1.5 min-w-0 text-[0.625rem] text-[#7C3AED]">
+                            <div class="flex items-center gap-1.5 min-w-0 text-[0.625rem] text-[#A78BFA]">
                                 <svg aria-hidden="true" class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                                 <span class="truncate" data-i18n="landing.mockup.ragHit">RAG: 3 relevant fragments found</span>
                             </div>
@@ -1156,7 +1165,7 @@
         <div class="max-w-3xl mx-auto space-y-3">
             <details class="glass-card rounded-2xl px-6 py-4">
                 <summary class="cursor-pointer font-medium text-white" data-i18n="faq.q1">Is MIKA5 free?</summary>
-                <p class="mt-3 text-sm text-[#9CA3AF]" data-i18n="faq.a1">Yes. MIKA5 is 100% free, open-source under AGPL-3.0, and runs entirely on your machine with no subscriptions or hidden costs.</p>
+                <p class="mt-3 text-sm text-[#9CA3AF]" data-i18n="faq.a1">Yes. MIKA5 is free and open source under AGPL-3.0, with no subscriptions or hidden costs. It runs on your machine; cloud providers are optional.</p>
             </details>
             <details class="glass-card rounded-2xl px-6 py-4">
                 <summary class="cursor-pointer font-medium text-white" data-i18n="faq.q2">Does MIKA5 require an internet connection?</summary>
@@ -1172,7 +1181,15 @@
             </details>
             <details class="glass-card rounded-2xl px-6 py-4">
                 <summary class="cursor-pointer font-medium text-white" data-i18n="faq.q5">Does MIKA5 collect any data or telemetry?</summary>
-                <p class="mt-3 text-sm text-[#9CA3AF]" data-i18n="faq.a5">No. MIKA5 has zero telemetry, zero tracking, and zero data collection. All conversations and documents stay on your machine in a local SQLite database.</p>
+                <p class="mt-3 text-sm text-[#9CA3AF]" data-i18n="faq.a5">No. MIKA5 has no telemetry and no tracking. Conversations and documents stay on your machine in a local SQLite database, and only leave it when you choose a cloud provider and confirm the request.</p>
+            </details>
+            <details class="glass-card rounded-2xl px-6 py-4">
+                <summary class="cursor-pointer font-medium text-white" data-i18n="faq.q6">How do I get past the Windows and macOS warnings on first launch?</summary>
+                <p class="mt-3 text-sm text-[#9CA3AF]" data-i18n="faq.a6">MIKA5 is not code-signed yet, so the system asks you to confirm once. On Windows, click “More info” in the SmartScreen window, check that the file is the MIKA5 installer and click “Run anyway”. On macOS, open the app once, then go to System Settings → Privacy &amp; Security and click “Open Anyway” next to MIKA5. If Smart App Control is on in Windows, unsigned apps cannot be installed.</p>
+            </details>
+            <details class="glass-card rounded-2xl px-6 py-4">
+                <summary class="cursor-pointer font-medium text-white" data-i18n="faq.q7">How is MIKA5 different from ChatGPT?</summary>
+                <p class="mt-3 text-sm text-[#9CA3AF]" data-i18n="faq.a7">ChatGPT is OpenAI's cloud service: your conversations are processed on OpenAI's servers and you need an account. MIKA5 is a desktop app that runs open models on your own computer through Ollama or llama.cpp, keeps conversations and documents in a local database and needs no account. Cloud providers, OpenAI included, are optional: you use your own API key and confirm what is sent before anything leaves your machine.</p>
             </details>
         </div>
     </section>
@@ -1264,7 +1281,7 @@ const STRINGS = {
     'notify.emailLabel': 'Email address',
     'faq.title': 'Frequently asked questions',
     'faq.q1': 'Is MIKA5 free?',
-    'faq.a1': 'Yes. MIKA5 is 100% free, open-source under AGPL-3.0, and runs entirely on your machine with no subscriptions or hidden costs.',
+    'faq.a1': 'Yes. MIKA5 is free and open source under AGPL-3.0, with no subscriptions or hidden costs. It runs on your machine; cloud providers are optional.',
     'faq.q2': 'Does MIKA5 require an internet connection?',
     'faq.a2': 'No. MIKA5 works fully offline with local Ollama models. Cloud AI providers (OpenAI, Anthropic, Groq) are optional and clearly indicated.',
     'faq.q3': 'What is the built-in RAG engine?',
@@ -1272,7 +1289,11 @@ const STRINGS = {
     'faq.q4': 'What platforms does MIKA5 support?',
     'faq.a4': 'MIKA5 is available for Windows 10+ (installer and portable), macOS (Intel and Apple Silicon DMG), and Linux (AppImage, .deb, .rpm).',
     'faq.q5': 'Does MIKA5 collect any data or telemetry?',
-    'faq.a5': 'No. MIKA5 has zero telemetry, zero tracking, and zero data collection. All conversations and documents stay on your machine in a local SQLite database.',
+    'faq.a5': 'No. MIKA5 has no telemetry and no tracking. Conversations and documents stay on your machine in a local SQLite database, and only leave it when you choose a cloud provider and confirm the request.',
+    'faq.q6': 'How do I get past the Windows and macOS warnings on first launch?',
+    'faq.a6': 'MIKA5 is not code-signed yet, so the system asks you to confirm once. On Windows, click “More info” in the SmartScreen window, check that the file is the MIKA5 installer and click “Run anyway”. On macOS, open the app once, then go to System Settings → Privacy & Security and click “Open Anyway” next to MIKA5. If Smart App Control is on in Windows, unsigned apps cannot be installed.',
+    'faq.q7': 'How is MIKA5 different from ChatGPT?',
+    'faq.a7': 'ChatGPT is OpenAI\'s cloud service: your conversations are processed on OpenAI\'s servers and you need an account. MIKA5 is a desktop app that runs open models on your own computer through Ollama or llama.cpp, keeps conversations and documents in a local database and needs no account. Cloud providers, OpenAI included, are optional: you use your own API key and confirm what is sent before anything leaves your machine.',
     'guide.title': 'First launch: getting past the Windows and macOS warnings',
     'guide.intro': 'MIKA5 is not code-signed yet, so the system asks you to confirm the first time. It takes three steps, and only once.',
     'guide.win.title': 'Windows — “Windows protected your PC”',
@@ -1537,7 +1558,7 @@ const STRINGS = {
     'notify.emailLabel': 'Correo electrónico',
     'faq.title': 'Preguntas frecuentes',
     'faq.q1': '¿MIKA5 es gratis?',
-    'faq.a1': 'Sí. MIKA5 es 100% gratuito, de código abierto bajo AGPL-3.0, y funciona por completo en tu equipo, sin suscripciones ni costes ocultos.',
+    'faq.a1': 'Sí. MIKA5 es gratuito y de código abierto bajo AGPL-3.0, sin suscripciones ni costes ocultos. Funciona en tu equipo; los proveedores en la nube son opcionales.',
     'faq.q2': '¿MIKA5 necesita conexión a Internet?',
     'faq.a2': 'No. MIKA5 funciona por completo sin conexión con modelos locales de Ollama. Los proveedores de IA en la nube (OpenAI, Anthropic, Groq) son opcionales y se indican con claridad.',
     'faq.q3': '¿Qué es el motor RAG integrado?',
@@ -1545,7 +1566,11 @@ const STRINGS = {
     'faq.q4': '¿En qué plataformas funciona MIKA5?',
     'faq.a4': 'MIKA5 está disponible para Windows 10+ (instalador y portable), macOS (DMG para Intel y Apple Silicon) y Linux (AppImage, .deb, .rpm).',
     'faq.q5': '¿MIKA5 recoge datos o telemetría?',
-    'faq.a5': 'No. MIKA5 no tiene telemetría, ni rastreo, ni recogida de datos. Todas las conversaciones y documentos se quedan en tu equipo, en una base de datos SQLite local.',
+    'faq.a5': 'No. MIKA5 no tiene telemetría ni rastreo. Las conversaciones y los documentos se quedan en tu equipo, en una base de datos SQLite local, y solo salen de él cuando eliges un proveedor en la nube y confirmas la petición.',
+    'faq.q6': '¿Cómo paso los avisos de Windows y macOS en el primer arranque?',
+    'faq.a6': 'MIKA5 todavía no tiene firma de código, así que el sistema te pide confirmar una vez. En Windows, pulsa «Más información» en la ventana de SmartScreen, comprueba que el archivo es el instalador de MIKA5 y pulsa «Ejecutar de todas formas». En macOS, abre la app una vez, ve a Ajustes del Sistema → Privacidad y seguridad y pulsa «Abrir igualmente» junto a MIKA5. Si Smart App Control está activado en Windows, no se pueden instalar apps sin firma.',
+    'faq.q7': '¿En qué se diferencia MIKA5 de ChatGPT?',
+    'faq.a7': 'ChatGPT es el servicio en la nube de OpenAI: tus conversaciones se procesan en sus servidores y necesitas una cuenta. MIKA5 es una aplicación de escritorio que ejecuta modelos abiertos en tu propio equipo con Ollama o llama.cpp, guarda conversaciones y documentos en una base de datos local y no necesita cuenta. Los proveedores en la nube, OpenAI incluido, son opcionales: usas tu propia clave de API y confirmas lo que se envía antes de que nada salga de tu equipo.',
     'guide.title': 'Primer arranque: cómo pasar los avisos de Windows y macOS',
     'guide.intro': 'MIKA5 todavía no tiene firma de código, así que el sistema te pide confirmar la primera vez. Son tres pasos, una sola vez.',
     'guide.win.title': 'Windows — «Windows protegió su PC»',
@@ -1828,14 +1853,16 @@ function aplicarMetadata(lang) {
     if (nodo && valor !== undefined) nodo.setAttribute(par[1], valor);
   });
 
-  // JSON-LD: se reescribe solo la descripcion, conservando el resto del objeto.
+  // JSON-LD: el objeto raiz solo contiene @graph, asi que la descripcion se
+  // reescribe en el nodo SoftwareApplication, conservando el resto.
   var ld = document.querySelector('script[type="application/ld+json"]');
   var desc = i18nTexto(lang, 'landing.meta.description');
   if (ld && desc !== undefined) {
     try {
       var datos = JSON.parse(ld.textContent);
-      datos.description = desc;
-      datos.inLanguage = lang;
+      (datos['@graph'] || []).forEach(function(nodo) {
+        if (nodo['@type'] === 'SoftwareApplication') nodo.description = desc;
+      });
       ld.textContent = JSON.stringify(datos, null, 2);
     } catch (e) { /* JSON-LD invalido: se deja como esta */ }
   }
