@@ -9,8 +9,8 @@
       keywords: { en: ['what', 'mika5', 'about', 'overview', 'explain'], es: ['que', 'mika5', 'sobre', 'descripcion', 'explicar'] },
       question: { en: 'What is MIKA5?', es: 'Que es MIKA5?' },
       answer: {
-        en: "MIKA5 Community 0.3.1 is a free AGPL-3.0 desktop application with projects, chats and a local knowledge base. It supports local inference and optional cloud providers, including Ollama cloud models with privacy notices and consent.",
-        es: "MIKA5 Community 0.3.1 es una aplicación de escritorio gratuita bajo AGPL-3.0, con proyectos, chats y conocimiento local. Admite inferencia local y proveedores cloud opcionales, incluidos modelos cloud de Ollama con avisos de privacidad y consentimiento."
+        en: "MIKA5 Community 0.3.2 is a free AGPL-3.0 desktop application with projects, chats and a local knowledge base. It supports local inference and optional cloud providers, including Ollama cloud models with privacy notices and consent.",
+        es: "MIKA5 Community 0.3.2 es una aplicación de escritorio gratuita bajo AGPL-3.0, con proyectos, chats y conocimiento local. Admite inferencia local y proveedores cloud opcionales, incluidos modelos cloud de Ollama con avisos de privacidad y consentimiento."
       }
     },
     {
@@ -179,8 +179,8 @@
       keywords: { en: ['download', 'get', 'install', 'mika5', 'where', 'link'], es: ['descargar', 'obtener', 'instalar', 'mika5', 'donde', 'enlace', 'link'] },
       question: { en: 'Where can I download MIKA5?', es: 'Donde puedo descargar MIKA5?' },
       answer: {
-        en: 'Download MIKA5 from GitHub Releases:\nhttps://github.com/mika5app/mika5-releases/releases/tag/v0.3.1\n\nAvailable for Windows (.exe installer + portable), macOS (DMG for Intel and Apple Silicon), and Linux (AppImage, .deb, .rpm).',
-        es: 'Descarga MIKA5 desde GitHub Releases:\nhttps://github.com/mika5app/mika5-releases/releases/tag/v0.3.1\n\nDisponible para Windows (.exe instalador + portable), macOS (DMG para Intel y Apple Silicon), y Linux (AppImage, .deb, .rpm).'
+        en: 'Download MIKA5 from GitHub Releases:\nhttps://github.com/mika5app/mika5-releases/releases/tag/v0.3.2\n\nAvailable for Windows (.exe installer + portable), macOS (DMG for Intel and Apple Silicon), and Linux (AppImage, .deb, .rpm).',
+        es: 'Descarga MIKA5 desde GitHub Releases:\nhttps://github.com/mika5app/mika5-releases/releases/tag/v0.3.2\n\nDisponible para Windows (.exe instalador + portable), macOS (DMG para Intel y Apple Silicon), y Linux (AppImage, .deb, .rpm).'
       }
     },
     {

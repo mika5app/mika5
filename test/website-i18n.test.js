@@ -1005,12 +1005,12 @@ check(/x86-64/.test(en.get('dl.linux.warning')) && /no ARM build/i.test(en.get('
   'el aviso de Linux acota la arquitectura publicada');
 
 // --- Enlaces de release ---
-const RELEASE = 'https://github.com/mika5app/mika5-releases/releases/download/v0.3.1';
+const RELEASE = 'https://github.com/mika5app/mika5-releases/releases/download/v0.3.2';
 const ENLAZADOS = [
-  'MIKA5-Setup-0.3.1-win-x64.exe', 'MIKA5-Portable-0.3.1-win-x64.exe',
-  'MIKA5-0.3.1-mac-arm64.dmg', 'MIKA5-0.3.1-mac-x64.dmg',
-  'MIKA5-0.3.1-linux-x86_64.AppImage', 'MIKA5-0.3.1-linux-amd64.deb',
-  'MIKA5-0.3.1-linux-x86_64.rpm', 'MIKA5-0.3.1-source.tar.gz',
+  'MIKA5-Setup-0.3.2-win-x64.exe', 'MIKA5-Portable-0.3.2-win-x64.exe',
+  'MIKA5-0.3.2-mac-arm64.dmg', 'MIKA5-0.3.2-mac-x64.dmg',
+  'MIKA5-0.3.2-linux-x86_64.AppImage', 'MIKA5-0.3.2-linux-amd64.deb',
+  'MIKA5-0.3.2-linux-x86_64.rpm', 'MIKA5-0.3.2-source.tar.gz',
   'SHA256SUMS.txt', 'BUILDING.md', 'COMMUNITY.md', 'BUILD-METADATA.json', 'LICENSE'
 ];
 for (const asset of ENLAZADOS) {
@@ -1018,7 +1018,7 @@ for (const asset of ENLAZADOS) {
 }
 check(ENLAZADOS.length === 13, `se enlazan 13 assets de los 15 publicados (${ENLAZADOS.length})`);
 // Los dos ZIP de macOS se dejan publicados pero sin enlace, de forma deliberada.
-for (const zip of ['MIKA5-0.3.1-mac-arm64.zip', 'MIKA5-0.3.1-mac-x64.zip']) {
+for (const zip of ['MIKA5-0.3.2-mac-arm64.zip', 'MIKA5-0.3.2-mac-x64.zip']) {
   check(!landing.includes(zip), `${zip} deliberadamente sin enlace directo`);
 }
 check(/15 assets/.test(en.get('dl.extras.note')) && /15 assets/.test(es.get('dl.extras.note')),
