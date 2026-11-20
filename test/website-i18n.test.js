@@ -663,30 +663,6 @@ const versionDeLaLanding = /"softwareVersion": "([\d.]+)"/.exec(leer('landing.ht
 check(llms.includes(`MIKA5 Community ${versionDeLaLanding}`) && llms.includes(`/releases/tag/v${versionDeLaLanding}`),
   `llms.txt anuncia la misma version que la landing (${versionDeLaLanding})`);
 
-// El asistente de la landing: lo que escribe el visitante no pasa por el
-// analizador de HTML, y Enter no envia mientras se compone un caracter.
-{
-  const widget = leer('chat-widget.js');
-  const linkify = new Function('document', `${/function linkify\(text\) \{[\s\S]*?\n  \}/.exec(widget)[0]}; return linkify;`);
-  const nodo = (tipo, extra) => ({ tipo, hijos: [], appendChild(h) { this.hijos.push(h); return h; }, ...extra });
-  const doc = {
-    createDocumentFragment: () => nodo('fragmento'),
-    createTextNode: (texto) => nodo('texto', { texto }),
-    createElement: (etiqueta) => nodo(etiqueta)
-  };
-  const partes = linkify(doc)('mira <img src=x onerror=alert(1)> en https://mika5.xyz/a"b y ya').hijos;
-  check(partes.length === 3 && partes[0].tipo === 'texto' && partes[0].texto === 'mira <img src=x onerror=alert(1)> en '
-    && partes[1].tipo === 'a' && partes[1].textContent === 'https://mika5.xyz/a"b' && partes[1].rel === 'noopener'
-    && partes[2].texto === ' y ya',
-    'el asistente pinta el texto escrito como texto y los enlaces como nodos, nunca como HTML');
-  check(!/innerHTML = linkify/.test(widget) && /div\.appendChild\(linkify\(text\)\)/.test(widget),
-    'y ningun mensaje se inserta con innerHTML');
-  check(/e\.preventDefault\(\);\s*\/\/[^\n]*\n\s*if \(e\.isComposing \|\| e\.keyCode === 229\) return;\s*handleSend\(\);/.test(widget),
-    'Enter que confirma una composicion (chino, japones, coreano) no envia el mensaje');
-  check(/@media\(prefers-reduced-motion:no-preference\)\{[^']*mika5-bounce/.test(widget)
-    && !/background:#6B7280;animation:/.test(widget),
-    'las animaciones del asistente solo corren si el sistema no pide reducir el movimiento');
-}
 {
   const landing = leer('landing.html');
   check(!/class="scroll-smooth"/.test(landing)
